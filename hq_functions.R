@@ -388,8 +388,3 @@ hq_leaflet_map <- function(polys_sf = NULL, outages_sf = NULL,
                               popup = pt_popup)
 }
 
-# ---- Examples ----
-polys <- get_hq_polygons()
-res   <- hq_outages_join_polygons(polys)
-res$summary |> dplyr::arrange(dplyr::desc(n_outages)) |> head()
-hq_leaflet_map(res$polygons, res$joined_points)
