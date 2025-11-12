@@ -2,7 +2,7 @@ name: HQ outages hourly
 
 on:
   schedule:
-    - cron: "0 * * * *"        # hourly (UTC)
+  - cron: "*/15 * * * *"
   workflow_dispatch: {}
 
 jobs:
