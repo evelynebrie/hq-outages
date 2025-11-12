@@ -49,12 +49,6 @@ jobs:
             any::httr, any::jsonlite, any::dplyr, any::tidyr, any::stringr,
             any::lubridate, any::arrow, any::sf, any::readr
 
-      - name: Install R packages
-        run: |
-          Rscript -e 'pkgs <- c("httr","jsonlite","dplyr","tidyr","stringr","lubridate","arrow","sf","readr"); \
-                      inst <- setdiff(pkgs, rownames(installed.packages())); \
-                      if(length(inst)) install.packages(inst, repos="https://cloud.r-project.org")'
-
       - name: Run scraper (build parquet + polygons + join)
         run: Rscript hq_scrape.R
 
