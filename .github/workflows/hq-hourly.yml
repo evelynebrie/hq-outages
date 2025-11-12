@@ -42,6 +42,13 @@ jobs:
             libfontconfig1-dev
 
       # Install R packages (cached above)
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          use-public-rspm: true
+          extra-packages: >
+            any::httr, any::jsonlite, any::dplyr, any::tidyr, any::stringr,
+            any::lubridate, any::arrow, any::sf, any::readr
+
       - name: Install R packages
         run: |
           Rscript -e 'pkgs <- c("httr","jsonlite","dplyr","tidyr","stringr","lubridate","arrow","sf","readr"); \
