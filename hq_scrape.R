@@ -9,6 +9,7 @@ library(stringr)
 library(lubridate)
 library(arrow)
 library(sf)  # needed for polygons
+library(readr)   # add this
 
 TZ <- "America/Toronto"
 
