@@ -2,7 +2,7 @@ name: HQ outages hourly
 
 on:
   schedule:
-    - cron: "0 * * * *"   # hourly (UTC)
+    - cron: "0 * * * *"        # hourly (UTC)
   workflow_dispatch: {}
 
 jobs:
@@ -20,8 +20,7 @@ jobs:
 
       - name: Prepare cache dirs
         run: |
-          mkdir -p ~/.Rlib
-          mkdir -p ~/.cache/R
+          mkdir -p ~/.Rlib ~/.cache/R
 
       - name: Cache R packages
         uses: actions/cache@v4
@@ -29,31 +28,38 @@ jobs:
           path: |
             ~/.Rlib
             ~/.cache/R
-          key: r-lib-${{ runner.os }}-4.5-${{ hashFiles('**/*.R', '**/*.r', '**/*.yml') }}
+          key: r-lib-${{ runner.os }}-4.5-${{ hashFiles('**/*.R','**/*.r','**/*.yml') }}
           restore-keys: |
             r-lib-${{ runner.os }}-4.5-
 
-      # --- extra system libs required for sf/leaflet/htmlwidgets ---
+      # System libraries for sf/arrow/etc.
       - name: System libs
         run: |
-          sudo apt-get update && sudo apt-get install -y \
+          sudo apt-get update
+          sudo apt-get install -y \
             libcurl4-openssl-dev libssl-dev libxml2-dev jq curl \
             libgdal-dev libgeos-dev libproj-dev libudunits2-dev \
             libfontconfig1-dev
 
-      - name: Run scraper (build parquet + polygons + map)
+      # Install R packages (cached above)
+      - name: Install R packages
+        run: |
+          Rscript -e 'pkgs <- c("httr","jsonlite","dplyr","tidyr","stringr","lubridate","arrow","sf","readr"); \
+                      inst <- setdiff(pkgs, rownames(installed.packages())); \
+                      if(length(inst)) install.packages(inst, repos="https://cloud.r-project.org")'
+
+      - name: Run scraper (build parquet + polygons + join)
         run: Rscript hq_scrape.R
 
       - name: Upload to Dropbox (data + map)
         env:
           DROPBOX_TOKEN: ${{ secrets.DROPBOX_TOKEN }}
         run: |
-          set -e
-          # upload everything in data/ and maps/
+          set -euo pipefail
           for root in data maps; do
             [ -d "$root" ] || continue
             while IFS= read -r -d '' f; do
-              remote="/hq-outages/${f#*/}"  # keep subfolders
+              remote="/hq-outages/${f#*/}"
               echo "Uploading $f -> $remote"
               curl -sS -X POST https://content.dropboxapi.com/2/files/upload \
                 --header "Authorization: Bearer $DROPBOX_TOKEN" \
