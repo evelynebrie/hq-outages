@@ -2,31 +2,27 @@ name: HQ outages hourly
 
 on:
   schedule:
-    - cron: "0 * * * *"   # every hour (UTC)
+    - cron: "0 * * * *"   # hourly (UTC)
   workflow_dispatch: {}
 
 jobs:
   run:
     runs-on: ubuntu-latest
     env:
-      R_LIBS_USER: ~/.Rlib   # where R installs user packages
+      R_LIBS_USER: ~/.Rlib
 
     steps:
-      # 1) Checkout
       - uses: actions/checkout@v4
 
-      # 2) Setup R
       - uses: r-lib/actions/setup-r@v2
         with:
           use-public-rspm: true
 
-      # 3) Ensure cache dirs exist (prevents the warning)
-      - name: Prepare cache directories
+      - name: Prepare cache dirs
         run: |
           mkdir -p ~/.Rlib
           mkdir -p ~/.cache/R
 
-      # 4) Cache R library + download cache
       - name: Cache R packages
         uses: actions/cache@v4
         with:
@@ -37,33 +33,32 @@ jobs:
           restore-keys: |
             r-lib-${{ runner.os }}-4.5-
 
-      # 5) System libraries
+      # --- extra system libs required for sf/leaflet/htmlwidgets ---
       - name: System libs
         run: |
           sudo apt-get update && sudo apt-get install -y \
-            libcurl4-openssl-dev libssl-dev libxml2-dev jq curl
+            libcurl4-openssl-dev libssl-dev libxml2-dev jq curl \
+            libgdal-dev libgeos-dev libproj-dev libudunits2-dev \
+            libfontconfig1-dev
 
-      # 6) Run your R scraper
-      - name: Run scraper
+      - name: Run scraper (build parquet + polygons + map)
         run: Rscript hq_scrape.R
 
-      # 7) Upload results to Dropbox
-      - name: Upload to Dropbox
+      - name: Upload to Dropbox (data + map)
         env:
           DROPBOX_TOKEN: ${{ secrets.DROPBOX_TOKEN }}
         run: |
           set -e
-          found=0
-          while IFS= read -r -d '' f; do
-            found=1
-            remote="/hq-outages/${f#data/}"
-            echo "Uploading $f -> $remote"
-            curl -sS -X POST https://content.dropboxapi.com/2/files/upload \
-              --header "Authorization: Bearer $DROPBOX_TOKEN" \
-              --header "Dropbox-API-Arg: {\"path\": \"$remote\", \"mode\": \"overwrite\"}" \
-              --header "Content-Type: application/octet-stream" \
-              --data-binary @"$f" > /dev/null
-          done < <(find data -type f -print0)
-          if [ "$found" -eq 0 ]; then
-            echo "No files found under ./data"; exit 1
-          fi
+          # upload everything in data/ and maps/
+          for root in data maps; do
+            [ -d "$root" ] || continue
+            while IFS= read -r -d '' f; do
+              remote="/hq-outages/${f#*/}"  # keep subfolders
+              echo "Uploading $f -> $remote"
+              curl -sS -X POST https://content.dropboxapi.com/2/files/upload \
+                --header "Authorization: Bearer $DROPBOX_TOKEN" \
+                --header "Dropbox-API-Arg: {\"path\": \"$remote\", \"mode\": \"overwrite\"}" \
+                --header "Content-Type: application/octet-stream" \
+                --data-binary @"$f" > /dev/null
+            done < <(find "$root" -type f -print0)
+          done
