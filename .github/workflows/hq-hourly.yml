@@ -66,6 +66,9 @@ jobs:
                 --header "Authorization: Bearer $DROPBOX_TOKEN" \
                 --header "Dropbox-API-Arg: {\"path\": \"$remote\", \"mode\": \"overwrite\"}" \
                 --header "Content-Type: application/octet-stream" \
-                --data-binary @"$f" > /dev/null
+                --data-binary @"$f" | tee /tmp/dropbox_response.txt
+                echo
+                echo "Response from Dropbox:"
+                cat /tmp/dropbox_response.txt
             done < <(find "$root" -type f -print0)
           done
