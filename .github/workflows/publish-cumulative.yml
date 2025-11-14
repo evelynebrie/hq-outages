@@ -45,7 +45,7 @@ jobs:
           echo "token=$ACCESS" >> "$GITHUB_OUTPUT"
 
       # ----------------------------------------------------------
-      # Download ALL hourly polygon snapshots from Dropbox
+      # 🔹 Download ALL hourly polygon snapshots from Dropbox (robust version)
       # ----------------------------------------------------------
       - name: Download daily GeoJSONs from Dropbox
         env:
@@ -55,42 +55,65 @@ jobs:
 
           mkdir -p data/daily
 
-          # jq filter: only files, only polygons_*.geojson
+          # Safe jq extractor — never crashes
           extract_paths () {
-            jq -r '.entries[]
-              | select(.[".tag"] == "file")
-              | select(.name | test("^polygons_.*\\.geojson$"))
-              | .path_lower'
+            jq -er '
+              .entries? // []                         # if .entries is null → empty array
+              | map(select(.[".tag"] == "file"))
+              | map(select(.name | test("^polygons_.*\\.geojson$")))
+              | .[].path_lower
+            ' || echo ""
           }
 
-          # Initial listing over your REAL Dropbox API path
+          echo "➡️  Listing Dropbox folder..."
+
           resp=$(curl -sS -X POST https://api.dropboxapi.com/2/files/list_folder \
             --header "Authorization: Bearer $DROPBOX_TOKEN" \
             --header "Content-Type: application/json" \
             --data '{"path": "/hq-outages-uploader-appfolder/hq-outages", "recursive": true}')
 
-          echo "$resp" | extract_paths > /tmp/polygon_paths.txt
-          cursor=$(echo "$resp" | jq -r '.cursor')
-          has_more=$(echo "$resp" | jq -r '.has_more')
+          echo "📦 Raw Dropbox response (first page):"
+          echo "$resp" | jq .
 
-          # Pagination if needed
+          # Stop early if Dropbox returned an error
+          if echo "$resp" | jq -e '.error_summary?'; then
+            echo "❌ Dropbox returned an error on list_folder"
+            exit 1
+          fi
+
+          extract_paths <<< "$resp" > /tmp/polygon_paths.txt
+          cursor=$(jq -r '.cursor // empty' <<< "$resp")
+          has_more=$(jq -r '.has_more // false' <<< "$resp")
+
+          # Pagination
           while [ "$has_more" = "true" ]; do
+            echo "➡️  Fetching next page..."
+
             resp=$(curl -sS -X POST https://api.dropboxapi.com/2/files/list_folder/continue \
               --header "Authorization: Bearer $DROPBOX_TOKEN" \
               --header "Content-Type: application/json" \
               --data "{\"cursor\":\"$cursor\"}")
 
-            echo "$resp" | extract_paths >> /tmp/polygon_paths.txt
-            cursor=$(echo "$resp" | jq -r '.cursor')
-            has_more=$(echo "$resp" | jq -r '.has_more')
+            echo "📦 Raw Dropbox response (continuation):"
+            echo "$resp" | jq .
+
+            if echo "$resp" | jq -e '.error_summary?'; then
+              echo "❌ Dropbox returned an error during pagination"
+              exit 1
+            fi
+
+            extract_paths <<< "$resp" >> /tmp/polygon_paths.txt
+            cursor=$(jq -r '.cursor // empty' <<< "$resp")
+            has_more=$(jq -r '.has_more // false' <<< "$resp")
           done
 
-          # Download files to data/daily
+          echo "➡️  Downloading GeoJSON files…"
+
           sort -u /tmp/polygon_paths.txt | while read -r p; do
             [ -n "$p" ] || continue
-
             base=$(basename "$p")
-            echo "Downloading $p -> data/daily/$base"
+
+            echo "⬇️  $p → data/daily/$base"
 
             curl -sS -X POST https://content.dropboxapi.com/2/files/download \
               --header "Authorization: Bearer $DROPBOX_TOKEN" \
@@ -98,7 +121,8 @@ jobs:
               --output "data/daily/$base"
           done
 
-          echo "Fetched $(ls -1 data/daily | wc -l) files into data/daily"
+          count=$(ls -1 data/daily | wc -l)
+          echo "✅ Downloaded $count daily GeoJSON files."
 
       # ----------------------------------------------------------
       # Build cumulative exposure hex layer
@@ -113,7 +137,7 @@ jobs:
         uses: peaceiris/actions-gh-pages@v3
         with:
           personal_token: ${{ secrets.PUBLIC_REPO_TOKEN }}
-          external_repository: evelynebrie/hq-outages-public 
+          external_repository: evelynebrie/hq-outages-public
           publish_branch: gh-pages
           publish_dir: public
           commit_message: "Update cumulative outage exposure"
