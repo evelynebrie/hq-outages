@@ -2,7 +2,6 @@ name: Publish cumulative exposure (from Dropbox)
 
 on:
   schedule:
-    # around midnight Montreal (05:00 UTC works year-round)
     - cron: "0 5 * * *"
   workflow_dispatch: {}
 
@@ -30,15 +29,27 @@ jobs:
                       inst <- setdiff(pkgs, rownames(installed.packages()));
                       if(length(inst)) install.packages(inst, repos="https://cloud.r-project.org")'
 
-      # --- Pull ALL polygon snapshots from Dropbox into data/daily ---
+      # 🔹 NEW: Fetch a fresh Dropbox access token
+      - name: Get fresh Dropbox access token
+        id: dropbox_token
+        run: |
+          set -euo pipefail
+          TOKENS=$(curl -sS -X POST https://api.dropboxapi.com/oauth2/token \
+            -d grant_type=refresh_token \
+            -d refresh_token="${{ secrets.DROPBOX_REFRESH_TOKEN }}" \
+            -u "${{ secrets.DROPBOX_APP_KEY }}:${{ secrets.DROPBOX_APP_SECRET }}")
+
+          ACCESS=$(echo "$TOKENS" | jq -r '.access_token')
+          echo "token=$ACCESS" >> "$GITHUB_OUTPUT"
+
+      # --- Pull ALL polygon snapshots from Dropbox ---
       - name: Download daily GeoJSONs from Dropbox
         env:
-          DROPBOX_TOKEN: ${{ secrets.DROPBOX_TOKEN }}
+          DROPBOX_TOKEN: ${{ steps.dropbox_token.outputs.token }}
         run: |
           set -euo pipefail
           mkdir -p data/daily
 
-          # helper to extract only polygon files
           extract_paths () {
             jq -r '.entries[]
               | select(."\.tag"=="file")
@@ -46,7 +57,6 @@ jobs:
               | .path_lower'
           }
 
-          # initial listing (recursive)
           resp=$(curl -sS -X POST https://api.dropboxapi.com/2/files/list_folder \
             --header "Authorization: Bearer $DROPBOX_TOKEN" \
             --header "Content-Type: application/json" \
@@ -56,7 +66,6 @@ jobs:
           cursor=$(echo "$resp" | jq -r '.cursor')
           has_more=$(echo "$resp" | jq -r '.has_more')
 
-          # pagination
           while [ "$has_more" = "true" ]; do
             resp=$(curl -sS -X POST https://api.dropboxapi.com/2/files/list_folder/continue \
               --header "Authorization: Bearer $DROPBOX_TOKEN" \
@@ -77,16 +86,15 @@ jobs:
               --output "data/daily/$base"
           done
 
-          echo "Fetched $(ls -1 data/daily | wc -l) files into data/daily"
+          echo "Fetched $(ls -1 data/daily | wc -l) files"
 
       - name: Build cumulative hex layer
         run: Rscript R/build_cumulative_hex.R
 
-      # --- Publish artifacts to your PUBLIC repo via Pages (gh-pages) ---
       - name: Deploy to public repo (gh-pages)
         uses: peaceiris/actions-gh-pages@v3
         with:
-          personal_token: ${{ secrets.PUBLIC_REPO_TOKEN }}     # PAT with Contents RW on the public repo
+          personal_token: ${{ secrets.PUBLIC_REPO_TOKEN }}
           external_repository: <YOUR_USERNAME>/hq-outages-public
           publish_branch: gh-pages
           publish_dir: public
