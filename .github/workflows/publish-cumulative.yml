@@ -30,7 +30,7 @@ jobs:
                       if(length(inst)) install.packages(inst, repos="https://cloud.r-project.org")'
 
       # ----------------------------------------------------------
-      # 🔹 NEW: Get a fresh Dropbox access token from refresh token
+      # 🔹 Get fresh Dropbox access token using the refresh token
       # ----------------------------------------------------------
       - name: Get fresh Dropbox access token
         id: dropbox_token
@@ -45,16 +45,17 @@ jobs:
           echo "token=$ACCESS" >> "$GITHUB_OUTPUT"
 
       # ----------------------------------------------------------
-      # Download Daily GeoJSON snapshots from Dropbox
+      # Download ALL hourly polygon snapshots from Dropbox
       # ----------------------------------------------------------
       - name: Download daily GeoJSONs from Dropbox
         env:
           DROPBOX_TOKEN: ${{ steps.dropbox_token.outputs.token }}
         run: |
           set -euo pipefail
+
           mkdir -p data/daily
 
-          # FIXED: robust jq version that works in all shells
+          # jq filter: only files, only polygons_*.geojson
           extract_paths () {
             jq -r '.entries[]
               | select(.[".tag"] == "file")
@@ -62,17 +63,17 @@ jobs:
               | .path_lower'
           }
 
-          # Initial listing
+          # Initial listing over your REAL Dropbox API path
           resp=$(curl -sS -X POST https://api.dropboxapi.com/2/files/list_folder \
             --header "Authorization: Bearer $DROPBOX_TOKEN" \
             --header "Content-Type: application/json" \
-            --data '{"path": "/hq-outages", "recursive": true}')
+            --data '{"path": "/hq-outages-uploader-appfolder/hq-outages", "recursive": true}')
 
           echo "$resp" | extract_paths > /tmp/polygon_paths.txt
           cursor=$(echo "$resp" | jq -r '.cursor')
           has_more=$(echo "$resp" | jq -r '.has_more')
 
-          # Pagination
+          # Pagination if needed
           while [ "$has_more" = "true" ]; do
             resp=$(curl -sS -X POST https://api.dropboxapi.com/2/files/list_folder/continue \
               --header "Authorization: Bearer $DROPBOX_TOKEN" \
@@ -84,9 +85,10 @@ jobs:
             has_more=$(echo "$resp" | jq -r '.has_more')
           done
 
-          # Download actual files
+          # Download files to data/daily
           sort -u /tmp/polygon_paths.txt | while read -r p; do
             [ -n "$p" ] || continue
+
             base=$(basename "$p")
             echo "Downloading $p -> data/daily/$base"
 
@@ -99,19 +101,19 @@ jobs:
           echo "Fetched $(ls -1 data/daily | wc -l) files into data/daily"
 
       # ----------------------------------------------------------
-      # Build cumulative hex layer
+      # Build cumulative exposure hex layer
       # ----------------------------------------------------------
       - name: Build cumulative hex layer
         run: Rscript R/build_cumulative_hex.R
 
       # ----------------------------------------------------------
-      # Publish to public repo on gh-pages
+      # Publish to GitHub Pages (public repo)
       # ----------------------------------------------------------
       - name: Deploy to public repo (gh-pages)
         uses: peaceiris/actions-gh-pages@v3
         with:
           personal_token: ${{ secrets.PUBLIC_REPO_TOKEN }}
-          external_repository: evelynebrie/hq-outages-public
+          external_repository: evelynebrie/hq-outages-public 
           publish_branch: gh-pages
           publish_dir: public
           commit_message: "Update cumulative outage exposure"
