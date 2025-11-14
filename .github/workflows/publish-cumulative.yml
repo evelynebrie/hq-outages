@@ -111,7 +111,7 @@ jobs:
         uses: peaceiris/actions-gh-pages@v3
         with:
           personal_token: ${{ secrets.PUBLIC_REPO_TOKEN }}
-          external_repository: <YOUR_USERNAME>/hq-outages-public
+          external_repository: evelynebrie/hq-outages-public
           publish_branch: gh-pages
           publish_dir: public
           commit_message: "Update cumulative outage exposure"
