@@ -2,7 +2,7 @@ name: HQ outages hourly
 
 on:
   schedule:
-  - cron: "*/15 * * * *"
+    - cron: "*/15 * * * *"
   workflow_dispatch: {}
 
 jobs:
@@ -32,7 +32,6 @@ jobs:
           restore-keys: |
             r-lib-${{ runner.os }}-4.5-
 
-      # System libraries for sf/arrow/etc.
       - name: System libs
         run: |
           sudo apt-get update
@@ -41,7 +40,6 @@ jobs:
             libgdal-dev libgeos-dev libproj-dev libudunits2-dev \
             libfontconfig1-dev
 
-      # Install R packages (cached above)
       - uses: r-lib/actions/setup-r-dependencies@v2
         with:
           use-public-rspm: true
@@ -49,12 +47,26 @@ jobs:
             any::httr, any::jsonlite, any::dplyr, any::tidyr, any::stringr,
             any::lubridate, any::arrow, any::sf, any::readr
 
+      # 🔹 NEW: Fetch a fresh Dropbox access token
+      - name: Get fresh Dropbox access token
+        id: dropbox_token
+        run: |
+          set -euo pipefail
+          TOKENS=$(curl -sS -X POST https://api.dropboxapi.com/oauth2/token \
+            -d grant_type=refresh_token \
+            -d refresh_token="${{ secrets.DROPBOX_REFRESH_TOKEN }}" \
+            -u "${{ secrets.DROPBOX_APP_KEY }}:${{ secrets.DROPBOX_APP_SECRET }}")
+
+          ACCESS=$(echo "$TOKENS" | jq -r '.access_token')
+          echo "token=$ACCESS" >> "$GITHUB_OUTPUT"
+
       - name: Run scraper (build parquet + polygons + join)
         run: Rscript hq_scrape.R
 
+      # 🔹 NEW: Use the *refreshed* DROPBOX_TOKEN here
       - name: Upload to Dropbox (data + map)
         env:
-          DROPBOX_TOKEN: ${{ secrets.DROPBOX_TOKEN }}
+          DROPBOX_TOKEN: ${{ steps.dropbox_token.outputs.token }}
         run: |
           set -euo pipefail
           for root in data maps; do
@@ -66,9 +78,6 @@ jobs:
                 --header "Authorization: Bearer $DROPBOX_TOKEN" \
                 --header "Dropbox-API-Arg: {\"path\": \"$remote\", \"mode\": \"overwrite\"}" \
                 --header "Content-Type: application/octet-stream" \
-                --data-binary @"$f" | tee /tmp/dropbox_response.txt
-                echo
-                echo "Response from Dropbox:"
-                cat /tmp/dropbox_response.txt
+                --data-binary @"$f"
             done < <(find "$root" -type f -print0)
           done
