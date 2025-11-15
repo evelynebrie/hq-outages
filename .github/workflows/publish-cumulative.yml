@@ -56,12 +56,12 @@ jobs:
           mkdir -p data/daily
 
           extract_paths () {
-            jq -er '
+            jq -r '
               .entries? // [] |
               map(select(.[".tag"] == "file")) |
-              map(select(.name | test("^polygons_.*\\.geojson$"))) |
-              .[].path_lower
-            ' || true
+              map(select(.name | test("^polygons_.*\\.geojson$"; "i"))) |
+              .[].path_lower // empty
+            '
           }
 
           echo "📂 Listing Dropbox folder recursively..."
@@ -78,6 +78,9 @@ jobs:
           fi
 
           extract_paths <<< "$resp" > /tmp/polygon_paths.txt
+          
+          echo "📋 Found $(wc -l < /tmp/polygon_paths.txt) polygon files"
+          
           cursor=$(jq -r '.cursor // empty' <<< "$resp")
           has_more=$(jq -r '.has_more // false' <<< "$resp")
 
@@ -98,6 +101,11 @@ jobs:
           done
 
           echo "⬇️ Downloading files..."
+
+          if [ ! -s /tmp/polygon_paths.txt ]; then
+            echo "⚠️ No polygon files found matching pattern"
+            exit 1
+          fi
 
           sort -u /tmp/polygon_paths.txt | while read -r p; do
             [ -n "$p" ] || continue
