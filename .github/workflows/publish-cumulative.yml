@@ -104,8 +104,13 @@ jobs:
 
           if [ ! -s /tmp/polygon_paths.txt ]; then
             echo "⚠️ No polygon files found matching pattern"
+            echo "📄 Contents of /tmp/polygon_paths.txt:"
+            cat /tmp/polygon_paths.txt || echo "(empty)"
             exit 1
           fi
+
+          echo "📄 Sample of files to download:"
+          head -n 3 /tmp/polygon_paths.txt
 
           sort -u /tmp/polygon_paths.txt | while read -r p; do
             [ -n "$p" ] || continue
@@ -115,9 +120,18 @@ jobs:
               --header "Authorization: Bearer $DROPBOX_TOKEN" \
               --header "Dropbox-API-Arg: {\"path\": \"$p\"}" \
               --output "data/daily/$base"
+            
+            if [ -f "data/daily/$base" ]; then
+              size=$(stat -c%s "data/daily/$base" 2>/dev/null || stat -f%z "data/daily/$base" 2>/dev/null || echo "0")
+              echo "  ✓ Saved: $base (${size} bytes)"
+            else
+              echo "  ✗ Failed: $base"
+            fi
           done
 
-          echo "✅ Download complete: $(ls -1 data/daily | wc -l) files"
+          echo "✅ Download complete: $(ls -1 data/daily 2>/dev/null | wc -l) files"
+          echo "📊 Total size: $(du -sh data/daily 2>/dev/null | cut -f1)"
+          ls -lh data/daily/ | head -n 10
 
       # ----------------------------------------------------------
       # Build cumulative hex layer
