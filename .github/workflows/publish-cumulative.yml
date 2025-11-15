@@ -30,7 +30,7 @@ jobs:
                       if(length(inst)) install.packages(inst, repos="https://cloud.r-project.org")'
 
       # ----------------------------------------------------------
-      # 🔹 Get fresh Dropbox access token using the refresh token
+      # Get fresh Dropbox access token
       # ----------------------------------------------------------
       - name: Get fresh Dropbox access token
         id: dropbox_token
@@ -45,9 +45,9 @@ jobs:
           echo "token=$ACCESS" >> "$GITHUB_OUTPUT"
 
       # ----------------------------------------------------------
-      # 🔹 Download ALL hourly polygon snapshots from Dropbox (robust version)
+      # Download ALL polygon snapshots from Dropbox
       # ----------------------------------------------------------
-      - name: Download daily GeoJSONs from Dropbox
+      - name: Download GeoJSON snapshots from Dropbox
         env:
           DROPBOX_TOKEN: ${{ steps.dropbox_token.outputs.token }}
         run: |
@@ -55,29 +55,25 @@ jobs:
 
           mkdir -p data/daily
 
-          # Safe jq extractor — never crashes
           extract_paths () {
             jq -er '
-              .entries? // []                         # if .entries is null → empty array
-              | map(select(.[".tag"] == "file"))
-              | map(select(.name | test("^polygons_.*\\.geojson$")))
-              | .[].path_lower
-            ' || echo ""
+              .entries? // [] |
+              map(select(.[".tag"] == "file")) |
+              map(select(.name | test("^polygons_.*\\.geojson$"))) |
+              .[].path_lower
+            ' || true
           }
 
-          echo "➡️  Listing Dropbox folder..."
+          echo "📂 Listing Dropbox folder recursively..."
 
+          # *** FIXED ROOT PATH — THIS MATCHES YOUR REAL DROPBOX STRUCTURE ***
           resp=$(curl -sS -X POST https://api.dropboxapi.com/2/files/list_folder \
             --header "Authorization: Bearer $DROPBOX_TOKEN" \
             --header "Content-Type: application/json" \
-            --data '{"path": "/hq-outages-uploader-appfolder/hq-outages", "recursive": true}')
+            --data '{"path": "/hq-outages-uploader-appfolder", "recursive": true}')
 
-          echo "📦 Raw Dropbox response (first page):"
-          echo "$resp" | jq .
-
-          # Stop early if Dropbox returned an error
           if echo "$resp" | jq -e '.error_summary?'; then
-            echo "❌ Dropbox returned an error on list_folder"
+            echo "❌ Dropbox error on list_folder"
             exit 1
           fi
 
@@ -85,20 +81,14 @@ jobs:
           cursor=$(jq -r '.cursor // empty' <<< "$resp")
           has_more=$(jq -r '.has_more // false' <<< "$resp")
 
-          # Pagination
           while [ "$has_more" = "true" ]; do
-            echo "➡️  Fetching next page..."
-
             resp=$(curl -sS -X POST https://api.dropboxapi.com/2/files/list_folder/continue \
               --header "Authorization: Bearer $DROPBOX_TOKEN" \
               --header "Content-Type: application/json" \
               --data "{\"cursor\":\"$cursor\"}")
 
-            echo "📦 Raw Dropbox response (continuation):"
-            echo "$resp" | jq .
-
             if echo "$resp" | jq -e '.error_summary?'; then
-              echo "❌ Dropbox returned an error during pagination"
+              echo "❌ Dropbox pagination error"
               exit 1
             fi
 
@@ -107,31 +97,28 @@ jobs:
             has_more=$(jq -r '.has_more // false' <<< "$resp")
           done
 
-          echo "➡️  Downloading GeoJSON files…"
+          echo "⬇️ Downloading files..."
 
           sort -u /tmp/polygon_paths.txt | while read -r p; do
             [ -n "$p" ] || continue
             base=$(basename "$p")
-
-            echo "⬇️  $p → data/daily/$base"
-
+            echo "Downloading $p -> data/daily/$base"
             curl -sS -X POST https://content.dropboxapi.com/2/files/download \
               --header "Authorization: Bearer $DROPBOX_TOKEN" \
               --header "Dropbox-API-Arg: {\"path\": \"$p\"}" \
               --output "data/daily/$base"
           done
 
-          count=$(ls -1 data/daily | wc -l)
-          echo "✅ Downloaded $count daily GeoJSON files."
+          echo "✅ Download complete: $(ls -1 data/daily | wc -l) files"
 
       # ----------------------------------------------------------
-      # Build cumulative exposure hex layer
+      # Build cumulative hex layer
       # ----------------------------------------------------------
       - name: Build cumulative hex layer
         run: Rscript R/build_cumulative_hex.R
 
       # ----------------------------------------------------------
-      # Publish to GitHub Pages (public repo)
+      # Deploy to public repo
       # ----------------------------------------------------------
       - name: Deploy to public repo (gh-pages)
         uses: peaceiris/actions-gh-pages@v3
