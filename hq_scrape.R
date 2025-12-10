@@ -22,6 +22,12 @@ hour_str <- format(ts, "%H")
 dir_data <- file.path("data", paste0("date=", date_str), paste0("hour=", hour_str))
 dir.create(dir_data, recursive = TRUE, showWarnings = FALSE)
 
+existing_files <- list.files(dir_data, pattern = "\\.(parquet|geojson|csv)$")
+if (length(existing_files) > 0) {
+  cat("Data already exists for", format(ts, "%Y-%m-%d %H:00"), "- skipping\n")
+  quit(save = "no", status = 0)
+}
+
 # --- 1) Get outages ---
 outages <- get_hq_outages(FALSE)
 out_path <- file.path(dir_data, paste0("outages_", format(ts, "%Y%m%dT%H%M%S"), ".parquet"))
