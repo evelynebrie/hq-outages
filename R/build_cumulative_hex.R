@@ -1,401 +1,379 @@
-# HQ Outages Hexagonal Grid Analysis - FAST VERSION using CENTROIDS
-# 100x faster than polygon intersections!
+# HQ Outages - HIERARCHICAL AGGREGATION SYSTEM
+# Processes daily → monthly → total summaries
 
-cat("=== FAST Hexagonal Grid Analysis ===\n")
-cat(sprintf("Start time: %s\n", Sys.time()))
+suppressPackageStartupMessages({
+  library(sf)
+  library(dplyr)
+  library(jsonlite)
+})
 
+cat("=== HQ Outages Hierarchical Analysis ===\n")
 start_time <- Sys.time()
 
-# Load packages
-required_packages <- c("sf", "dplyr", "purrr", "fs")
-for (pkg in required_packages) {
-  if (!require(pkg, character.only = TRUE, quietly = TRUE)) {
-    install.packages(pkg, repos = "https://cloud.r-project.org")
-  }
-  suppressPackageStartupMessages(library(pkg, character.only = TRUE))
-}
-
-if (!require(jsonlite, quietly = TRUE)) {
-  install.packages("jsonlite", repos = "https://cloud.r-project.org")
-  library(jsonlite)
-}
-
-# Configuration
+# Config
 data_path <- "data/daily"
 output_dir <- "public"
-hex_size <- 2000  # 2km hexes for speed (adjust if needed)
-BATCH_SIZE <- 50
-SIMPLIFY_TOLERANCE <- 200  # Simplify to 200m (keeps accuracy, speeds up)
+HEX_SIZE <- 5000  # 5km hexes
+SIMPLIFY <- 200   # 200m simplification
 
-cat("\n=== Configuration ===\n")
-cat(sprintf("Hex size: %d meters\n", hex_size))
-cat(sprintf("Batch size: %d files\n", BATCH_SIZE))
-cat(sprintf("Simplification: %dm tolerance\n", SIMPLIFY_TOLERANCE))
-cat(sprintf("Method: Simplified geometries (accurate & fast)\n"))
+dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
+dir.create(file.path(output_dir, "daily"), recursive = TRUE, showWarnings = FALSE)
+dir.create(file.path(output_dir, "monthly"), recursive = TRUE, showWarnings = FALSE)
+dir.create(file.path(output_dir, "total"), recursive = TRUE, showWarnings = FALSE)
 
-dir_create(output_dir)
+# =================================================================
+# STEP 1: Identify which dates need processing
+# =================================================================
+cat("\n[1] Identifying dates to process...\n")
 
-# Find files
-geojson_files <- dir_ls(data_path, regexp = "\\.geojson$")
-total_files <- length(geojson_files)
-cat(sprintf("\nFound %d files\n", total_files))
+# Get all files and extract dates
+files <- list.files(data_path, pattern = "^polygons_.*\\.geojson$", full.names = TRUE)
+if (length(files) == 0) stop("No polygon files found")
 
-if (total_files == 0) {
-  stop("No GeoJSON files found!")
-}
+# Extract dates from filenames (polygons_20251210t142438.geojson -> 2025-12-10)
+file_dates <- sapply(basename(files), function(f) {
+  # Extract YYYYMMDD from filename
+  m <- regmatches(f, regexpr("\\d{8}", f))
+  if (length(m) > 0) {
+    d <- m[1]
+    sprintf("%s-%s-%s", substr(d,1,4), substr(d,5,6), substr(d,7,8))
+  } else NA
+})
 
-# ===================================================================
-# STEP 1: Quick extent from first file
-# ===================================================================
-cat("\n=== Step 1: Determining extent ===\n")
+files_df <- data.frame(
+  file = files,
+  date = file_dates,
+  stringsAsFactors = FALSE
+) %>% filter(!is.na(date))
 
-first_file <- st_read(geojson_files[1], quiet = TRUE) %>%
-  st_transform(32618)
+unique_dates <- unique(files_df$date)
+cat(sprintf("  Found %d files across %d dates\n", nrow(files_df), length(unique_dates)))
 
-bbox <- st_bbox(first_file)
+# Check which dates already have daily summaries
+existing_dailies <- list.files(
+  file.path(output_dir, "daily"), 
+  pattern = "^daily_.*\\.geojson$"
+)
+existing_dates <- sub("daily_(.*)\\.geojson", "\\1", existing_dailies)
 
-# Expand by 20% to ensure coverage
-x_expand <- (bbox["xmax"] - bbox["xmin"]) * 0.2
-y_expand <- (bbox["ymax"] - bbox["ymin"]) * 0.2
-bbox["xmin"] <- bbox["xmin"] - x_expand
-bbox["xmax"] <- bbox["xmax"] + x_expand
-bbox["ymin"] <- bbox["ymin"] - y_expand
-bbox["ymax"] <- bbox["ymax"] + y_expand
+dates_to_process <- setdiff(unique_dates, existing_dates)
+cat(sprintf("  %d dates already processed\n", length(existing_dates)))
+cat(sprintf("  %d dates to process: %s\n", 
+            length(dates_to_process),
+            if(length(dates_to_process) <= 5) paste(dates_to_process, collapse=", ") else paste(c(head(dates_to_process, 3), "..."), collapse=", ")))
 
-class(bbox) <- "bbox"
-attr(bbox, "crs") <- st_crs(32618)
-
-cat(sprintf("Extent: [%.0f, %.0f, %.0f, %.0f]\n", 
-            bbox["xmin"], bbox["ymin"], bbox["xmax"], bbox["ymax"]))
-
-rm(first_file)
-gc()
-
-# ===================================================================
-# STEP 2: Create hexagonal grid
-# ===================================================================
-cat("\n=== Step 2: Creating hex grid ===\n")
-
-grid_polygon <- st_as_sfc(bbox)
-hex_grid <- st_make_grid(
-  grid_polygon,
-  cellsize = hex_size,
-  square = FALSE,
-  what = "polygons"
-) %>%
-  st_sf() %>%
-  mutate(hex_id = row_number())
-
-cat(sprintf("Created %d hexagons\n", nrow(hex_grid)))
-
-hex_grid$outage_count <- 0
-
-rm(grid_polygon)
-gc()
-
-# ===================================================================
-# STEP 3: Process files using SIMPLIFIED GEOMETRIES
-# ===================================================================
-cat("\n=== Step 3: Processing files ===\n")
-cat("Using simplified geometries (accurate but faster)\n")
-
-num_batches <- ceiling(total_files / BATCH_SIZE)
-
-for (batch_num in 1:num_batches) {
-  start_idx <- (batch_num - 1) * BATCH_SIZE + 1
-  end_idx <- min(batch_num * BATCH_SIZE, total_files)
-  batch_files <- geojson_files[start_idx:end_idx]
+# =================================================================
+# STEP 2: Process each date (only new ones)
+# =================================================================
+if (length(dates_to_process) > 0) {
+  cat("\n[2] Processing daily summaries...\n")
   
-  cat(sprintf("\nBatch %d/%d (files %d-%d)\n", 
-              batch_num, num_batches, start_idx, end_idx))
+  # Create reference hex grid (from first file)
+  cat("  Creating reference hex grid...\n")
+  first_file <- files_df$file[1]
+  first_data <- st_read(first_file, quiet = TRUE) %>% st_transform(32618)
+  bbox <- st_bbox(first_data)
+  bbox["xmin"] <- bbox["xmin"] - 50000
+  bbox["xmax"] <- bbox["xmax"] + 50000
+  bbox["ymin"] <- bbox["ymin"] - 50000
+  bbox["ymax"] <- bbox["ymax"] + 50000
+  class(bbox) <- "bbox"
+  attr(bbox, "crs") <- st_crs(32618)
   
-  batch_start <- Sys.time()
+  hex_grid_template <- st_make_grid(
+    st_as_sfc(bbox), 
+    cellsize = HEX_SIZE, 
+    square = FALSE
+  ) %>%
+    st_sf() %>%
+    mutate(hex_id = row_number())
   
-  # Process each file
-  for (file_idx in seq_along(batch_files)) {
-    file <- batch_files[file_idx]
-    
-    if (file_idx %% 10 == 0) {
-      cat(sprintf("  File %d/%d...\n", 
-                  start_idx + file_idx - 1, 
-                  total_files))
-    }
-    
-    # Read file
-    polygons <- tryCatch({
-      st_read(file, quiet = TRUE) %>% st_transform(32618)
-    }, error = function(e) {
-      warning(sprintf("Error reading file: %s", basename(file)))
-      return(NULL)
-    })
-    
-    if (is.null(polygons) || nrow(polygons) == 0) next
-    
-    # OPTIMIZATION: Simplify geometries to reduce complexity
-    # This keeps the shape but reduces vertices dramatically
-    polygons_simple <- st_simplify(
-      polygons, 
-      dTolerance = SIMPLIFY_TOLERANCE,
-      preserveTopology = TRUE
-    )
-    
-    # Union simplified polygons from this file
-    file_union <- st_union(polygons_simple)
-    
-    # Find intersecting hexes
-    intersects_sparse <- st_intersects(hex_grid, file_union, sparse = TRUE)
-    affected_hexes <- which(lengths(intersects_sparse) > 0)
-    
-    # Increment count
-    hex_grid$outage_count[affected_hexes] <- 
-      hex_grid$outage_count[affected_hexes] + 1
-    
-    # Clean up immediately
-    rm(polygons, polygons_simple, file_union, intersects_sparse)
-  }
-  
+  rm(first_data, bbox)
   gc()
   
-  batch_elapsed <- difftime(Sys.time(), batch_start, units = "secs")
-  cat(sprintf("  Batch complete in %.1f sec. Max count: %d\n", 
-              batch_elapsed, max(hex_grid$outage_count)))
+  cat(sprintf("  Template: %d hexagons\n", nrow(hex_grid_template)))
+  
+  # Process each date
+  for (date in dates_to_process) {
+    cat(sprintf("  Processing %s...\n", date))
+    
+    date_files <- files_df$file[files_df$date == date]
+    cat(sprintf("    %d files\n", length(date_files)))
+    
+    # Initialize hex grid for this date
+    hex_grid <- hex_grid_template
+    hex_grid$count <- 0L
+    
+    # Process all files for this date
+    for (f in date_files) {
+      tryCatch({
+        polys <- st_read(f, quiet = TRUE) %>%
+          st_transform(32618) %>%
+          st_simplify(dTolerance = SIMPLIFY, preserveTopology = FALSE) %>%
+          st_union()
+        
+        hits <- st_intersects(hex_grid, polys, sparse = TRUE)
+        affected <- which(lengths(hits) > 0)
+        hex_grid$count[affected] <- hex_grid$count[affected] + 1L
+        
+        rm(polys, hits, affected)
+      }, error = function(e) invisible(NULL))
+    }
+    
+    # Calculate percentage and filter
+    hex_grid_filtered <- hex_grid %>%
+      filter(count > 0) %>%
+      mutate(
+        date = date,
+        n_files = length(date_files),
+        pct = round(100 * count / length(date_files), 2)
+      ) %>%
+      st_transform(4326)
+    
+    # Save daily summary
+    daily_path <- file.path(output_dir, "daily", sprintf("daily_%s.geojson", date))
+    st_write(hex_grid_filtered, daily_path, delete_dsn = TRUE, quiet = TRUE)
+    
+    cat(sprintf("    → %d hexes affected (%.1f%% avg)\n", 
+                nrow(hex_grid_filtered), mean(hex_grid_filtered$pct)))
+    
+    gc()
+  }
+  
+  rm(hex_grid_template)
+  gc()
 }
 
-# ===================================================================
-# STEP 4: Calculate scores
-# ===================================================================
-cat("\n=== Step 4: Calculating scores ===\n")
+# =================================================================
+# STEP 3: Aggregate monthly summaries
+# =================================================================
+cat("\n[3] Creating monthly summaries...\n")
 
-hex_grid_filtered <- hex_grid %>% 
-  filter(outage_count > 0)
-
-hex_grid_filtered$outage_score <- 
-  (hex_grid_filtered$outage_count / total_files) * 100
-
-cat(sprintf("\nResults:\n"))
-cat(sprintf("  Total hexes: %d\n", nrow(hex_grid)))
-cat(sprintf("  Hexes with outages: %d (%.1f%%)\n", 
-            nrow(hex_grid_filtered),
-            100 * nrow(hex_grid_filtered) / nrow(hex_grid)))
-cat(sprintf("  Score range: %.1f%% - %.1f%%\n", 
-            min(hex_grid_filtered$outage_score), 
-            max(hex_grid_filtered$outage_score)))
-cat(sprintf("  Mean score: %.1f%%\n", 
-            mean(hex_grid_filtered$outage_score)))
-cat(sprintf("  Median score: %.1f%%\n", 
-            median(hex_grid_filtered$outage_score)))
-
-# Transform to WGS84
-hex_grid_wgs84 <- st_transform(hex_grid_filtered, 4326)
-
-rm(hex_grid, hex_grid_filtered)
-gc()
-
-# ===================================================================
-# STEP 5: Export all formats
-# ===================================================================
-cat("\n=== Step 5: Exporting ===\n")
-
-# 1. GeoJSON
-cat("1. GeoJSON...\n")
-geojson_path <- file.path(output_dir, "outage_hex_grid.geojson")
-st_write(hex_grid_wgs84, geojson_path, delete_dsn = TRUE, quiet = TRUE)
-cat(sprintf("   ✓ %s (%.1f MB)\n", 
-            geojson_path, 
-            file.size(geojson_path) / 1024^2))
-
-# 2. Shapefile
-cat("2. Shapefile...\n")
-shapefile_dir <- file.path(output_dir, "shapefile")
-dir_create(shapefile_dir)
-shapefile_path <- file.path(shapefile_dir, "outage_hex_grid.shp")
-st_write(hex_grid_wgs84, shapefile_path, delete_dsn = TRUE, quiet = TRUE)
-cat(sprintf("   ✓ %s\n", shapefile_path))
-
-# 3. CSV
-cat("3. CSV...\n")
-csv_data <- hex_grid_wgs84 %>%
-  st_drop_geometry() %>%
-  select(hex_id, outage_count, outage_score) %>%
-  arrange(desc(outage_score))
-
-csv_path <- file.path(output_dir, "outage_hex_stats.csv")
-write.csv(csv_data, csv_path, row.names = FALSE)
-cat(sprintf("   ✓ %s (%d rows, %.1f KB)\n", 
-            csv_path, 
-            nrow(csv_data),
-            file.size(csv_path) / 1024))
-
-# 4. Summary statistics
-cat("4. Summary JSON...\n")
-summary_stats <- list(
-  total_files_analyzed = total_files,
-  total_hexes = nrow(hex_grid_wgs84),
-  hex_size_meters = hex_size,
-  mean_score = mean(hex_grid_wgs84$outage_score),
-  median_score = median(hex_grid_wgs84$outage_score),
-  min_score = min(hex_grid_wgs84$outage_score),
-  max_score = max(hex_grid_wgs84$outage_score),
-  processing_date = as.character(Sys.Date()),
-  processing_time_minutes = as.numeric(difftime(Sys.time(), start_time, units = "mins")),
-  method = "simplified_geometries",
-  simplification_tolerance_m = SIMPLIFY_TOLERANCE
+# Get all daily summaries
+all_daily_files <- list.files(
+  file.path(output_dir, "daily"),
+  pattern = "^daily_.*\\.geojson$",
+  full.names = TRUE
 )
 
-summary_path <- file.path(output_dir, "summary_stats.json")
-write_json(summary_stats, summary_path, pretty = TRUE, auto_unbox = TRUE)
-cat(sprintf("   ✓ %s\n", summary_path))
+if (length(all_daily_files) > 0) {
+  # Extract year-month from dates
+  daily_dates <- sub(".*daily_(\\d{4}-\\d{2})-\\d{2}\\.geojson", "\\1", all_daily_files)
+  unique_months <- unique(daily_dates)
+  
+  cat(sprintf("  Processing %d months...\n", length(unique_months)))
+  
+  for (month in unique_months) {
+    month_files <- all_daily_files[grepl(month, all_daily_files)]
+    cat(sprintf("  %s: %d days\n", month, length(month_files)))
+    
+    # Read and combine all daily summaries for this month
+    month_data <- lapply(month_files, function(f) {
+      st_read(f, quiet = TRUE)
+    })
+    
+    # Aggregate: sum counts across days
+    combined <- bind_rows(month_data) %>%
+      group_by(hex_id) %>%
+      summarise(
+        count = sum(count),
+        n_files = sum(n_files),
+        .groups = "drop"
+      ) %>%
+      mutate(
+        month = month,
+        pct = round(100 * count / n_files, 2)
+      ) %>%
+      filter(count > 0)
+    
+    # Save monthly summary
+    monthly_path <- file.path(output_dir, "monthly", sprintf("monthly_%s.geojson", month))
+    st_write(combined, monthly_path, delete_dsn = TRUE, quiet = TRUE)
+    
+    cat(sprintf("    → %d hexes\n", nrow(combined)))
+  }
+}
 
-# 5. HTML viewer
-cat("5. HTML viewer...\n")
-html_content <- sprintf('<!DOCTYPE html>
+# =================================================================
+# STEP 4: Create TOTAL summary (from dailies)
+# =================================================================
+cat("\n[4] Creating total summary...\n")
+
+if (length(all_daily_files) > 0) {
+  # Read ALL daily summaries
+  cat("  Reading all daily summaries...\n")
+  all_daily_data <- lapply(all_daily_files, function(f) {
+    st_read(f, quiet = TRUE)
+  })
+  
+  # Aggregate across ALL days
+  total_combined <- bind_rows(all_daily_data) %>%
+    group_by(hex_id) %>%
+    summarise(
+      total_count = sum(count),
+      total_files = sum(n_files),
+      days_affected = n(),
+      .groups = "drop"
+    ) %>%
+    mutate(
+      pct = round(100 * total_count / total_files, 2)
+    ) %>%
+    filter(total_count > 0)
+  
+  cat(sprintf("  %d hexes affected across %d days\n", 
+              nrow(total_combined), length(all_daily_files)))
+  
+  # Save total GeoJSON
+  st_write(total_combined, 
+           file.path(output_dir, "total", "total_exposure.geojson"),
+           delete_dsn = TRUE, quiet = TRUE)
+  
+  # Save total CSV
+  total_combined %>%
+    st_drop_geometry() %>%
+    arrange(desc(pct)) %>%
+    write.csv(file.path(output_dir, "total", "total_stats.csv"), row.names = FALSE)
+  
+  # Save total shapefile
+  shp_dir <- file.path(output_dir, "total", "shapefile")
+  dir.create(shp_dir, recursive = TRUE, showWarnings = FALSE)
+  st_write(total_combined,
+           file.path(shp_dir, "total_exposure.shp"),
+           delete_dsn = TRUE, quiet = TRUE)
+  
+  # Summary stats
+  summary_stats <- list(
+    total_days = length(all_daily_files),
+    total_files = sum(total_combined$total_files[1]), # Should be same for all hexes
+    total_hexes_affected = nrow(total_combined),
+    mean_exposure_pct = round(mean(total_combined$pct), 2),
+    max_exposure_pct = round(max(total_combined$pct), 2),
+    hex_size_m = HEX_SIZE,
+    last_updated = as.character(Sys.Date()),
+    processing_time_min = round(as.numeric(difftime(Sys.time(), start_time, units = "mins")), 1)
+  )
+  
+  write_json(summary_stats, 
+             file.path(output_dir, "total", "summary.json"),
+             pretty = TRUE, auto_unbox = TRUE)
+  
+  cat(sprintf("  Mean exposure: %.1f%%\n", summary_stats$mean_exposure_pct))
+  cat(sprintf("  Max exposure: %.1f%%\n", summary_stats$max_exposure_pct))
+}
+
+# =================================================================
+# STEP 5: Create HTML viewer
+# =================================================================
+cat("\n[5] Creating HTML viewer...\n")
+
+html <- sprintf('<!DOCTYPE html>
 <html>
 <head>
-    <title>HQ Outage Exposure Map</title>
+    <title>HQ Outage Exposure Analysis</title>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <style>
-        body { margin: 0; padding: 0; font-family: -apple-system, system-ui, sans-serif; }
-        #map { position: absolute; top: 0; bottom: 0; width: 100%%; }
-        .info { 
-            padding: 12px; 
-            background: white; 
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1); 
-            border-radius: 8px; 
-            max-width: 220px;
-        }
-        .info h4 { margin: 0 0 8px 0; color: #333; font-size: 15px; font-weight: 600; }
-        .info p { margin: 4px 0; font-size: 13px; color: #666; }
-        .legend { line-height: 20px; color: #555; font-size: 12px; }
-        .legend i { 
-            width: 18px; height: 18px; float: left; 
-            margin-right: 8px; opacity: 0.8; border-radius: 2px;
-        }
-        .downloads { padding: 10px 12px; background: white; 
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1); border-radius: 8px; }
-        .downloads h4 { margin: 0 0 8px 0; font-size: 14px; font-weight: 600; }
-        .downloads a { 
-            display: block; margin: 5px 0; padding: 4px 8px;
-            color: #0066cc; text-decoration: none; border-radius: 4px;
-            font-size: 13px; transition: background 0.2s;
-        }
-        .downloads a:hover { background: #f0f0f0; }
+        body{margin:0;padding:0;font-family:-apple-system,system-ui,sans-serif}
+        #map{position:absolute;top:0;bottom:0;width:100%%}
+        .info{padding:12px;background:white;box-shadow:0 2px 10px rgba(0,0,0,0.1);border-radius:8px}
+        .info h4{margin:0 0 8px;font-size:15px;font-weight:600}
+        .info p{margin:4px 0;font-size:13px}
+        .legend{line-height:20px;font-size:12px}
+        .legend i{width:18px;height:18px;float:left;margin-right:8px;opacity:0.8;border-radius:2px}
+        .controls{padding:10px;background:white;box-shadow:0 2px 10px rgba(0,0,0,0.1);border-radius:8px}
+        .controls h4{margin:0 0 8px;font-size:14px;font-weight:600}
+        .controls select{width:100%%;padding:6px;border-radius:4px;border:1px solid #ddd}
+        .downloads a{display:block;margin:4px 0;padding:4px 8px;color:#0066cc;text-decoration:none;border-radius:4px}
+        .downloads a:hover{background:#f0f0f0}
     </style>
 </head>
 <body>
     <div id="map"></div>
     <script>
-        var map = L.map("map").setView([46.8, -71.2], 8);
+        var map = L.map("map").setView([46.8,-71.2],7);
+        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{attribution:"© OSM"}).addTo(map);
         
-        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-            attribution: "© OpenStreetMap",
-            maxZoom: 18
-        }).addTo(map);
+        var currentLayer;
         
-        fetch("outage_hex_grid.geojson")
-            .then(r => r.json())
-            .then(data => {
-                L.geoJSON(data, {
-                    style: f => ({
-                        fillColor: getColor(f.properties.outage_score),
-                        weight: 0.5, opacity: 0.8, color: "white", fillOpacity: 0.75
-                    }),
-                    onEachFeature: (f, layer) => {
-                        layer.bindPopup(
-                            `<b>Hex ${f.properties.hex_id}</b><br>` +
-                            `<b>Exposure:</b> ${f.properties.outage_score.toFixed(1)}%%<br>` +
-                            `<b>Snapshots:</b> ${f.properties.outage_count}/%d`
-                        );
-                    }
-                }).addTo(map);
-            });
-        
-        function getColor(d) {
-            return d > 80 ? "#67000d" : d > 60 ? "#a50f15" :
-                   d > 40 ? "#cb181d" : d > 20 ? "#ef3b2c" :
-                   d > 10 ? "#fb6a4a" : d > 5  ? "#fc9272" :
-                   d > 2  ? "#fcbba1" : "#fee5d9";
+        function loadData(url, type) {
+            if (currentLayer) map.removeLayer(currentLayer);
+            
+            fetch(url)
+                .then(r => r.json())
+                .then(data => {
+                    currentLayer = L.geoJSON(data, {
+                        style: f => ({
+                            fillColor: getColor(f.properties.pct),
+                            weight: 0.5,
+                            color: "#fff",
+                            fillOpacity: 0.75
+                        }),
+                        onEachFeature: (f, layer) => {
+                            var popup = `<b>Hex ${f.properties.hex_id}</b><br>Exposure: ${f.properties.pct}%%`;
+                            if (type === "total") {
+                                popup += `<br>Days affected: ${f.properties.days_affected}`;
+                            }
+                            layer.bindPopup(popup);
+                        }
+                    }).addTo(map);
+                });
         }
         
-        var legend = L.control({position: "bottomright"});
+        function getColor(d) {
+            return d>80?"#67000d":d>60?"#a50f15":d>40?"#cb181d":d>20?"#ef3b2c":
+                   d>10?"#fb6a4a":d>5?"#fc9272":d>2?"#fcbba1":"#fee5d9";
+        }
+        
+        // Load total by default
+        loadData("total/total_exposure.geojson", "total");
+        
+        var legend = L.control({position:"bottomright"});
         legend.onAdd = () => {
-            var div = L.DomUtil.create("div", "info legend");
-            var grades = [0, 2, 5, 10, 20, 40, 60, 80];
+            var div = L.DomUtil.create("div","info legend");
             div.innerHTML = "<h4>Exposure (%%)</h4>";
-            for (var i = 0; i < grades.length; i++) {
-                div.innerHTML += `<i style="background:${getColor(grades[i] + 1)}"></i> ` +
-                    grades[i] + (grades[i + 1] ? "&ndash;" + grades[i + 1] + "<br>" : "+");
-            }
+            [0,2,5,10,20,40,60,80].forEach((g,i,a) => {
+                div.innerHTML += `<i style="background:${getColor(g+1)}"></i>${g}${a[i+1]?"–"+a[i+1]:"+"}<br>`;
+            });
             return div;
         };
         legend.addTo(map);
         
-        var info = L.control({position: "topright"});
+        var info = L.control({position:"topright"});
         info.onAdd = () => {
-            var div = L.DomUtil.create("div", "info");
-            div.innerHTML = 
-                "<h4>HQ Cumulative Outage Exposure</h4>" +
-                "<p><b>Snapshots:</b> %d</p>" +
-                "<p><b>Hex size:</b> %dm</p>" +
-                "<p><b>Affected hexes:</b> %d</p>" +
-                "<p><small>Simplified geometries</small></p>";
+            var div = L.DomUtil.create("div","info");
+            div.innerHTML = "<h4>HQ Cumulative Outage Exposure</h4>" +
+                           "<p><b>Hex size:</b> %dkm</p>" +
+                           "<p><b>Days analyzed:</b> %d</p>";
             return div;
         };
         info.addTo(map);
         
-        var downloads = L.control({position: "topleft"});
-        downloads.onAdd = () => {
-            var div = L.DomUtil.create("div", "downloads");
-            div.innerHTML = 
-                "<h4>📥 Downloads</h4>" +
-                `<a href="outage_hex_grid.geojson" download>GeoJSON</a>` +
-                `<a href="outage_hex_stats.csv" download>CSV Data</a>` +
-                `<a href="summary_stats.json" download>Summary</a>`;
+        var controls = L.control({position:"topleft"});
+        controls.onAdd = () => {
+            var div = L.DomUtil.create("div","controls downloads");
+            div.innerHTML = "<h4>📥 Downloads</h4>" +
+                           "<a href=\\"total/total_exposure.geojson\\">Total GeoJSON</a>" +
+                           "<a href=\\"total/total_stats.csv\\">Total CSV</a>" +
+                           "<a href=\\"total/summary.json\\">Summary JSON</a>";
             return div;
         };
-        downloads.addTo(map);
+        controls.addTo(map);
     </script>
 </body>
-</html>', total_files, total_files, hex_size, nrow(hex_grid_wgs84))
+</html>', HEX_SIZE/1000, length(all_daily_files))
 
-html_path <- file.path(output_dir, "index.html")
-writeLines(html_content, html_path)
-cat(sprintf("   ✓ %s\n", html_path))
+writeLines(html, file.path(output_dir, "index.html"))
 
-# ===================================================================
-# Verify outputs
-# ===================================================================
-cat("\n=== Verification ===\n")
-required_files <- c(
-  "outage_hex_grid.geojson",
-  "outage_hex_stats.csv",
-  "summary_stats.json",
-  "index.html",
-  "shapefile/outage_hex_grid.shp"
-)
-
-all_exist <- all(file.exists(file.path(output_dir, required_files)))
-
-for (f in required_files) {
-  exists <- file.exists(file.path(output_dir, f))
-  cat(sprintf("  %s %s\n", if(exists) "✓" else "✗", f))
-}
-
-if (!all_exist) {
-  stop("ERROR: Not all outputs were created!")
-}
-
-# ===================================================================
-# Final summary
-# ===================================================================
-elapsed <- difftime(Sys.time(), start_time, units = "mins")
-
-cat("\n=== COMPLETE ===\n")
-cat(sprintf("Processing time: %.1f minutes\n", elapsed))
-cat(sprintf("Files analyzed: %d\n", total_files))
-cat(sprintf("Hexes created: %d\n", nrow(hex_grid_wgs84)))
-cat(sprintf("Mean exposure: %.1f%%\n", mean(hex_grid_wgs84$outage_score)))
-cat(sprintf("Max exposure: %.1f%%\n", max(hex_grid_wgs84$outage_score)))
-cat("\n✅ SUCCESS - Fast simplified geometry processing!\n")
+# =================================================================
+# Done!
+# =================================================================
+elapsed <- as.numeric(difftime(Sys.time(), start_time, units = "mins"))
+cat(sprintf("\n✅ COMPLETE in %.1f minutes\n", elapsed))
+cat("\nOutput structure:\n")
+cat("  public/\n")
+cat("    daily/     - Daily summaries (one per date)\n")
+cat("    monthly/   - Monthly aggregations\n")
+cat("    total/     - Cumulative summary of all data\n")
+cat("    index.html - Interactive map\n")
