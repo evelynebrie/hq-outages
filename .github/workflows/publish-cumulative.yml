@@ -29,16 +29,6 @@ jobs:
                       inst <- setdiff(pkgs, rownames(installed.packages()));
                       if(length(inst)) install.packages(inst, repos="https://cloud.r-project.org")'
 
-      - name: Configure system for large data processing
-        run: |
-          echo "Configuring swap space for memory-intensive processing..."
-          sudo fallocate -l 8G /swapfile
-          sudo chmod 600 /swapfile
-          sudo mkswap /swapfile
-          sudo swapon /swapfile
-          echo "Swap enabled:"
-          free -h
-
       # ----------------------------------------------------------
       # Get fresh Dropbox access token
       # ----------------------------------------------------------
