@@ -25,7 +25,7 @@ jobs:
 
       - name: Install R packages
         run: |
-          Rscript -e 'pkgs <- c("sf","dplyr","fs","purrr");
+          Rscript -e 'pkgs <- c("sf","dplyr","fs","purrr","jsonlite");
                       inst <- setdiff(pkgs, rownames(installed.packages()));
                       if(length(inst)) install.packages(inst, repos="https://cloud.r-project.org")'
 
@@ -66,7 +66,6 @@ jobs:
 
           echo "📂 Listing Dropbox folder recursively..."
 
-          # *** FIXED ROOT PATH — THIS MATCHES YOUR REAL DROPBOX STRUCTURE ***
           resp=$(curl -sS -X POST https://api.dropboxapi.com/2/files/list_folder \
             --header "Authorization: Bearer $DROPBOX_TOKEN" \
             --header "Content-Type: application/json" \
@@ -104,40 +103,78 @@ jobs:
 
           if [ ! -s /tmp/polygon_paths.txt ]; then
             echo "⚠️ No polygon files found matching pattern"
-            echo "📄 Contents of /tmp/polygon_paths.txt:"
-            cat /tmp/polygon_paths.txt || echo "(empty)"
             exit 1
           fi
 
           echo "📄 Sample of files to download:"
           head -n 3 /tmp/polygon_paths.txt
 
+          downloaded=0
+          failed=0
+
           sort -u /tmp/polygon_paths.txt | while read -r p; do
             [ -n "$p" ] || continue
             base=$(basename "$p")
             echo "Downloading $p -> data/daily/$base"
-            curl -sS -X POST https://content.dropboxapi.com/2/files/download \
+            
+            if curl -sS -X POST https://content.dropboxapi.com/2/files/download \
               --header "Authorization: Bearer $DROPBOX_TOKEN" \
               --header "Dropbox-API-Arg: {\"path\": \"$p\"}" \
-              --output "data/daily/$base"
-            
-            if [ -f "data/daily/$base" ]; then
-              size=$(stat -c%s "data/daily/$base" 2>/dev/null || stat -f%z "data/daily/$base" 2>/dev/null || echo "0")
-              echo "  ✓ Saved: $base (${size} bytes)"
+              --output "data/daily/$base"; then
+              
+              if [ -f "data/daily/$base" ]; then
+                size=$(stat -c%s "data/daily/$base" 2>/dev/null || stat -f%z "data/daily/$base" 2>/dev/null || echo "0")
+                echo "  ✓ Saved: $base (${size} bytes)"
+                downloaded=$((downloaded + 1))
+              else
+                echo "  ✗ Failed: $base"
+                failed=$((failed + 1))
+              fi
             else
-              echo "  ✗ Failed: $base"
+              echo "  ✗ Download failed: $base"
+              failed=$((failed + 1))
             fi
           done
 
           echo "✅ Download complete: $(ls -1 data/daily 2>/dev/null | wc -l) files"
           echo "📊 Total size: $(du -sh data/daily 2>/dev/null | cut -f1)"
-          ls -lh data/daily/ | head -n 10
+          
+          # Verify we have files
+          file_count=$(ls -1 data/daily/*.geojson 2>/dev/null | wc -l)
+          if [ "$file_count" -eq 0 ]; then
+            echo "❌ ERROR: No GeoJSON files downloaded!"
+            exit 1
+          fi
+          
+          echo "✓ Verified: $file_count GeoJSON files ready for processing"
 
       # ----------------------------------------------------------
       # Build cumulative hex layer
       # ----------------------------------------------------------
       - name: Build cumulative hex layer
-        run: Rscript R/build_cumulative_hex.R
+        run: |
+          echo "Starting hexagonal grid analysis..."
+          Rscript R/build_cumulative_hex.R
+          
+          echo "Verifying outputs..."
+          ls -lh public/
+          
+          if [ ! -f "public/outage_hex_grid.geojson" ]; then
+            echo "❌ ERROR: GeoJSON output not found!"
+            exit 1
+          fi
+          
+          if [ ! -f "public/outage_hex_stats.csv" ]; then
+            echo "❌ ERROR: CSV output not found!"
+            exit 1
+          fi
+          
+          if [ ! -d "public/shapefile" ]; then
+            echo "❌ ERROR: Shapefile directory not found!"
+            exit 1
+          fi
+          
+          echo "✅ All outputs verified successfully"
 
       # ----------------------------------------------------------
       # Deploy to public repo
@@ -149,4 +186,4 @@ jobs:
           external_repository: evelynebrie/hq-outages-public
           publish_branch: gh-pages
           publish_dir: public
-          commit_message: "Update cumulative outage exposure"
+          commit_message: "Update cumulative outage exposure - ${{ github.run_number }}"
