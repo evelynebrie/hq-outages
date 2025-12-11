@@ -1,9 +1,5 @@
-# HQ Outages - HIERARCHICAL AGGREGATION SYSTEM (MODIFIED)
-# Changes:
-# 1. Hex size changed to 1km (1000m)
-# 2. Score = number of hours (files) hex appears in, not percentage
-# 3. Added centroid coordinates for each hex
-# 4. Added day/hour tracking for each hex
+# HQ Outages - HIERARCHICAL AGGREGATION SYSTEM (MODIFIED v2)
+# Fixed HTML generation error
 
 suppressPackageStartupMessages({
   library(sf)
@@ -11,7 +7,7 @@ suppressPackageStartupMessages({
   library(jsonlite)
 })
 
-cat("=== HQ Outages Hierarchical Analysis (Modified) ===\n")
+cat("=== HQ Outages Hierarchical Analysis (Modified v2) ===\n")
 start_time <- Sys.time()
 
 # Config
@@ -333,7 +329,13 @@ if (length(all_daily_files) > 0) {
 # =================================================================
 cat("\n[5] Creating HTML viewer...\n")
 
-html <- sprintf('<!DOCTYPE html>
+# Build HTML in parts to avoid sprintf length limits
+hex_size_km <- HEX_SIZE / 1000
+num_days <- length(all_daily_files)
+
+html_parts <- list()
+
+html_parts[[1]] <- '<!DOCTYPE html>
 <html lang="fr">
 <head>
     <title>Pannes de courant cumulatives</title>
@@ -343,7 +345,7 @@ html <- sprintf('<!DOCTYPE html>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <style>
         body{margin:0;padding:0;font-family:-apple-system,system-ui,sans-serif}
-        #map{position:absolute;top:0;bottom:0;width:100%%}
+        #map{position:absolute;top:0;bottom:0;width:100%}
         .info{padding:12px;background:white;box-shadow:0 2px 10px rgba(0,0,0,0.1);border-radius:8px}
         .info h4{margin:0 0 8px;font-size:15px;font-weight:600}
         .info p{margin:4px 0;font-size:13px}
@@ -352,19 +354,19 @@ html <- sprintf('<!DOCTYPE html>
         .controls{padding:10px;background:white;box-shadow:0 2px 10px rgba(0,0,0,0.1);border-radius:8px;max-width:250px}
         .controls h4{margin:0 0 8px;font-size:14px;font-weight:600}
         .controls label{display:block;margin:8px 0 4px;font-size:12px;font-weight:500}
-        .controls select{width:100%%;padding:6px;border-radius:4px;border:1px solid #ddd;font-size:12px}
+        .controls select{width:100%;padding:6px;border-radius:4px;border:1px solid #ddd;font-size:12px}
         .detail-link{color:#0066cc;cursor:pointer;text-decoration:underline;font-size:12px;margin-top:8px;display:inline-block}
         .detail-link:hover{color:#0052a3}
-        .detail-modal{display:none;position:fixed;z-index:2000;left:50%%;top:50%%;transform:translate(-50%%,-50%%);
+        .detail-modal{display:none;position:fixed;z-index:2000;left:50%;top:50%;transform:translate(-50%,-50%);
                       background:white;padding:20px;border-radius:8px;box-shadow:0 4px 20px rgba(0,0,0,0.3);
                       max-width:500px;max-height:70vh;overflow-y:auto}
         .detail-modal.active{display:block}
-        .modal-overlay{display:none;position:fixed;z-index:1999;left:0;top:0;width:100%%;height:100%%;
+        .modal-overlay{display:none;position:fixed;z-index:1999;left:0;top:0;width:100%;height:100%;
                        background:rgba(0,0,0,0.5)}
         .modal-overlay.active{display:block}
         .close-modal{float:right;font-size:24px;font-weight:bold;cursor:pointer;color:#999}
         .close-modal:hover{color:#333}
-        .detail-table{width:100%%;border-collapse:collapse;margin-top:10px}
+        .detail-table{width:100%;border-collapse:collapse;margin-top:10px}
         .detail-table th,.detail-table td{text-align:left;padding:6px;border-bottom:1px solid #eee;font-size:12px}
         .detail-table th{font-weight:600;background:#f5f5f5}
     </style>
@@ -376,76 +378,74 @@ html <- sprintf('<!DOCTYPE html>
         <span class="close-modal" onclick="closeModal()">&times;</span>
         <div id="modalContent"></div>
     </div>
-    <script>
-        var map = L.map("map").setView([46.8,-71.2],7);
-        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{attribution:"© OSM"}).addTo(map);
+    <script>'
+
+html_parts[[2]] <- "
+        var map = L.map('map').setView([46.8,-71.2],7);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'© OSM'}).addTo(map);
         
         var currentLayer;
         var allData = {};
         
-        // Load all daily data on startup
         async function loadAllDailyData() {
             try {
-                const response = await fetch("total/total_exposure.geojson");
+                const response = await fetch('total/total_exposure.geojson');
                 const data = await response.json();
                 allData.total = data;
                 
-                // Extract unique dates from the data
                 const dates = new Set();
                 data.features.forEach(f => {
                     if (f.properties.datetimes_affected) {
-                        const datetimes = f.properties.datetimes_affected.split(",");
+                        const datetimes = f.properties.datetimes_affected.split(',');
                         datetimes.forEach(dt => {
-                            const date = dt.split(" ")[0];
+                            const date = dt.split(' ')[0];
                             dates.add(date);
                         });
                     }
                 });
                 
-                // Populate date selector
-                const dateSelect = document.getElementById("dateSelect");
+                const dateSelect = document.getElementById('dateSelect');
                 const sortedDates = Array.from(dates).sort();
                 sortedDates.forEach(date => {
-                    const opt = document.createElement("option");
+                    const opt = document.createElement('option');
                     opt.value = date;
                     opt.text = date;
                     dateSelect.appendChild(opt);
                 });
                 
             } catch (e) {
-                console.error("Error loading data:", e);
+                console.error('Error loading data:', e);
             }
         }
         
         function filterDataByDateTime(date, hour) {
             if (!allData.total) return null;
             
-            if (date === "all") {
+            if (date === 'all') {
                 return allData.total;
             }
             
             const filtered = {
-                type: "FeatureCollection",
+                type: 'FeatureCollection',
                 features: allData.total.features.filter(f => {
                     if (!f.properties.datetimes_affected) return false;
-                    const datetimes = f.properties.datetimes_affected.split(",");
+                    const datetimes = f.properties.datetimes_affected.split(',');
                     return datetimes.some(dt => {
-                        if (hour === "all") {
+                        if (hour === 'all') {
                             return dt.startsWith(date);
                         } else {
-                            const targetDateTime = date + " " + hour.padStart(2, "0") + ":00";
+                            const targetDateTime = date + ' ' + hour.padStart(2, '0') + ':00';
                             return dt === targetDateTime;
                         }
                     });
                 }).map(f => {
-                    // Recalculate count for this filter
-                    const datetimes = f.properties.datetimes_affected.split(",");
+                    const datetimes = f.properties.datetimes_affected.split(',');
                     let matchingCount = 0;
                     datetimes.forEach(dt => {
-                        if (hour === "all" && dt.startsWith(date)) {
+                        if (hour === 'all' && dt.startsWith(date)) {
                             matchingCount++;
-                        } else if (hour !== "all") {
-                            const targetDateTime = date + " " + hour.padStart(2, "0") + ":00";
+                        } else if (hour !== 'all') {
+                            const targetDateTime = date + ' ' + hour.padStart(2, '0') + ':00';
                             if (dt === targetDateTime) matchingCount++;
                         }
                     });
@@ -464,33 +464,33 @@ html <- sprintf('<!DOCTYPE html>
         }
         
         function updateMap() {
-            const date = document.getElementById("dateSelect").value;
-            const hour = document.getElementById("hourSelect").value;
+            const date = document.getElementById('dateSelect').value;
+            const hour = document.getElementById('hourSelect').value;
             
             const data = filterDataByDateTime(date, hour);
             if (!data) return;
             
             if (currentLayer) map.removeLayer(currentLayer);
             
-            const isFiltered = date !== "all";
+            const isFiltered = date !== 'all';
             
             currentLayer = L.geoJSON(data, {
                 style: f => ({
                     fillColor: getColor(isFiltered ? f.properties.filtered_hours_count : f.properties.hours_count),
                     weight: 0.5,
-                    color: "#fff",
+                    color: '#fff',
                     fillOpacity: 0.75
                 }),
                 onEachFeature: (f, layer) => {
                     const props = f.properties;
                     const hoursCount = isFiltered ? props.filtered_hours_count : props.hours_count;
                     
-                    var popup = `<b>Hexagone #${props.hex_id}</b><br>` +
-                               `<b>Nombre d\'\'heures impactées:</b> ${hoursCount}<br>` +
-                               `<b>Nombre de jours impactés:</b> ${props.days_affected}<br>` +
-                               `<b>Coordonnées du centroïde:</b><br>` +
-                               `Lat: ${props.centroid_lat.toFixed(6)}, Lon: ${props.centroid_lon.toFixed(6)}<br>` +
-                               `<a class="detail-link" onclick="showDetails(${props.hex_id})">Voir toutes les heures et jours impactés</a>`;
+                    var popup = '<b>Hexagone #' + props.hex_id + '</b><br>' +
+                               '<b>Nombre d\\'heures impactées:</b> ' + hoursCount + '<br>' +
+                               '<b>Nombre de jours impactés:</b> ' + props.days_affected + '<br>' +
+                               '<b>Coordonnées du centroïde:</b><br>' +
+                               'Lat: ' + props.centroid_lat.toFixed(6) + ', Lon: ' + props.centroid_lon.toFixed(6) + '<br>' +
+                               '<a class=\"detail-link\" onclick=\"showDetails(' + props.hex_id + ')\">Voir toutes les heures et jours impactés</a>';
                     
                     layer.bindPopup(popup);
                 }
@@ -502,89 +502,93 @@ html <- sprintf('<!DOCTYPE html>
             if (!feature) return;
             
             const props = feature.properties;
-            const datetimes = props.datetimes_affected.split(",").sort();
+            const datetimes = props.datetimes_affected.split(',').sort();
             
-            // Group by date
             const byDate = {};
             datetimes.forEach(dt => {
-                const [date, time] = dt.split(" ");
+                const [date, time] = dt.split(' ');
                 if (!byDate[date]) byDate[date] = [];
                 byDate[date].push(time);
             });
             
-            let html = `<h3>Hexagone #${hexId}</h3>`;
-            html += `<p><b>Total heures impactées:</b> ${props.hours_count}</p>`;
-            html += `<p><b>Total jours impactés:</b> ${props.days_affected}</p>`;
-            html += `<p><b>Centroïde:</b> ${props.centroid_lat.toFixed(6)}, ${props.centroid_lon.toFixed(6)}</p>`;
-            html += `<table class="detail-table">`;
-            html += `<thead><tr><th>Date</th><th>Heures</th></tr></thead><tbody>`;
+            let html = '<h3>Hexagone #' + hexId + '</h3>';
+            html += '<p><b>Total heures impactées:</b> ' + props.hours_count + '</p>';
+            html += '<p><b>Total jours impactés:</b> ' + props.days_affected + '</p>';
+            html += '<p><b>Centroïde:</b> ' + props.centroid_lat.toFixed(6) + ', ' + props.centroid_lon.toFixed(6) + '</p>';
+            html += '<table class=\"detail-table\">';
+            html += '<thead><tr><th>Date</th><th>Heures</th></tr></thead><tbody>';
             
             Object.keys(byDate).sort().forEach(date => {
                 const hours = byDate[date].sort();
-                html += `<tr><td>${date}</td><td>${hours.join(", ")}</td></tr>`;
+                html += '<tr><td>' + date + '</td><td>' + hours.join(', ') + '</td></tr>';
             });
             
-            html += `</tbody></table>`;
+            html += '</tbody></table>';
             
-            document.getElementById("modalContent").innerHTML = html;
-            document.getElementById("detailModal").classList.add("active");
-            document.getElementById("modalOverlay").classList.add("active");
+            document.getElementById('modalContent').innerHTML = html;
+            document.getElementById('detailModal').classList.add('active');
+            document.getElementById('modalOverlay').classList.add('active');
         }
         
         function closeModal() {
-            document.getElementById("detailModal").classList.remove("active");
-            document.getElementById("modalOverlay").classList.remove("active");
+            document.getElementById('detailModal').classList.remove('active');
+            document.getElementById('modalOverlay').classList.remove('active');
         }
         
-        document.getElementById("modalOverlay").onclick = closeModal;
+        document.getElementById('modalOverlay').onclick = closeModal;
         
         function getColor(d) {
-            return d>80?"#67000d":d>60?"#a50f15":d>40?"#cb181d":d>20?"#ef3b2c":
-                   d>10?"#fb6a4a":d>5?"#fc9272":d>2?"#fcbba1":"#fee5d9";
+            return d>80?'#67000d':d>60?'#a50f15':d>40?'#cb181d':d>20?'#ef3b2c':
+                   d>10?'#fb6a4a':d>5?'#fc9272':d>2?'#fcbba1':'#fee5d9';
         }
         
-        // Initialize
         loadAllDailyData().then(() => {
             updateMap();
         });
         
-        var legend = L.control({position:"bottomright"});
+        var legend = L.control({position:'bottomright'});
         legend.onAdd = () => {
-            var div = L.DomUtil.create("div","info legend");
-            div.innerHTML = "<h4>Heures (nombre)</h4>";
+            var div = L.DomUtil.create('div','info legend');
+            div.innerHTML = '<h4>Heures (nombre)</h4>';
             [0,2,5,10,20,40,60,80].forEach((g,i,a) => {
-                div.innerHTML += `<i style="background:${getColor(g+1)}"></i>${g}${a[i+1]?"–"+a[i+1]:"+"}<br>`;
+                div.innerHTML += '<i style=\"background:' + getColor(g+1) + '\"></i>' + g + (a[i+1]?'–'+a[i+1]:'+') + '<br>';
             });
             return div;
         };
         legend.addTo(map);
-        
-        var info = L.control({position:"topright"});
+"
+
+html_parts[[3]] <- paste0("
+        var info = L.control({position:'topright'});
         info.onAdd = () => {
-            var div = L.DomUtil.create("div","info");
-            div.innerHTML = "<h4>Pannes de courant cumulatives</h4>" +
-                           "<p><b>Taille des hexagones:</b> %d km</p>" +
-                           "<p><b>Jours analysés:</b> %d</p>";
+            var div = L.DomUtil.create('div','info');
+            div.innerHTML = '<h4>Pannes de courant cumulatives</h4>' +
+                           '<p><b>Taille des hexagones:</b> ", hex_size_km, " km</p>' +
+                           '<p><b>Jours analysés:</b> ", num_days, "</p>';
             return div;
         };
         info.addTo(map);
         
-        var controls = L.control({position:"topleft"});
+        var controls = L.control({position:'topleft'});
         controls.onAdd = () => {
-            var div = L.DomUtil.create("div","controls");
-            div.innerHTML = "<h4>Filtres</h4>" +
-                           "<label>Date:</label>" +
-                           "<select id=\\"dateSelect\\" onchange=\\"updateMap()\\"><option value=\\"all\\">Résumé complet (défaut)</option></select>" +
-                           "<label>Heure:</label>" +
-                           "<select id=\\"hourSelect\\" onchange=\\"updateMap()\\"><option value=\\"all\\">Toutes</option>" +
-                           Array.from({length: 24}, (_, i) => `<option value=\\"${i}\\">${i}:00</option>`).join("") +
-                           "</select>";
+            var div = L.DomUtil.create('div','controls');
+            div.innerHTML = '<h4>Filtres</h4>' +
+                           '<label>Date:</label>' +
+                           '<select id=\"dateSelect\" onchange=\"updateMap()\"><option value=\"all\">Résumé complet (défaut)</option></select>' +
+                           '<label>Heure:</label>' +
+                           '<select id=\"hourSelect\" onchange=\"updateMap()\"><option value=\"all\">Toutes</option>' +")
+
+html_parts[[4]] <- paste0(
+  paste(sapply(0:23, function(i) sprintf("'<option value=\"%d\">%d:00</option>'", i, i)), collapse=" + "),
+  " + '</select>';
             return div;
         };
         controls.addTo(map);
     </script>
 </body>
-</html>', HEX_SIZE/1000, length(all_daily_files))
+</html>")
+
+html <- paste(html_parts, collapse = "")
 
 writeLines(html, file.path(output_dir, "index.html"))
 
