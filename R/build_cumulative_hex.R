@@ -12,7 +12,7 @@ start_time <- Sys.time()
 
 # Config
 data_path <- "data/daily"
-output_dir <- normalizePath("public", mustWork = FALSE)
+output_dir <- file.path(getwd(), "public")
 HEX_SIZE <- 5000  # 5km hexes
 SIMPLIFY <- 200   # 200m simplification
 
