@@ -224,22 +224,29 @@ if (length(all_daily_files) > 0) {
               nrow(total_combined), length(all_daily_files)))
   
   # Save total GeoJSON
-  st_write(total_combined, 
-           file.path(output_dir, "total", "total_exposure.geojson"),
-           delete_dsn = TRUE, quiet = TRUE)
+  total_geojson <- file.path(output_dir, "total", "total_exposure.geojson")
+  st_write(total_combined, total_geojson, delete_dsn = TRUE, quiet = TRUE)
+  cat(sprintf("  Saved: %s\n", total_geojson))
   
   # Save total CSV
+  total_csv <- file.path(output_dir, "total", "total_stats.csv")
   total_combined %>%
     st_drop_geometry() %>%
     arrange(desc(pct)) %>%
-    write.csv(file.path(output_dir, "total", "total_stats.csv"), row.names = FALSE)
+    write.csv(total_csv, row.names = FALSE)
+  cat(sprintf("  Saved: %s\n", total_csv))
   
   # Save total shapefile
   shp_dir <- file.path(output_dir, "total", "shapefile")
   dir.create(shp_dir, recursive = TRUE, showWarnings = FALSE)
-  st_write(total_combined,
-           file.path(shp_dir, "total_exposure.shp"),
-           delete_dsn = TRUE, quiet = TRUE)
+  
+  tryCatch({
+    st_write(total_combined,
+             file.path(shp_dir, "total_exposure.shp"),
+             delete_dsn = TRUE, quiet = TRUE)
+  }, error = function(e) {
+    cat("  Warning: Could not create shapefile\n")
+  })
   
   # Summary stats
   summary_stats <- list(
@@ -377,3 +384,25 @@ cat("    daily/     - Daily summaries (one per date)\n")
 cat("    monthly/   - Monthly aggregations\n")
 cat("    total/     - Cumulative summary of all data\n")
 cat("    index.html - Interactive map\n")
+
+# Verify critical files exist
+cat("\nVerifying files...\n")
+required_files <- c(
+  "public/total/total_exposure.geojson",
+  "public/total/total_stats.csv",
+  "public/index.html"
+)
+
+all_exist <- TRUE
+for (f in required_files) {
+  exists <- file.exists(f)
+  cat(sprintf("  %s %s\n", if(exists) "✓" else "✗", f))
+  if (!exists) all_exist <- FALSE
+}
+
+if (!all_exist) {
+  cat("\n❌ ERROR: Some required files were not created!\n")
+  quit(status = 1)
+}
+
+cat("\n✅ All required files verified\n")
