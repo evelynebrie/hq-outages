@@ -211,19 +211,23 @@ if (length(all_daily_files) > 0) {
     st_read(f, quiet = TRUE)
   })
   
-  # Aggregate across ALL days
-  total_combined <- bind_rows(all_daily_data) %>%
-    group_by(hex_id) %>%
-    summarise(
-      total_count = sum(count),
-      total_files = sum(n_files),
-      days_affected = n(),
-      .groups = "drop"
-    ) %>%
-    mutate(
-      pct = round(100 * total_count / total_files, 2)
-    ) %>%
-    filter(total_count > 0)
+  total_combined <- bind_rows(all_daily_data)
+
+# KEEP ONE GEOMETRY PER HEX BEFORE SUMMARISING
+total_combined <- total_combined %>%
+  group_by(hex_id) %>%
+  summarise(
+    geometry = first(geometry),             # <-- ADD THIS
+    total_count = sum(count, na.rm = TRUE),
+    total_files = sum(n_files, na.rm = TRUE),
+    days_affected = n(),
+    .groups = "drop"
+  ) %>%
+  st_as_sf() %>%                             # <-- ENSURE IT REMAINS sf
+  mutate(
+    pct = round(100 * total_count / total_files, 2)
+  ) %>%
+  filter(total_count > 0)
 
   total_combined <- st_make_valid(total_combined)
 
