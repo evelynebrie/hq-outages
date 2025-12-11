@@ -158,16 +158,11 @@ jobs:
           # Verify R script exists
           if [ ! -f "R/build_cumulative_hex.R" ]; then
             echo "❌ ERROR: R/build_cumulative_hex.R not found!"
-            echo "Current directory: $(pwd)"
-            echo "Directory contents:"
-            ls -la
-            echo "R directory contents:"
-            ls -la R/ 2>/dev/null || echo "R/ directory does not exist"
             exit 1
           fi
           
           echo "✓ R script found"
-          echo "Running R script..."
+          echo "Running hierarchical aggregation..."
           Rscript R/build_cumulative_hex.R
           
           exit_code=$?
@@ -176,25 +171,32 @@ jobs:
             exit $exit_code
           fi
           
+          echo ""
           echo "Verifying outputs..."
           ls -lh public/
           
-          if [ ! -f "public/outage_hex_grid.geojson" ]; then
-            echo "❌ ERROR: GeoJSON output not found!"
+          # Check for required output structure
+          if [ ! -d "public/total" ]; then
+            echo "❌ ERROR: public/total/ directory not found!"
             exit 1
           fi
           
-          if [ ! -f "public/outage_hex_stats.csv" ]; then
-            echo "❌ ERROR: CSV output not found!"
+          if [ ! -f "public/total/total_exposure.geojson" ]; then
+            echo "❌ ERROR: total_exposure.geojson not found!"
             exit 1
           fi
           
-          if [ ! -d "public/shapefile" ]; then
-            echo "❌ ERROR: Shapefile directory not found!"
+          if [ ! -f "public/total/total_stats.csv" ]; then
+            echo "❌ ERROR: total_stats.csv not found!"
             exit 1
           fi
           
-          echo "✅ All outputs verified successfully"
+          if [ ! -f "public/index.html" ]; then
+            echo "❌ ERROR: index.html not found!"
+            exit 1
+          fi
+          
+          echo "✅ All required outputs verified successfully"
 
       # ----------------------------------------------------------
       # Deploy to public repo
