@@ -12,7 +12,10 @@ start_time <- Sys.time()
 
 # Config
 data_path <- "data/daily"
-output_dir <- file.path(getwd(), "public")
+output_dir <- file.path(dirname(getwd()), "public")
+
+cat("Writing outputs to:", output_dir, "\n")
+
 HEX_SIZE <- 5000  # 5km hexes
 SIMPLIFY <- 200   # 200m simplification
 
