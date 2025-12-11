@@ -129,6 +129,9 @@ if (length(dates_to_process) > 0) {
         pct = round(100 * count / length(date_files), 2)
       ) %>%
       st_transform(4326)
+
+     hex_grid_filtered <- st_make_valid(hex_grid_filtered)
+
     
     # Save daily summary
     daily_path <- file.path(output_dir, "daily", sprintf("daily_%s.geojson", date))
@@ -185,7 +188,9 @@ if (length(all_daily_files) > 0) {
         pct = round(100 * count / n_files, 2)
       ) %>%
       filter(count > 0)
-    
+
+    combined <- st_make_valid(combined)
+
     # Save monthly summary
     monthly_path <- file.path(output_dir, "monthly", sprintf("monthly_%s.geojson", month))
     st_write(combined, monthly_path, delete_dsn = TRUE, quiet = TRUE)
@@ -219,7 +224,9 @@ if (length(all_daily_files) > 0) {
       pct = round(100 * total_count / total_files, 2)
     ) %>%
     filter(total_count > 0)
-  
+
+  total_combined <- st_make_valid(total_combined)
+
   cat(sprintf("  %d hexes affected across %d days\n", 
               nrow(total_combined), length(all_daily_files)))
   
