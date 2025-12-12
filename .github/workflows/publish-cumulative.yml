@@ -59,7 +59,7 @@ jobs:
             jq -r '
               .entries? // [] |
               map(select(.[".tag"] == "file")) |
-              map(select(.name | test("^polygons_.*\\.geojson$"; "i"))) |
+              map(select(.name | test("^(polygons_.*\\.geojson|outages_joined_.*\\.csv)$"; "i"))) |
               .[].path_lower // empty
             '
           }
@@ -78,7 +78,7 @@ jobs:
 
           extract_paths <<< "$resp" > /tmp/polygon_paths.txt
           
-          echo "📋 Found $(wc -l < /tmp/polygon_paths.txt) polygon files"
+          echo "📋 Found $(wc -l < /tmp/polygon_paths.txt) polygon and customer impact files"
           
           cursor=$(jq -r '.cursor // empty' <<< "$resp")
           has_more=$(jq -r '.has_more // false' <<< "$resp")
@@ -140,13 +140,17 @@ jobs:
           echo "📊 Total size: $(du -sh data/daily 2>/dev/null | cut -f1)"
           
           # Verify we have files
-          file_count=$(ls -1 data/daily/*.geojson 2>/dev/null | wc -l)
-          if [ "$file_count" -eq 0 ]; then
+          geojson_count=$(ls -1 data/daily/*.geojson 2>/dev/null | wc -l)
+          csv_count=$(ls -1 data/daily/*.csv 2>/dev/null | wc -l)
+          if [ "$geojson_count" -eq 0 ]; then
             echo "❌ ERROR: No GeoJSON files downloaded!"
             exit 1
           fi
           
-          echo "✓ Verified: $file_count GeoJSON files ready for processing"
+          echo "✓ Verified: $geojson_count GeoJSON files ready for processing"
+          if [ "$csv_count" -gt 0 ]; then
+            echo "✓ Verified: $csv_count customer impact CSV files found"
+          fi
 
       # ----------------------------------------------------------
       # Build cumulative hex layer
