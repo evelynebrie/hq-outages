@@ -1,5 +1,5 @@
-# HQ Outages - HIERARCHICAL AGGREGATION SYSTEM (MODIFIED v2)
-# Fixed HTML generation error
+# HQ Outages - HIERARCHICAL AGGREGATION SYSTEM v3
+# With customer impact data and improved table logic
 
 suppressPackageStartupMessages({
   library(sf)
@@ -7,7 +7,7 @@ suppressPackageStartupMessages({
   library(jsonlite)
 })
 
-cat("=== HQ Outages Hierarchical Analysis (Modified v2) ===\n")
+cat("=== HQ Outages Hierarchical Analysis v3 ===\n")
 start_time <- Sys.time()
 
 # Config
@@ -16,7 +16,6 @@ output_dir <- "public"
 
 cat(">>> DEBUG: Writing outputs to:", normalizePath(output_dir, mustWork = FALSE), "\n")
 
-# MODIFIED: Hex size changed from 5000m to 1000m (1km)
 HEX_SIZE <- 1000
 SIMPLIFY <- 200
 
@@ -26,17 +25,15 @@ dir.create(file.path(output_dir, "monthly"), recursive = TRUE, showWarnings = FA
 dir.create(file.path(output_dir, "total"), recursive = TRUE, showWarnings = FALSE)
 
 # =================================================================
-# STEP 1: Identify which dates need processing
+# STEP 1: Identify files and extract datetime info
 # =================================================================
 cat("\n[1] Identifying dates to process...\n")
 
-# Get all files and extract dates AND hours
 files <- list.files(data_path, pattern = "^polygons_.*\\.geojson$", full.names = TRUE)
 if (length(files) == 0) stop("No polygon files found")
 
-# Extract dates and hours from filenames (polygons_20251210t142438.geojson)
+# Extract dates and hours from filenames
 file_info <- lapply(basename(files), function(f) {
-  # Extract YYYYMMDDtHHMMSS from filename
   m <- regmatches(f, regexpr("\\d{8}t\\d{6}", f, ignore.case = TRUE))
   if (length(m) > 0) {
     ts <- m[1]
@@ -64,7 +61,6 @@ files_df <- data.frame(
 unique_dates <- unique(files_df$date)
 cat(sprintf("  Found %d files across %d dates\n", nrow(files_df), length(unique_dates)))
 
-# Check which dates already have daily summaries
 existing_dailies <- list.files(
   file.path(output_dir, "daily"), 
   pattern = "^daily_.*\\.geojson$"
@@ -83,7 +79,6 @@ cat(sprintf("  %d dates to process: %s\n",
 if (length(dates_to_process) > 0) {
   cat("\n[2] Processing daily summaries...\n")
   
-  # Create reference hex grid (from first file)
   cat("  Creating reference hex grid...\n")
   first_file <- files_df$file[1]
   first_data <- st_read(first_file, quiet = TRUE) %>% st_transform(32618)
@@ -103,7 +98,6 @@ if (length(dates_to_process) > 0) {
     st_sf() %>%
     mutate(hex_id = row_number())
   
-  # Calculate centroids for each hex (in WGS84)
   hex_centroids <- st_centroid(hex_grid_template) %>%
     st_transform(4326) %>%
     st_coordinates() %>%
@@ -118,7 +112,6 @@ if (length(dates_to_process) > 0) {
   
   cat(sprintf("  Template: %d hexagons\n", nrow(hex_grid_template)))
   
-  # Process each date
   for (date in dates_to_process) {
     cat(sprintf("  Processing %s...\n", date))
     
@@ -126,13 +119,11 @@ if (length(dates_to_process) > 0) {
     date_files <- date_files_info$file
     cat(sprintf("    %d files\n", length(date_files)))
     
-    # Initialize hex grid for this date
     hex_grid <- hex_grid_template
     hex_grid$count <- 0L
     hex_grid$hours_list <- vector("list", nrow(hex_grid))
     hex_grid$datetimes_list <- vector("list", nrow(hex_grid))
     
-    # Process all files for this date
     for (i in seq_along(date_files)) {
       f <- date_files[i]
       hour_val <- date_files_info$hour[i]
@@ -157,7 +148,6 @@ if (length(dates_to_process) > 0) {
       }, error = function(e) invisible(NULL))
     }
     
-    # Format hours and datetimes as JSON strings
     hex_grid_filtered <- hex_grid %>%
       filter(count > 0) %>%
       mutate(
@@ -171,7 +161,6 @@ if (length(dates_to_process) > 0) {
 
     hex_grid_filtered <- st_make_valid(hex_grid_filtered)
 
-    # Save daily summary
     daily_path <- file.path(output_dir, "daily", sprintf("daily_%s.geojson", date))
     st_write(hex_grid_filtered, daily_path, delete_dsn = TRUE, quiet = TRUE)
     
@@ -190,7 +179,6 @@ if (length(dates_to_process) > 0) {
 # =================================================================
 cat("\n[3] Creating monthly summaries...\n")
 
-# Get all daily summaries
 all_daily_files <- list.files(
   file.path(output_dir, "daily"),
   pattern = "^daily_.*\\.geojson$",
@@ -198,7 +186,6 @@ all_daily_files <- list.files(
 )
 
 if (length(all_daily_files) > 0) {
-  # Extract year-month from dates
   daily_dates <- sub(".*daily_(\\d{4}-\\d{2})-\\d{2}\\.geojson", "\\1", all_daily_files)
   unique_months <- unique(daily_dates)
   
@@ -208,12 +195,10 @@ if (length(all_daily_files) > 0) {
     month_files <- all_daily_files[grepl(month, all_daily_files)]
     cat(sprintf("  %s: %d days\n", month, length(month_files)))
     
-    # Read and combine all daily summaries for this month
     month_data <- lapply(month_files, function(f) {
       st_read(f, quiet = TRUE)
     })
     
-    # Aggregate: sum counts across days, merge hours
     combined <- bind_rows(month_data) %>%
       group_by(hex_id) %>%
       summarise(
@@ -232,7 +217,6 @@ if (length(all_daily_files) > 0) {
 
     combined <- st_make_valid(combined)
 
-    # Save monthly summary
     monthly_path <- file.path(output_dir, "monthly", sprintf("monthly_%s.geojson", month))
     st_write(combined, monthly_path, delete_dsn = TRUE, quiet = TRUE)
     
@@ -241,12 +225,11 @@ if (length(all_daily_files) > 0) {
 }
 
 # =================================================================
-# STEP 4: Create TOTAL summary (from dailies)
+# STEP 4: Create TOTAL summary
 # =================================================================
 cat("\n[4] Creating total summary...\n")
 
 if (length(all_daily_files) > 0) {
-  # Read ALL daily summaries
   cat("  Reading all daily summaries...\n")
   all_daily_data <- lapply(all_daily_files, function(f) {
     st_read(f, quiet = TRUE)
@@ -254,7 +237,6 @@ if (length(all_daily_files) > 0) {
   
   total_combined <- bind_rows(all_daily_data)
 
-  # Aggregate with hour and day tracking
   total_combined <- total_combined %>%
     group_by(hex_id) %>%
     summarise(
@@ -270,7 +252,7 @@ if (length(all_daily_files) > 0) {
     ) %>%
     st_as_sf() %>%
     mutate(
-      hours_count = total_count  # This is the number of hourly files the hex appeared in
+      hours_count = total_count
     ) %>%
     filter(total_count > 0)
 
@@ -279,12 +261,10 @@ if (length(all_daily_files) > 0) {
   cat(sprintf("  %d hexes affected across %d days\n", 
               nrow(total_combined), length(all_daily_files)))
   
-  # Save total GeoJSON
   total_geojson <- file.path(output_dir, "total", "total_exposure.geojson")
   st_write(total_combined, total_geojson, delete_dsn = TRUE, quiet = TRUE)
   cat(sprintf("  Saved: %s\n", total_geojson))
   
-  # Save total CSV
   total_csv <- file.path(output_dir, "total", "total_stats.csv")
   total_combined %>%
     st_drop_geometry() %>%
@@ -292,7 +272,6 @@ if (length(all_daily_files) > 0) {
     write.csv(total_csv, row.names = FALSE)
   cat(sprintf("  Saved: %s\n", total_csv))
   
-  # Save total shapefile
   shp_dir <- file.path(output_dir, "total", "shapefile")
   dir.create(shp_dir, recursive = TRUE, showWarnings = FALSE)
   
@@ -304,7 +283,6 @@ if (length(all_daily_files) > 0) {
     cat("  Warning: Could not create shapefile\n")
   })
   
-  # Summary stats
   summary_stats <- list(
     total_days = length(all_daily_files),
     total_files = sum(total_combined$total_files[1]),
@@ -322,27 +300,112 @@ if (length(all_daily_files) > 0) {
   
   cat(sprintf("  Mean hours affected: %.1f\n", summary_stats$mean_hours_affected))
   cat(sprintf("  Max hours affected: %d\n", summary_stats$max_hours_affected))
+  
+  # Verify critical files before HTML
+  cat("\n[4b] Verifying all critical files saved...\n")
+  
+  critical_files <- c(
+    "public/total/total_exposure.geojson",
+    "public/total/total_stats.csv",
+    "public/total/summary.json"
+  )
+  
+  all_critical_saved <- TRUE
+  for (f in critical_files) {
+    exists <- file.exists(f)
+    cat(sprintf("  %s %s\n", if(exists) "✓" else "✗", f))
+    if (!exists) all_critical_saved <- FALSE
+  }
+  
+  if (!all_critical_saved) {
+    cat("\n❌ ERROR: Some critical files were not saved!\n")
+    quit(status = 1)
+  }
+  
+  cat("✅ All critical data files verified and saved\n")
 }
 
 # =================================================================
-# STEP 5: Create HTML viewer (French, with date/hour selector)
+# STEP 5: Process customer impact data (NEW!)
 # =================================================================
-cat("\n[5] Creating HTML viewer...\n")
+cat("\n[5] Processing customer impact data...\n")
 
-# Build HTML in parts to avoid sprintf length limits
+customer_files <- list.files(data_path, pattern = "^outages_joined_.*\\.csv$", full.names = TRUE)
+
+if (length(customer_files) > 0) {
+  cat(sprintf("  Found %d customer impact files\n", length(customer_files)))
+  
+  customer_data_list <- list()
+  
+  for (cf in customer_files) {
+    tryCatch({
+      # Extract datetime from filename
+      fname <- basename(cf)
+      m <- regmatches(fname, regexpr("\\d{8}T\\d{6}", fname))
+      if (length(m) > 0) {
+        ts <- m[1]
+        datetime_str <- sprintf("%s-%s-%s %s:%s",
+                               substr(ts, 1, 4), substr(ts, 5, 6), substr(ts, 7, 8),
+                               substr(ts, 10, 11), substr(ts, 12, 13))
+        
+        df <- read.csv(cf, stringsAsFactors = FALSE)
+        if ("customers_sum" %in% names(df)) {
+          total_customers <- sum(df$customers_sum, na.rm = TRUE)
+          customer_data_list[[length(customer_data_list) + 1]] <- data.frame(
+            datetime = datetime_str,
+            total_customers_affected = total_customers,
+            stringsAsFactors = FALSE
+          )
+        }
+      }
+    }, error = function(e) invisible(NULL))
+  }
+  
+  if (length(customer_data_list) > 0) {
+    customer_summary <- bind_rows(customer_data_list) %>%
+      arrange(datetime)
+    
+    customer_json_path <- file.path(output_dir, "total", "customer_impact.json")
+    write_json(customer_summary, customer_json_path, pretty = TRUE)
+    cat(sprintf("  Saved: %s (%d records)\n", customer_json_path, nrow(customer_summary)))
+  } else {
+    cat("  No valid customer data extracted\n")
+  }
+} else {
+  cat("  No customer impact files found (this is optional)\n")
+}
+
+# =================================================================
+# STEP 6: Create HTML viewer with all improvements
+# =================================================================
+cat("\n[6] Creating enhanced HTML viewer...\n")
+cat("   (If this fails, your data files are already saved)\n")
+
 hex_size_km <- HEX_SIZE / 1000
 num_days <- length(all_daily_files)
 
-html_parts <- list()
+html_generated <- tryCatch({
+  
+  # Load the customer impact data if it exists for embedding
+  customer_data_js <- "null"
+  customer_json_path <- file.path(output_dir, "total", "customer_impact.json")
+  if (file.exists(customer_json_path)) {
+    customer_data_js <- readLines(customer_json_path) %>% paste(collapse = "\n")
+  }
+  
+  html_parts <- list()
 
-html_parts[[1]] <- '<!DOCTYPE html>
+html_parts[[1]] <- paste0('<!DOCTYPE html>
 <html lang="fr">
 <head>
-    <title>Pannes de courant cumulatives</title>
+    <title>Pannes de courant cumulatives - Hydro-Québec</title>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.css"/>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         body{margin:0;padding:0;font-family:-apple-system,system-ui,sans-serif}
         #map{position:absolute;top:0;bottom:0;width:100%}
@@ -359,34 +422,90 @@ html_parts[[1]] <- '<!DOCTYPE html>
         .detail-link:hover{color:#0052a3}
         .detail-modal{display:none;position:fixed;z-index:2000;left:50%;top:50%;transform:translate(-50%,-50%);
                       background:white;padding:20px;border-radius:8px;box-shadow:0 4px 20px rgba(0,0,0,0.3);
-                      max-width:500px;max-height:70vh;overflow-y:auto}
+                      max-width:600px;max-height:80vh;overflow-y:auto}
         .detail-modal.active{display:block}
         .modal-overlay{display:none;position:fixed;z-index:1999;left:0;top:0;width:100%;height:100%;
                        background:rgba(0,0,0,0.5)}
         .modal-overlay.active{display:block}
         .close-modal{float:right;font-size:24px;font-weight:bold;cursor:pointer;color:#999}
         .close-modal:hover{color:#333}
-        .detail-table{width:100%;border-collapse:collapse;margin-top:10px}
-        .detail-table th,.detail-table td{text-align:left;padding:6px;border-bottom:1px solid #eee;font-size:12px}
-        .detail-table th{font-weight:600;background:#f5f5f5}
+        .detail-table{width:100%;border-collapse:collapse;margin-top:10px;font-size:13px}
+        .detail-table th,.detail-table td{text-align:left;padding:8px;border-bottom:1px solid #eee}
+        .detail-table th{font-weight:600;background:#f5f5f5;position:sticky;top:0}
+        .detail-table tfoot{font-weight:600;background:#f9f9f9}
+        .sidebar{position:fixed;left:0;top:0;bottom:0;width:350px;background:white;box-shadow:2px 0 10px rgba(0,0,0,0.1);
+                 transform:translateX(-350px);transition:transform 0.3s;z-index:1000;overflow-y:auto}
+        .sidebar.active{transform:translateX(0)}
+        .sidebar-toggle{position:fixed;left:10px;top:10px;z-index:1001;padding:10px 15px;background:white;
+                        border:none;border-radius:4px;box-shadow:0 2px 10px rgba(0,0,0,0.1);cursor:pointer;font-size:14px}
+        .sidebar-content{padding:20px}
+        .sidebar h3{margin-top:0}
+        .chart-container{margin:20px 0;height:300px}
+        .welcome-modal{display:block;position:fixed;z-index:2001;left:50%;top:50%;transform:translate(-50%,-50%);
+                       background:white;padding:30px;border-radius:8px;box-shadow:0 4px 20px rgba(0,0,0,0.3);
+                       max-width:500px}
+        .welcome-modal h2{margin-top:0;color:#0066cc}
+        .welcome-modal button{padding:10px 20px;background:#0066cc;color:white;border:none;border-radius:4px;
+                              cursor:pointer;font-size:14px;margin-top:15px}
+        .welcome-modal button:hover{background:#0052a3}
     </style>
 </head>
 <body>
     <div id="map"></div>
     <div class="modal-overlay" id="modalOverlay"></div>
+    <div class="modal-overlay active" id="welcomeOverlay"></div>
+    
+    <div class="welcome-modal" id="welcomeModal">
+        <h2>Bienvenue!</h2>
+        <p>Cette carte interactive présente les pannes de courant cumulatives dHydro-Québec.</p>
+        <p><strong>Fonctionnalités:</strong></p>
+        <ul>
+            <li>Hexagones de 1km montrant les zones affectées</li>
+            <li>Filtrage par date et heure</li>
+            <li>Recherche dadresse ou code postal</li>
+            <li>Statistiques des clients affectés (panneau latéral)</li>
+            <li>Détails complets pour chaque hexagone</li>
+        </ul>
+        <p><em>Les données sont mises à jour quotidiennement.</em></p>
+        <button onclick="closeWelcome()">Commencer</button>
+    </div>
+    
     <div class="detail-modal" id="detailModal">
-        <span class="close-modal" onclick="closeModal()">&times;</span>
+        <span class="close-modal" onclick="closeDetailModal()">&times;</span>
         <div id="modalContent"></div>
     </div>
-    <script>'
-
-html_parts[[2]] <- "
-        var map = L.map('map').setView([46.8,-71.2],7);
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'© OSM'}).addTo(map);
+    
+    <button class="sidebar-toggle" onclick="toggleSidebar()">☰ Statistiques</button>
+    <div class="sidebar" id="sidebar">
+        <div class="sidebar-content">
+            <h3>Impact sur les clients</h3>
+            <p id="sidebarInfo">Chargement...</p>
+            <div class="chart-container">
+                <canvas id="impactChart"></canvas>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        var customerData = ', customer_data_js, ';
+        var map = L.map("map").setView([46.4, -72.7], 8);
+        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{attribution:"© OSM"}).addTo(map);
         
         var currentLayer;
         var allData = {};
+        var impactChart = null;
         
+        function closeWelcome() {
+            document.getElementById("welcomeModal").style.display = "none";
+            document.getElementById("welcomeOverlay").classList.remove("active");
+        }
+        
+        function toggleSidebar() {
+            document.getElementById("sidebar").classList.toggle("active");
+        }
+')
+
+html_parts[[2]] <- "
         async function loadAllDailyData() {
             try {
                 const response = await fetch('total/total_exposure.geojson');
@@ -398,7 +517,7 @@ html_parts[[2]] <- "
                     if (f.properties.datetimes_affected) {
                         const datetimes = f.properties.datetimes_affected.split(',');
                         datetimes.forEach(dt => {
-                            const date = dt.split(' ')[0];
+                            const date = dt.trim().split(' ')[0];
                             dates.add(date);
                         });
                     }
@@ -413,9 +532,55 @@ html_parts[[2]] <- "
                     dateSelect.appendChild(opt);
                 });
                 
+                if (customerData && customerData.length > 0) {
+                    initImpactChart();
+                }
+                
             } catch (e) {
                 console.error('Error loading data:', e);
             }
+        }
+        
+        function initImpactChart() {
+            const ctx = document.getElementById('impactChart').getContext('2d');
+            
+            const dates = {};
+            customerData.forEach(d => {
+                const date = d.datetime.split(' ')[0];
+                if (!dates[date]) dates[date] = 0;
+                dates[date] += d.total_customers_affected;
+            });
+            
+            impactChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: Object.keys(dates).sort(),
+                    datasets: [{
+                        label: 'Clients affectés',
+                        data: Object.values(dates),
+                        backgroundColor: '#cb181d'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'Nombre de clients'
+                            }
+                        }
+                    }
+                }
+            });
+            
+            const totalCustomers = customerData.reduce((sum, d) => sum + d.total_customers_affected, 0);
+            document.getElementById('sidebarInfo').innerHTML = 
+                '<p><strong>Total cumulé:</strong> ' + totalCustomers.toLocaleString() + ' clients</p>' +
+                '<p><strong>Période:</strong> ' + Object.keys(dates).sort()[0] + ' à ' + 
+                Object.keys(dates).sort()[Object.keys(dates).length-1] + '</p>';
         }
         
         function filterDataByDateTime(date, hour) {
@@ -429,7 +594,7 @@ html_parts[[2]] <- "
                 type: 'FeatureCollection',
                 features: allData.total.features.filter(f => {
                     if (!f.properties.datetimes_affected) return false;
-                    const datetimes = f.properties.datetimes_affected.split(',');
+                    const datetimes = f.properties.datetimes_affected.split(',').map(s => s.trim());
                     return datetimes.some(dt => {
                         if (hour === 'all') {
                             return dt.startsWith(date);
@@ -439,7 +604,7 @@ html_parts[[2]] <- "
                         }
                     });
                 }).map(f => {
-                    const datetimes = f.properties.datetimes_affected.split(',');
+                    const datetimes = f.properties.datetimes_affected.split(',').map(s => s.trim());
                     let matchingCount = 0;
                     datetimes.forEach(dt => {
                         if (hour === 'all' && dt.startsWith(date)) {
@@ -473,13 +638,14 @@ html_parts[[2]] <- "
             if (currentLayer) map.removeLayer(currentLayer);
             
             const isFiltered = date !== 'all';
+            const useFixedColor = isFiltered;
             
             currentLayer = L.geoJSON(data, {
                 style: f => ({
-                    fillColor: getColor(isFiltered ? f.properties.filtered_hours_count : f.properties.hours_count),
+                    fillColor: useFixedColor ? '#a50f15' : getColor(f.properties.hours_count),
                     weight: 0.5,
                     color: '#fff',
-                    fillOpacity: 0.75
+                    fillOpacity: useFixedColor ? 0.8 : 0.75
                 }),
                 onEachFeature: (f, layer) => {
                     const props = f.properties;
@@ -490,7 +656,7 @@ html_parts[[2]] <- "
                                '<b>Nombre de jours impactés:</b> ' + props.days_affected + '<br>' +
                                '<b>Coordonnées du centroïde:</b><br>' +
                                'Lat: ' + props.centroid_lat.toFixed(6) + ', Lon: ' + props.centroid_lon.toFixed(6) + '<br>' +
-                               '<a class=\"detail-link\" onclick=\"showDetails(' + props.hex_id + ')\">Voir toutes les heures et jours impactés</a>';
+                               '<a class=\"detail-link\" onclick=\"showDetails(' + props.hex_id + ')\">Voir les détails complets</a>';
                     
                     layer.bindPopup(popup);
                 }
@@ -502,40 +668,47 @@ html_parts[[2]] <- "
             if (!feature) return;
             
             const props = feature.properties;
-            const datetimes = props.datetimes_affected.split(',').sort();
+            const datetimes = props.datetimes_affected.split(',').map(s => s.trim()).sort();
             
             const byDate = {};
             datetimes.forEach(dt => {
                 const [date, time] = dt.split(' ');
                 if (!byDate[date]) byDate[date] = [];
-                byDate[date].push(time);
+                const hour = parseInt(time.split(':')[0]);
+                byDate[date].push(hour);
             });
             
             let html = '<h3>Hexagone #' + hexId + '</h3>';
-            html += '<p><b>Total heures impactées:</b> ' + props.hours_count + '</p>';
-            html += '<p><b>Total jours impactés:</b> ' + props.days_affected + '</p>';
-            html += '<p><b>Centroïde:</b> ' + props.centroid_lat.toFixed(6) + ', ' + props.centroid_lon.toFixed(6) + '</p>';
+            html += '<p><strong>Centroïde:</strong> ' + props.centroid_lat.toFixed(6) + ', ' + props.centroid_lon.toFixed(6) + '</p>';
             html += '<table class=\"detail-table\">';
-            html += '<thead><tr><th>Date</th><th>Heures</th></tr></thead><tbody>';
+            html += '<thead><tr><th>Date</th><th>Première heure</th><th>Nombre d\\'heures</th></tr></thead><tbody>';
+            
+            let totalDays = 0;
+            let totalHours = 0;
             
             Object.keys(byDate).sort().forEach(date => {
-                const hours = byDate[date].sort();
-                html += '<tr><td>' + date + '</td><td>' + hours.join(', ') + '</td></tr>';
+                const hours = byDate[date].sort((a, b) => a - b);
+                const firstHour = hours[0];
+                const numHours = hours.length;
+                totalDays++;
+                totalHours += numHours;
+                html += '<tr><td>' + date + '</td><td>' + firstHour + ':00</td><td>' + numHours + '</td></tr>';
             });
             
-            html += '</tbody></table>';
+            html += '</tbody><tfoot><tr><td><strong>Total</strong></td><td>' + totalDays + ' jours</td><td>' + totalHours + ' heures</td></tr></tfoot>';
+            html += '</table>';
             
             document.getElementById('modalContent').innerHTML = html;
             document.getElementById('detailModal').classList.add('active');
             document.getElementById('modalOverlay').classList.add('active');
         }
         
-        function closeModal() {
+        function closeDetailModal() {
             document.getElementById('detailModal').classList.remove('active');
             document.getElementById('modalOverlay').classList.remove('active');
         }
         
-        document.getElementById('modalOverlay').onclick = closeModal;
+        document.getElementById('modalOverlay').onclick = closeDetailModal;
         
         function getColor(d) {
             return d>80?'#67000d':d>60?'#a50f15':d>40?'#cb181d':d>20?'#ef3b2c':
@@ -556,6 +729,23 @@ html_parts[[2]] <- "
             return div;
         };
         legend.addTo(map);
+        
+        var geocoder = L.Control.geocoder({
+            defaultMarkGeocode: false,
+            placeholder: 'Rechercher une adresse...',
+            errorMessage: 'Adresse non trouvée'
+        })
+        .on('markgeocode', function(e) {
+            var bbox = e.geocode.bbox;
+            var poly = L.polygon([
+                bbox.getSouthEast(),
+                bbox.getNorthEast(),
+                bbox.getNorthWest(),
+                bbox.getSouthWest()
+            ]);
+            map.fitBounds(poly.getBounds());
+        })
+        .addTo(map);
 "
 
 html_parts[[3]] <- paste0("
@@ -588,24 +778,50 @@ html_parts[[4]] <- paste0(
 </body>
 </html>")
 
-html <- paste(html_parts, collapse = "")
+  html <- paste(html_parts, collapse = "")
+  writeLines(html, file.path(output_dir, "index.html"))
+  cat("  ✓ HTML file created successfully\n")
+  TRUE
 
-writeLines(html, file.path(output_dir, "index.html"))
+}, error = function(e) {
+  cat("\n❌ HTML GENERATION FAILED:\n")
+  cat(sprintf("  Error: %s\n", e$message))
+  cat("\n⚠️  Creating fallback HTML...\n")
+  
+  fallback_html <- sprintf('<!DOCTYPE html>
+<html><head><title>HQ Outages Data</title></head>
+<body>
+<h1>HQ Outages Data Available</h1>
+<p>Data processing completed. Download files:</p>
+<ul>
+<li><a href="total/total_exposure.geojson">GeoJSON</a></li>
+<li><a href="total/total_stats.csv">CSV</a></li>
+<li><a href="total/summary.json">Summary</a></li>
+</ul>
+</body></html>')
+  
+  writeLines(fallback_html, file.path(output_dir, "index.html"))
+  cat("  ✓ Fallback HTML created\n")
+  FALSE
+})
 
 # =================================================================
 # Done!
 # =================================================================
 elapsed <- as.numeric(difftime(Sys.time(), start_time, units = "mins"))
-cat(sprintf("\n✅ COMPLETE in %.1f minutes\n", elapsed))
-cat("\nOutput structure:\n")
-cat("  public/\n")
-cat("    daily/     - Daily summaries (one per date)\n")
-cat("    monthly/   - Monthly aggregations\n")
-cat("    total/     - Cumulative summary of all data\n")
-cat("    index.html - Interactive map\n")
+cat(sprintf("\n✅ PROCESSING COMPLETE in %.1f minutes\n", elapsed))
 
-# Verify critical files exist
-cat("\nVerifying files...\n")
+cat("\n📊 DATA FILES SAVED:\n")
+cat("  ✓ public/total/total_exposure.geojson\n")
+cat("  ✓ public/total/total_stats.csv\n")
+cat("  ✓ public/total/summary.json\n")
+if (file.exists("public/total/customer_impact.json")) {
+  cat("  ✓ public/total/customer_impact.json\n")
+}
+cat(sprintf("  ✓ public/daily/ - %d files\n", length(all_daily_files)))
+cat(sprintf("  %s public/index.html\n", if(html_generated) "✓" else "⚠"))
+
+cat("\n🔍 Final verification:\n")
 required_files <- c(
   "public/total/total_exposure.geojson",
   "public/total/total_stats.csv",
@@ -620,8 +836,9 @@ for (f in required_files) {
 }
 
 if (!all_exist) {
-  cat("\n❌ ERROR: Some required files were not created!\n")
+  cat("\n❌ ERROR: Some required files missing!\n")
   quit(status = 1)
 }
 
-cat("\n✅ All required files verified\n")
+cat("\n✅ ALL FILES VERIFIED AND READY\n")
+cat("🚀 Ready for deployment!\n")
