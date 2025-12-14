@@ -26,8 +26,19 @@ cat(sprintf("Found %d daily summary files\n", num_days))
 customer_data_js <- "null"
 customer_json_path <- file.path(output_dir, "total", "customer_impact.json")
 if (file.exists(customer_json_path)) {
-  customer_data_js <- paste(readLines(customer_json_path), collapse = "\n")
-  cat("Customer impact data found\n")
+  tryCatch({
+    # Try to read and validate it's actually JSON
+    test_json <- fromJSON(customer_json_path)
+    if (is.list(test_json) || is.data.frame(test_json)) {
+      customer_data_js <- paste(readLines(customer_json_path), collapse = "\n")
+      cat("Customer impact data found and validated\n")
+    } else {
+      cat("Customer impact file exists but is not valid JSON, ignoring\n")
+    }
+  }, error = function(e) {
+    cat("Customer impact file exists but failed validation:", e$message, "\n")
+    cat("Will use null instead\n")
+  })
 } else {
   cat("No customer impact data (optional)\n")
 }
