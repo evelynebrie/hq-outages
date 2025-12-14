@@ -1,0 +1,108 @@
+name: Quick HTML Update (no data reprocessing)
+
+# This workflow ONLY regenerates the HTML from existing data
+# Use for UI/UX fixes that don't require reprocessing polygon files
+# Runtime: ~2-3 minutes instead of 20-30 minutes
+
+on:
+  workflow_dispatch:
+    inputs:
+      description:
+        description: 'What UI changes are you deploying?'
+        required: false
+        default: 'UI improvements'
+
+jobs:
+  quick-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup R
+        uses: r-lib/actions/setup-r@v2
+        with:
+          use-public-rspm: true
+
+      - name: Install R packages (minimal)
+        run: |
+          Rscript -e 'pkgs <- c("jsonlite");
+                      inst <- setdiff(pkgs, rownames(installed.packages()));
+                      if(length(inst)) install.packages(inst, repos="https://cloud.r-project.org")'
+
+      - name: Get fresh Dropbox access token
+        id: dropbox_token
+        run: |
+          set -euo pipefail
+          TOKENS=$(curl -sS -X POST https://api.dropboxapi.com/oauth2/token \
+            -d grant_type=refresh_token \
+            -d refresh_token="${{ secrets.DROPBOX_REFRESH_TOKEN }}" \
+            -u "${{ secrets.DROPBOX_APP_KEY }}:${{ secrets.DROPBOX_APP_SECRET }}")
+
+          ACCESS=$(echo "$TOKENS" | jq -r '.access_token')
+          echo "token=$ACCESS" >> "$GITHUB_OUTPUT"
+
+      # Download ONLY the existing processed data (not raw polygons)
+      - name: Download existing processed data from Dropbox
+        env:
+          DROPBOX_TOKEN: ${{ steps.dropbox_token.outputs.token }}
+        run: |
+          set -euo pipefail
+          
+          echo "📥 Downloading existing processed data from public repo..."
+          
+          mkdir -p public/total public/daily public/monthly
+          
+          # Download from the public GitHub Pages repo instead of Dropbox
+          # This is faster and uses already-processed data
+          
+          base_url="https://raw.githubusercontent.com/evelynebrie/hq-outages-public/gh-pages"
+          
+          echo "Downloading total summary files..."
+          curl -sS -o public/total/total_exposure.geojson "$base_url/total/total_exposure.geojson"
+          curl -sS -o public/total/total_stats.csv "$base_url/total/total_stats.csv"
+          curl -sS -o public/total/summary.json "$base_url/total/summary.json"
+          
+          # Try to download customer impact if it exists
+          curl -sS -o public/total/customer_impact.json "$base_url/total/customer_impact.json" || echo "No customer impact data (optional)"
+          
+          echo "✅ Downloaded existing data"
+          ls -lh public/total/
+
+      - name: Regenerate HTML only
+        run: |
+          echo "🎨 Regenerating HTML with UI fixes..."
+          
+          if [ ! -f "R/generate_html_only.R" ]; then
+            echo "❌ ERROR: R/generate_html_only.R not found!"
+            exit 1
+          fi
+          
+          Rscript R/generate_html_only.R
+          
+          if [ ! -f "public/index.html" ]; then
+            echo "❌ ERROR: HTML generation failed!"
+            exit 1
+          fi
+          
+          echo "✅ HTML generated successfully"
+          ls -lh public/index.html
+
+      - name: Deploy to public repo (gh-pages)
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          personal_token: ${{ secrets.PUBLIC_REPO_TOKEN }}
+          external_repository: evelynebrie/hq-outages-public
+          publish_branch: gh-pages
+          publish_dir: public
+          commit_message: "Quick HTML update: ${{ github.event.inputs.description }}"
+          
+      - name: Summary
+        run: |
+          echo "✅ Quick deployment complete!"
+          echo ""
+          echo "🌐 View at: https://evelynebrie.github.io/hq-outages-public/"
+          echo ""
+          echo "⏱️  Total time: ~2-3 minutes (vs 20-30 for full reprocessing)"
+          echo ""
+          echo "📝 Changes deployed: ${{ github.event.inputs.description }}"
