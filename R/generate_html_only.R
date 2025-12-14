@@ -26,7 +26,7 @@ cat(sprintf("Found %d daily summary files\n", num_days))
 customer_data_js <- "null"
 customer_json_path <- file.path(output_dir, "total", "customer_impact.json")
 if (file.exists(customer_json_path)) {
-  customer_data_js <- readLines(customer_json_path) %>% paste(collapse = "\n")
+  customer_data_js <- paste(readLines(customer_json_path), collapse = "\n")
   cat("Customer impact data found\n")
 } else {
   cat("No customer impact data (optional)\n")
