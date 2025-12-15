@@ -30,44 +30,27 @@ jobs:
                       inst <- setdiff(pkgs, rownames(installed.packages()));
                       if(length(inst)) install.packages(inst, repos="https://cloud.r-project.org")'
 
-      - name: Get fresh Dropbox access token
-        id: dropbox_token
-        run: |
-          set -euo pipefail
-          TOKENS=$(curl -sS -X POST https://api.dropboxapi.com/oauth2/token \
-            -d grant_type=refresh_token \
-            -d refresh_token="${{ secrets.DROPBOX_REFRESH_TOKEN }}" \
-            -u "${{ secrets.DROPBOX_APP_KEY }}:${{ secrets.DROPBOX_APP_SECRET }}")
-
-          ACCESS=$(echo "$TOKENS" | jq -r '.access_token')
-          echo "token=$ACCESS" >> "$GITHUB_OUTPUT"
-
       # Download ONLY the existing processed data (not raw polygons)
-      - name: Download existing processed data from Dropbox
-        env:
-          DROPBOX_TOKEN: ${{ steps.dropbox_token.outputs.token }}
+      - name: Download existing processed data
         run: |
           set -euo pipefail
           
-          echo "📥 Downloading existing processed data from public repo..."
+          echo "📥 Downloading ALL existing files from gh-pages..."
           
           mkdir -p public/total public/daily public/monthly
           
-          # Download from the public GitHub Pages repo instead of Dropbox
-          # This is faster and uses already-processed data
+          # Clone the gh-pages branch to get ALL existing files
+          git clone --depth 1 --branch gh-pages \
+            https://github.com/evelynebrie/hq-outages-public.git temp-public
           
-          base_url="https://raw.githubusercontent.com/evelynebrie/hq-outages-public/gh-pages"
+          # Copy all files except .git
+          rsync -av --exclude='.git' temp-public/ public/
+          rm -rf temp-public
           
-          echo "Downloading total summary files..."
-          curl -sS -o public/total/total_exposure.geojson "$base_url/total/total_exposure.geojson"
-          curl -sS -o public/total/total_stats.csv "$base_url/total/total_stats.csv"
-          curl -sS -o public/total/summary.json "$base_url/total/summary.json"
-          
-          # Try to download customer impact if it exists
-          curl -sS -o public/total/customer_impact.json "$base_url/total/customer_impact.json" || echo "No customer impact data (optional)"
-          
-          echo "✅ Downloaded existing data"
-          ls -lh public/total/
+          echo "✅ Downloaded all existing files"
+          echo "Contents:"
+          ls -lh public/
+          ls -lh public/total/ || echo "No total/ directory"
 
       - name: Regenerate HTML only
         run: |
