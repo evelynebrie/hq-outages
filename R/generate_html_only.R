@@ -344,17 +344,24 @@ html_parts[[2]] <- "
                 return;
             }
             
-            const byDate = {};
+            // Count frequency of each datetime (represents duration)
+            const datetimeCount = {};
             datetimes.forEach(dt => {
+                datetimeCount[dt] = (datetimeCount[dt] || 0) + 1;
+            });
+            
+            const byDate = {};
+            Object.keys(datetimeCount).forEach(dt => {
                 const parts = dt.split(' ');
                 if (parts.length !== 2) return;
                 const date = parts[0];
                 const time = parts[1];
                 if (!byDate[date]) byDate[date] = [];
-                const hourMatch = time.match(/^(\\d{1,2}):/);
+                const hourMatch = time.match(/^(\d{1,2}):/);
                 if (hourMatch) {
                     const hour = parseInt(hourMatch[1]);
-                    byDate[date].push(hour);
+                    const count = datetimeCount[dt];
+                    byDate[date].push({hour: hour, count: count});
                 }
             });
             
@@ -362,20 +369,32 @@ html_parts[[2]] <- "
             html += '<p><strong>Centroïde:</strong> ' + props.centroid_lat.toFixed(6) + ', ' + props.centroid_lon.toFixed(6) + '</p>';
             html += '<h4>Heures affectées par date:</h4>';
             html += '<table class=\"detail-table\">';
-            html += '<thead><tr><th>Date</th><th>Heures</th></tr></thead><tbody>';
+            html += '<thead><tr><th>Date</th><th>Heures (durée estimée)</th></tr></thead><tbody>';
             
             const sortedDates = Object.keys(byDate).sort();
+            let totalOccurrences = 0;
+            
             sortedDates.forEach(date => {
-                const hours = byDate[date].sort((a, b) => a - b);
-                const hourList = hours.map(h => h + ':00').join(', ');
+                const hourData = byDate[date].sort((a, b) => a.hour - b.hour);
+                const hourList = hourData.map(h => {
+                    totalOccurrences += h.count;
+                    if (h.count > 1) {
+                        return h.hour + ':00 (×' + h.count + ')';
+                    } else {
+                        return h.hour + ':00';
+                    }
+                }).join(', ');
                 html += '<tr><td>' + date + '</td><td>' + hourList + '</td></tr>';
             });
             
             const totalDays = sortedDates.length;
-            const totalHours = Object.values(byDate).reduce((sum, arr) => sum + arr.length, 0);
+            const uniqueHours = Object.keys(datetimeCount).length;
             
-            html += '</tbody><tfoot><tr><td><strong>Total</strong></td><td><strong>' + totalDays + ' jours, ' + totalHours + ' heures</strong></td></tr></tfoot>';
+            html += '</tbody><tfoot><tr><td><strong>Total</strong></td><td><strong>' + 
+                    totalDays + ' jours, ' + uniqueHours + ' heures uniques (' + 
+                    totalOccurrences + ' occurrences)</strong></td></tr></tfoot>';
             html += '</table>';
+            html += '<p style=\"font-size:11px;color:#666;margin-top:10px;\"><em>×N = Cette heure apparaît N fois dans les données (durée estimée)</em></p>';
             
             document.getElementById('modalContent').innerHTML = html;
             document.getElementById('detailModal').classList.add('active');
