@@ -357,7 +357,7 @@ html_parts[[2]] <- "
                 const date = parts[0];
                 const time = parts[1];
                 if (!byDate[date]) byDate[date] = [];
-                const hourMatch = time.match(/^(\d{1,2}):/);
+                const hourMatch = time.match(/^(\\d{1,2}):/);
                 if (hourMatch) {
                     const hour = parseInt(hourMatch[1]);
                     const count = datetimeCount[dt];
