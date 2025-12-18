@@ -336,6 +336,8 @@ if (length(customer_files) > 0) {
   cat(sprintf("  Found %d customer impact files\n", length(customer_files)))
   
   customer_data_list <- list()
+  files_processed <- 0
+  files_failed <- 0
   
   for (cf in customer_files) {
     tryCatch({
@@ -351,15 +353,31 @@ if (length(customer_files) > 0) {
         df <- read.csv(cf, stringsAsFactors = FALSE)
         if ("customers_sum" %in% names(df)) {
           total_customers <- sum(df$customers_sum, na.rm = TRUE)
-          customer_data_list[[length(customer_data_list) + 1]] <- data.frame(
-            datetime = datetime_str,
-            total_customers_affected = total_customers,
-            stringsAsFactors = FALSE
-          )
+          if (total_customers > 0) {
+            customer_data_list[[length(customer_data_list) + 1]] <- data.frame(
+              datetime = datetime_str,
+              total_customers_affected = total_customers,
+              stringsAsFactors = FALSE
+            )
+            files_processed <- files_processed + 1
+          }
+        } else {
+          files_failed <- files_failed + 1
+          if (files_failed <= 3) {
+            cat(sprintf("    ⚠️ File missing 'customers_sum' column: %s (columns: %s)\n", 
+                       fname, paste(names(df), collapse=", ")))
+          }
         }
       }
-    }, error = function(e) invisible(NULL))
+    }, error = function(e) {
+      files_failed <- files_failed + 1
+      if (files_failed <= 3) {
+        cat(sprintf("    ❌ Error processing %s: %s\n", basename(cf), e$message))
+      }
+    })
   }
+  
+  cat(sprintf("  Processed: %d files, Failed: %d files\n", files_processed, files_failed))
   
   if (length(customer_data_list) > 0) {
     customer_summary <- bind_rows(customer_data_list) %>%
@@ -367,9 +385,9 @@ if (length(customer_files) > 0) {
     
     customer_json_path <- file.path(output_dir, "total", "customer_impact.json")
     write_json(customer_summary, customer_json_path, pretty = TRUE)
-    cat(sprintf("  Saved: %s (%d records)\n", customer_json_path, nrow(customer_summary)))
+    cat(sprintf("  ✅ Saved: %s (%d records)\n", customer_json_path, nrow(customer_summary)))
   } else {
-    cat("  No valid customer data extracted\n")
+    cat("  ⚠️ No valid customer data extracted (all files had 0 customers or errors)\n")
   }
 } else {
   cat("  No customer impact files found (this is optional)\n")
@@ -390,7 +408,19 @@ html_generated <- tryCatch({
   customer_data_js <- "null"
   customer_json_path <- file.path(output_dir, "total", "customer_impact.json")
   if (file.exists(customer_json_path)) {
-    customer_data_js <- readLines(customer_json_path) %>% paste(collapse = "\n")
+    tryCatch({
+      # Validate it's actually valid JSON before embedding
+      test_json <- fromJSON(customer_json_path)
+      if (is.list(test_json) || is.data.frame(test_json)) {
+        customer_data_js <- readLines(customer_json_path) %>% paste(collapse = "\n")
+        cat("  Customer impact data validated and embedded\n")
+      } else {
+        cat("  Customer impact file exists but is not valid, using null\n")
+      }
+    }, error = function(e) {
+      cat("  Customer impact file validation failed:", e$message, "\n")
+      cat("  Using null instead\n")
+    })
   }
   
   html_parts <- list()
