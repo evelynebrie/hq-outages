@@ -1,8 +1,8 @@
-name: Publish cumulative exposure (from Dropbox)
+name: Publish cumulative exposure (from Dropbox) - INCREMENTAL
 
 on:
   schedule:
-    - cron: "0 5 * * *"
+    - cron: "0 5 * * *"  # Run daily at 5 AM UTC
   workflow_dispatch: {}
 
 jobs:
@@ -25,7 +25,7 @@ jobs:
 
       - name: Install R packages
         run: |
-          Rscript -e 'pkgs <- c("sf","dplyr","fs","purrr","jsonlite");
+          Rscript -e 'pkgs <- c("sf","dplyr","fs","purrr","jsonlite","parallel","data.table");
                       inst <- setdiff(pkgs, rownames(installed.packages()));
                       if(length(inst)) install.packages(inst, repos="https://cloud.r-project.org")'
 
@@ -153,11 +153,28 @@ jobs:
           fi
 
       # ----------------------------------------------------------
-      # Build cumulative hex layer
+      # Restore previous outputs (for incremental updates)
       # ----------------------------------------------------------
-      - name: Build cumulative hex layer
+      - name: Restore previous outputs
+        continue-on-error: true
+        uses: actions/cache/restore@v3
+        with:
+          path: |
+            public/daily
+            public/monthly
+            public/total
+            public/hex_grid_template.rds
+            public/cumulative_snapshots
+          key: hq-outages-cache-${{ github.run_number }}
+          restore-keys: |
+            hq-outages-cache-
+
+      # ----------------------------------------------------------
+      # Build cumulative hex layer (INCREMENTAL)
+      # ----------------------------------------------------------
+      - name: Build cumulative hex layer (incremental)
         run: |
-          echo "=== Starting Hexagonal Grid Analysis ==="
+          echo "=== Starting INCREMENTAL Hexagonal Grid Analysis ==="
           
           # Verify R script exists
           if [ ! -f "R/build_cumulative_hex.R" ]; then
@@ -166,7 +183,7 @@ jobs:
           fi
           
           echo "✓ R script found"
-          echo "Running hierarchical aggregation..."
+          echo "Running incremental aggregation..."
           Rscript R/build_cumulative_hex.R
           
           exit_code=$?
@@ -201,6 +218,27 @@ jobs:
           fi
           
           echo "✅ All required outputs verified successfully"
+          
+          # Show snapshot history
+          if [ -d "public/cumulative_snapshots" ]; then
+            echo ""
+            echo "📸 Cumulative snapshots:"
+            ls -lh public/cumulative_snapshots/ | tail -5
+          fi
+
+      # ----------------------------------------------------------
+      # Save outputs for next run
+      # ----------------------------------------------------------
+      - name: Save outputs for next run
+        uses: actions/cache/save@v3
+        with:
+          path: |
+            public/daily
+            public/monthly
+            public/total
+            public/hex_grid_template.rds
+            public/cumulative_snapshots
+          key: hq-outages-cache-${{ github.run_number }}
 
       # ----------------------------------------------------------
       # Deploy to public repo
