@@ -26,7 +26,7 @@ cumulative_snapshots_dir <- file.path(output_dir, "cumulative_snapshots")
 
 HEX_SIZE <- 1000
 SIMPLIFY <- 200
-N_CORES <- max(1, detectCores() - 1)
+N_CORES <- 1
 
 cat(sprintf(">>> Using %d CPU cores for parallel processing\n", N_CORES))
 
