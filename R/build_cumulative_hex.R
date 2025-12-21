@@ -1,266 +1,757 @@
-name: Publish cumulative exposure (from Dropbox) - INCREMENTAL
+# HQ Outages - MEMORY-EFFICIENT INCREMENTAL v7
+# Only tracks hexagons that actually have outages (not all 466k in memory)
 
-on:
-  schedule:
-    - cron: "0 5 * * *"  # Run daily at 5 AM UTC
-  workflow_dispatch: {}
+suppressPackageStartupMessages({
+  library(sf)
+  library(dplyr)
+  library(jsonlite)
+  library(data.table)
+})
 
-jobs:
-  build:
-    runs-on: ubuntu-latest
+cat("=== HQ Outages MEMORY-EFFICIENT Incremental System v7 ===\n")
+cat("Optimizations:\n")
+cat("  • Only stores hexagons with actual outages\n")
+cat("  • Maintains consistent hex_id grid for alignment\n")
+cat("  • Much faster processing per date\n")
+cat(sprintf("\nStarting at: %s\n", format(Sys.time(), "%Y-%m-%d %H:%M:%S")))
+start_time <- Sys.time()
 
-    steps:
-      - uses: actions/checkout@v4
+# Config
+data_path <- "data/daily"
+output_dir <- "public"
+cumulative_snapshots_dir <- file.path(output_dir, "cumulative_snapshots")
 
-      - name: Setup R
-        uses: r-lib/actions/setup-r@v2
-        with:
-          use-public-rspm: true
+HEX_SIZE <- 1000
+SIMPLIFY <- 200
 
-      - name: System libs for sf/gdal
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libgdal-dev libgeos-dev libproj-dev libudunits2-dev jq curl
+dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
+dir.create(file.path(output_dir, "daily"), recursive = TRUE, showWarnings = FALSE)
+dir.create(file.path(output_dir, "monthly"), recursive = TRUE, showWarnings = FALSE)
+dir.create(file.path(output_dir, "total"), recursive = TRUE, showWarnings = FALSE)
+dir.create(cumulative_snapshots_dir, recursive = TRUE, showWarnings = FALSE)
 
-      - name: Cache R packages
-        uses: actions/cache@v3
-        with:
-          path: ${{ env.R_LIBS_USER }}
-          key: ${{ runner.os }}-r-${{ hashFiles('**/DESCRIPTION') }}-v2
-          restore-keys: |
-            ${{ runner.os }}-r-
+# =================================================================
+# STEP 1: Identify NEW files to process
+# =================================================================
+cat("\n[1] Identifying NEW dates to process...\n")
 
-      - name: Install R packages
-        run: |
-          Rscript -e 'pkgs <- c("sf","dplyr","fs","purrr","jsonlite","parallel","data.table");
-                      inst <- setdiff(pkgs, rownames(installed.packages()));
-                      if(length(inst)) {
-                        cat("Installing", length(inst), "packages:", paste(inst, collapse=", "), "\n");
-                        install.packages(inst, repos="https://cloud.r-project.org", Ncpus=2)
-                      } else {
-                        cat("All packages already installed (from cache)\n")
-                      }'
+files <- list.files(data_path, pattern = "^polygons_.*\\.geojson$", full.names = TRUE)
+if (length(files) == 0) stop("No polygon files found")
 
-      # ----------------------------------------------------------
-      # Get fresh Dropbox access token
-      # ----------------------------------------------------------
-      - name: Get fresh Dropbox access token
-        id: dropbox_token
-        run: |
-          set -euo pipefail
-          TOKENS=$(curl -sS -X POST https://api.dropboxapi.com/oauth2/token \
-            -d grant_type=refresh_token \
-            -d refresh_token="${{ secrets.DROPBOX_REFRESH_TOKEN }}" \
-            -u "${{ secrets.DROPBOX_APP_KEY }}:${{ secrets.DROPBOX_APP_SECRET }}")
+cat("  Parsing timestamps...\n")
+basenames <- basename(files)
+timestamps <- regmatches(basenames, regexpr("\\d{8}t\\d{6}", basenames, ignore.case = TRUE))
 
-          ACCESS=$(echo "$TOKENS" | jq -r '.access_token')
-          echo "token=$ACCESS" >> "$GITHUB_OUTPUT"
+date_parts <- substr(timestamps, 1, 8)
+dates <- sprintf("%s-%s-%s", 
+                substr(date_parts, 1, 4), 
+                substr(date_parts, 5, 6), 
+                substr(date_parts, 7, 8))
 
-      # ----------------------------------------------------------
-      # Download ALL polygon snapshots from Dropbox
-      # ----------------------------------------------------------
-      - name: Download GeoJSON snapshots from Dropbox
-        env:
-          DROPBOX_TOKEN: ${{ steps.dropbox_token.outputs.token }}
-        run: |
-          set -eo pipefail
+hours <- as.integer(substr(timestamps, 10, 11))
+minutes <- substr(timestamps, 12, 13)
+seconds <- substr(timestamps, 14, 15)
 
-          mkdir -p data/daily
+datetimes <- sprintf("%s %s:%s:%s", dates, 
+                    substr(timestamps, 10, 11), minutes, seconds)
 
-          extract_paths () {
-            jq -r '
-              .entries? // [] |
-              map(select(.[".tag"] == "file")) |
-              map(select(.name | test("^(polygons_.*\\.geojson|outages_joined_.*\\.csv)$"; "i"))) |
-              .[].path_lower // empty
-            '
+files_dt <- data.table(
+  file = files,
+  date = dates,
+  hour = hours,
+  datetime = datetimes,
+  timestamp_sort = as.numeric(as.POSIXct(datetimes, format="%Y-%m-%d %H:%M:%S"))
+)
+
+cat(sprintf("  Found %d total files\n", nrow(files_dt)))
+
+# Select latest file per hour
+setkey(files_dt, date, hour, timestamp_sort)
+files_dt <- files_dt[, .SD[.N], by = .(date, hour)]
+setorder(files_dt, date, hour)
+
+existing_dailies <- list.files(
+  file.path(output_dir, "daily"), 
+  pattern = "^daily_.*\\.geojson$"
+)
+existing_dates <- sub("daily_(.*)\\.geojson", "\\1", existing_dailies)
+
+dates_to_process <- setdiff(unique(files_dt$date), existing_dates)
+
+all_dates <- unique(files_dt$date)
+cat(sprintf("  Total unique dates in source: %d\n", length(all_dates)))
+cat(sprintf("  Already processed (daily summaries exist): %d\n", length(existing_dates)))
+cat(sprintf("  NEW dates to process: %d\n", length(dates_to_process)))
+
+if (length(existing_dates) > 0) {
+  cat(sprintf("  ✓ Found existing daily summaries - will reuse them!\n"))
+}
+
+if (length(dates_to_process) > 0) {
+  if (length(dates_to_process) <= 10) {
+    cat(sprintf("  New dates: %s\n", paste(dates_to_process, collapse=", ")))
+  } else {
+    cat(sprintf("  New dates: %s ... %s (%d total)\n", 
+                paste(head(dates_to_process, 3), collapse=", "),
+                paste(tail(dates_to_process, 3), collapse=", "),
+                length(dates_to_process)))
+  }
+  
+  est_time_sec <- length(dates_to_process) * 30  # ~30 sec per date with new method
+  if (est_time_sec > 120) {
+    cat(sprintf("  ⏱ Estimated processing time: ~%.1f minutes\n", est_time_sec / 60))
+  } else {
+    cat(sprintf("  ⏱ Estimated processing time: ~%d seconds\n", est_time_sec))
+  }
+}
+
+# =================================================================
+# STEP 2: Process ONLY NEW dates (MEMORY-EFFICIENT)
+# =================================================================
+if (length(dates_to_process) > 0) {
+  cat("\n[2] Processing NEW daily summaries (memory-efficient)...\n")
+  
+  # Load or create hex grid REFERENCE (for consistent hex_ids)
+  hex_grid_path <- file.path(output_dir, "hex_grid_template.rds")
+  
+  if (file.exists(hex_grid_path)) {
+    cat("  Loading hex grid reference...\n")
+    hex_grid_reference <- readRDS(hex_grid_path)
+  } else {
+    cat("  Creating hex grid reference (first run)...\n")
+    first_file <- files_dt$file[1]
+    first_data <- st_read(first_file, quiet = TRUE) %>% st_transform(32618)
+    bbox <- st_bbox(first_data)
+    bbox["xmin"] <- bbox["xmin"] - 50000
+    bbox["xmax"] <- bbox["xmax"] + 50000
+    bbox["ymin"] <- bbox["ymin"] - 50000
+    bbox["ymax"] <- bbox["ymax"] + 50000
+    class(bbox) <- "bbox"
+    attr(bbox, "crs") <- st_crs(32618)
+    
+    hex_grid_reference <- st_make_grid(
+      st_as_sfc(bbox), 
+      cellsize = HEX_SIZE, 
+      square = FALSE
+    ) %>%
+      st_sf() %>%
+      mutate(hex_id = row_number())
+    
+    hex_centroids <- st_centroid(hex_grid_reference) %>%
+      st_transform(4326) %>%
+      st_coordinates() %>%
+      as.data.frame() %>%
+      rename(centroid_lon = X, centroid_lat = Y)
+    
+    hex_grid_reference$centroid_lon <- hex_centroids$centroid_lon
+    hex_grid_reference$centroid_lat <- hex_centroids$centroid_lat
+    
+    saveRDS(hex_grid_reference, hex_grid_path)
+    cat(sprintf("  Reference grid saved: %d total hexagons\n", nrow(hex_grid_reference)))
+  }
+  
+  cat(sprintf("  Reference grid: %d hexagons (only affected ones will be stored)\n", 
+              nrow(hex_grid_reference)))
+  
+  # Process dates sequentially with SPARSE storage
+  for (date in dates_to_process) {
+    cat(sprintf("  Processing %s...\n", date))
+    date_start <- Sys.time()
+    
+    date_files_info <- files_dt[files_dt$date == date, ]
+    
+    # MEMORY-EFFICIENT: Use a sparse structure (only affected hexagons)
+    affected_hexes <- list()  # hex_id -> list(count, datetimes)
+    
+    for (i in seq_len(nrow(date_files_info))) {
+      f <- date_files_info$file[i]
+      datetime_val <- date_files_info$datetime[i]
+      
+      tryCatch({
+        polys <- st_read(f, quiet = TRUE) %>%
+          st_transform(32618) %>%
+          st_simplify(dTolerance = SIMPLIFY, preserveTopology = FALSE)
+        
+        if (nrow(polys) > 1) polys <- st_union(polys)
+        
+        # Find which hexagons are hit (only check against reference grid)
+        hits <- st_intersects(hex_grid_reference, polys, sparse = TRUE)
+        affected_ids <- which(lengths(hits) > 0)
+        
+        # Store ONLY the affected hexagons
+        for (hex_id in affected_ids) {
+          if (is.null(affected_hexes[[as.character(hex_id)]])) {
+            affected_hexes[[as.character(hex_id)]] <- list(
+              count = 1,
+              datetimes = datetime_val
+            )
+          } else {
+            affected_hexes[[as.character(hex_id)]]$count <- 
+              affected_hexes[[as.character(hex_id)]]$count + 1
+            affected_hexes[[as.character(hex_id)]]$datetimes <- 
+              c(affected_hexes[[as.character(hex_id)]]$datetimes, datetime_val)
           }
+        }
+        
+        rm(polys, hits)
+      }, error = function(e) invisible(NULL))
+    }
+    
+    # Convert sparse structure to sf object
+    if (length(affected_hexes) > 0) {
+      hex_ids <- as.integer(names(affected_hexes))
+      
+      result_data <- data.frame(
+        hex_id = hex_ids,
+        count = sapply(affected_hexes, function(x) x$count),
+        datetimes_affected = sapply(affected_hexes, function(x) paste(sort(x$datetimes), collapse = ",")),
+        stringsAsFactors = FALSE
+      )
+      
+      # Join with reference grid to get geometry and centroids
+      result_sf <- hex_grid_reference %>%
+        filter(hex_id %in% hex_ids) %>%
+        left_join(result_data, by = "hex_id") %>%
+        mutate(
+          date = date,
+          n_files = nrow(date_files_info)
+        ) %>%
+        st_transform(4326)
+      
+      result_sf <- st_make_valid(result_sf)
+      
+      daily_path <- file.path(output_dir, "daily", sprintf("daily_%s.geojson", date))
+      st_write(result_sf, daily_path, delete_dsn = TRUE, quiet = TRUE)
+      
+      date_elapsed <- as.numeric(difftime(Sys.time(), date_start, units = "secs"))
+      cat(sprintf("    → %d hexes affected (avg %.1f hours) in %.1f sec\n", 
+                  nrow(result_sf), mean(result_sf$count), date_elapsed))
+    } else {
+      cat("    → No hexes affected\n")
+    }
+    
+    gc()
+  }
+  
+  cat("  ✓ New daily summaries created\n")
+} else {
+  cat("\n[2] No new dates to process - all daily summaries up to date!\n")
+}
 
-          echo "📂 Listing Dropbox folder recursively..."
+# =================================================================
+# STEP 3: Update monthly summaries (INCREMENTAL)
+# =================================================================
+cat("\n[3] Updating monthly summaries (incremental)...\n")
 
-          resp=$(curl -sS -X POST https://api.dropboxapi.com/2/files/list_folder \
-            --header "Authorization: Bearer $DROPBOX_TOKEN" \
-            --header "Content-Type: application/json" \
-            --data '{"path": "", "recursive": true}')
+all_daily_files <- list.files(
+  file.path(output_dir, "daily"),
+  pattern = "^daily_.*\\.geojson$",
+  full.names = TRUE
+)
 
-          if echo "$resp" | jq -e '.error_summary?'; then
-            echo "❌ Dropbox error on list_folder"
-            exit 1
-          fi
+if (length(all_daily_files) > 0) {
+  daily_months <- unique(sub(".*daily_(\\d{4}-\\d{2})-\\d{2}\\.geojson", "\\1", all_daily_files))
+  
+  months_to_update <- if (length(dates_to_process) > 0) {
+    unique(substr(dates_to_process, 1, 7))
+  } else {
+    character(0)
+  }
+  
+  if (length(months_to_update) > 0) {
+    cat(sprintf("  Updating %d months with new data: %s\n", 
+                length(months_to_update), paste(months_to_update, collapse=", ")))
+    
+    for (month in months_to_update) {
+      month_files <- all_daily_files[grepl(month, all_daily_files)]
+      month_data <- lapply(month_files, function(f) st_read(f, quiet = TRUE))
+      
+      combined_dt <- rbindlist(lapply(month_data, function(x) {
+        data.table(
+          hex_id = x$hex_id,
+          geometry = st_as_text(x$geometry),
+          centroid_lon = x$centroid_lon,
+          centroid_lat = x$centroid_lat,
+          count = x$count,
+          n_files = x$n_files,
+          datetimes_affected = x$datetimes_affected
+        )
+      }))
+      
+      combined_summary <- combined_dt[, .(
+        geometry = first(geometry),
+        centroid_lon = first(centroid_lon),
+        centroid_lat = first(centroid_lat),
+        count = sum(count),
+        n_files = sum(n_files),
+        datetimes_affected = paste(unlist(strsplit(paste(datetimes_affected, collapse = ","), ",")), collapse = ",")
+      ), by = hex_id]
+      
+      combined <- st_as_sf(combined_summary, wkt = "geometry", crs = 4326)
+      combined <- st_make_valid(combined)
+      
+      monthly_path <- file.path(output_dir, "monthly", sprintf("monthly_%s.geojson", month))
+      st_write(combined, monthly_path, delete_dsn = TRUE, quiet = TRUE)
+      cat(sprintf("  ✓ %s: %d hexes\n", month, nrow(combined)))
+    }
+  } else {
+    cat("  All monthly summaries up to date!\n")
+  }
+}
 
-          extract_paths <<< "$resp" > /tmp/polygon_paths.txt
-          
-          echo "📋 Found $(wc -l < /tmp/polygon_paths.txt) polygon and customer impact files"
-          
-          cursor=$(jq -r '.cursor // empty' <<< "$resp")
-          has_more=$(jq -r '.has_more // false' <<< "$resp")
+# =================================================================
+# STEP 4: Update TOTAL cumulative (INCREMENTAL with versioning)
+# =================================================================
+cat("\n[4] Updating total cumulative summary (incremental)...\n")
 
-          while [ "$has_more" = "true" ]; do
-            resp=$(curl -sS -X POST https://api.dropboxapi.com/2/files/list_folder/continue \
-              --header "Authorization: Bearer $DROPBOX_TOKEN" \
-              --header "Content-Type: application/json" \
-              --data "{\"cursor\":\"$cursor\"}")
+current_date <- format(Sys.time(), "%Y-%m-%d")
+snapshot_path <- file.path(cumulative_snapshots_dir, sprintf("cumulative_%s.geojson", current_date))
 
-            if echo "$resp" | jq -e '.error_summary?'; then
-              echo "❌ Dropbox pagination error"
-              exit 1
-            fi
+need_update <- length(dates_to_process) > 0
 
-            extract_paths <<< "$resp" >> /tmp/polygon_paths.txt
-            cursor=$(jq -r '.cursor // empty' <<< "$resp")
-            has_more=$(jq -r '.has_more // false' <<< "$resp")
-          done
+if (need_update) {
+  cat("  New data detected - updating cumulative total...\n")
+  
+  previous_cumulative_path <- file.path(output_dir, "total", "total_exposure.geojson")
+  
+  if (file.exists(previous_cumulative_path)) {
+    cat("  Loading previous cumulative data...\n")
+    previous_data <- st_read(previous_cumulative_path, quiet = TRUE)
+    
+    previous_dt <- data.table(
+      hex_id = previous_data$hex_id,
+      geometry = st_as_text(previous_data$geometry),
+      centroid_lon = previous_data$centroid_lon,
+      centroid_lat = previous_data$centroid_lat,
+      hours_count = previous_data$hours_count,
+      n_files = previous_data$n_files,
+      datetimes_affected = previous_data$datetimes_affected
+    )
+    
+    new_daily_paths <- file.path(output_dir, "daily", sprintf("daily_%s.geojson", dates_to_process))
+    new_daily_data <- lapply(new_daily_paths, function(f) st_read(f, quiet = TRUE))
+    
+    new_dt <- rbindlist(lapply(new_daily_data, function(x) {
+      data.table(
+        hex_id = x$hex_id,
+        geometry = st_as_text(x$geometry),
+        centroid_lon = x$centroid_lon,
+        centroid_lat = x$centroid_lat,
+        count = x$count,
+        n_files = x$n_files,
+        datetimes_affected = x$datetimes_affected
+      )
+    }))
+    
+    cat("  Merging previous cumulative with new data...\n")
+    combined_dt <- rbind(
+      previous_dt[, .(hex_id, geometry, centroid_lon, centroid_lat, 
+                     count = hours_count, n_files, datetimes_affected)],
+      new_dt,
+      fill = TRUE
+    )
+    
+  } else {
+    cat("  No previous cumulative - creating from scratch...\n")
+    all_daily_data <- lapply(all_daily_files, function(f) st_read(f, quiet = TRUE))
+    
+    combined_dt <- rbindlist(lapply(all_daily_data, function(x) {
+      data.table(
+        hex_id = x$hex_id,
+        geometry = st_as_text(x$geometry),
+        centroid_lon = x$centroid_lon,
+        centroid_lat = x$centroid_lat,
+        count = x$count,
+        n_files = x$n_files,
+        datetimes_affected = x$datetimes_affected
+      )
+    }))
+  }
+  
+  # Aggregate
+  total_summary <- combined_dt[, .(
+    geometry = first(na.omit(geometry)),
+    centroid_lon = first(centroid_lon),
+    centroid_lat = first(centroid_lat),
+    hours_count = sum(count),
+    n_files = sum(n_files),
+    datetimes_affected = paste(unlist(strsplit(paste(datetimes_affected, collapse = ","), ",")), collapse = ",")
+  ), by = hex_id]
+  
+  # Calculate days affected
+  total_summary[, days_affected := sapply(strsplit(datetimes_affected, ","), function(dts) {
+    length(unique(sapply(strsplit(dts, " "), `[`, 1)))
+  })]
+  
+  # Convert to sf
+  total_combined <- st_as_sf(total_summary, wkt = "geometry", crs = 4326)
+  total_combined <- st_make_valid(total_combined)
+  
+  st_write(total_combined, previous_cumulative_path, delete_dsn = TRUE, quiet = TRUE)
+  cat(sprintf("  ✓ Updated cumulative: %d hexes affected\n", nrow(total_combined)))
+  
+  st_write(total_combined, snapshot_path, delete_dsn = TRUE, quiet = TRUE)
+  cat(sprintf("  ✓ Snapshot saved: %s\n", basename(snapshot_path)))
+  
+  # Create CSV statistics
+  stats_csv <- as.data.frame(total_summary[, .(hex_id, centroid_lat, centroid_lon, 
+                                               hours_count, days_affected, datetimes_affected)])
+  
+  stats_path <- file.path(output_dir, "total", "total_stats.csv")
+  fwrite(stats_csv, stats_path)
+  cat("  ✓ Stats CSV updated\n")
+  
+  # Create summary JSON
+  summary_data <- list(
+    generated_at = format(Sys.time(), "%Y-%m-%d %H:%M:%S %Z"),
+    last_update_date = current_date,
+    new_dates_added = length(dates_to_process),
+    total_hexes_affected = nrow(total_combined),
+    total_hours_scraped = sum(total_combined$hours_count),
+    date_range = list(
+      first = min(files_dt$date),
+      last = max(files_dt$date)
+    ),
+    hex_size_meters = HEX_SIZE,
+    optimization_info = list(
+      processing_mode = "memory-efficient incremental",
+      snapshot_date = current_date
+    ),
+    stats = list(
+      mean_hours = mean(total_combined$hours_count),
+      median_hours = median(total_combined$hours_count),
+      max_hours = max(total_combined$hours_count),
+      mean_days = mean(total_combined$days_affected),
+      median_days = median(total_combined$days_affected),
+      max_days = max(total_combined$days_affected)
+    )
+  )
+  
+  summary_path <- file.path(output_dir, "total", "summary.json")
+  writeLines(jsonlite::toJSON(summary_data, auto_unbox = TRUE, pretty = TRUE), summary_path)
+  cat("  ✓ Summary JSON updated\n")
+  
+  num_days <- length(unique(files_dt$date))
+  hex_size_km <- round(HEX_SIZE / 1000, 1)
+  
+} else {
+  cat("  No new data - cumulative total is up to date!\n")
+  
+  previous_cumulative_path <- file.path(output_dir, "total", "total_exposure.geojson")
+  if (file.exists(previous_cumulative_path)) {
+    total_combined <- st_read(previous_cumulative_path, quiet = TRUE)
+    num_days <- length(unique(files_dt$date))
+    hex_size_km <- round(HEX_SIZE / 1000, 1)
+  }
+}
 
-          echo "⬇️ Downloading files..."
+# =================================================================
+# STEP 5: Generate/Update HTML (unchanged)
+# =================================================================
+cat("\n[5] Updating HTML map...\n")
 
-          if [ ! -s /tmp/polygon_paths.txt ]; then
-            echo "⚠️ No polygon files found matching pattern"
-            exit 1
-          fi
+html_generated <- tryCatch({
+  html_parts <- vector("list", 4)
+  
+  html_parts[[1]] <- paste0('<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pannes de courant Hydro-Québec - Analyse cumulative</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.css"/>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.js"></script>
+    <style>
+        body { margin:0; padding:0; font-family: -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
+        #map { position:absolute; top:0; bottom:0; width:100%; }
+        .info { padding:10px; background:white; border-radius:5px; box-shadow:0 0 15px rgba(0,0,0,0.2); max-width:300px; }
+        .info h4 { margin:0 0 10px; font-size:16px; color:#333; }
+        .info p { margin:5px 0; font-size:13px; color:#666; }
+        .legend { line-height:20px; color:#555; background:white; padding:10px; border-radius:5px; box-shadow:0 0 15px rgba(0,0,0,0.2); }
+        .legend i { width:18px; height:18px; float:left; margin-right:8px; opacity:0.8; }
+        .legend h4 { margin:0 0 8px; font-size:14px; }
+        .controls { background:white; padding:15px; border-radius:5px; box-shadow:0 0 15px rgba(0,0,0,0.2); min-width:200px; }
+        .controls h4 { margin:0 0 10px; font-size:14px; color:#333; }
+        .controls label { display:block; margin:8px 0 4px; font-size:12px; color:#666; font-weight:500; }
+        .controls select { width:100%; padding:6px; border:1px solid #ddd; border-radius:4px; font-size:13px; }
+        .detail-link { color:#1e88e5; cursor:pointer; text-decoration:underline; font-size:12px; }
+        .detail-link:hover { color:#1565c0; }
+        .modal-overlay { display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.5); z-index:2000; }
+        .modal-overlay.active { display:block; }
+        .detail-modal { display:none; position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); background:white; padding:25px; border-radius:8px; box-shadow:0 4px 20px rgba(0,0,0,0.3); z-index:2001; max-width:90%; max-height:90%; overflow-y:auto; }
+        .detail-modal.active { display:block; }
+        .detail-modal h3 { margin:0 0 15px; color:#333; }
+        .detail-modal p { margin:10px 0; color:#666; }
+        .detail-table { width:100%; border-collapse:collapse; margin:15px 0; font-size:13px; }
+        .detail-table th, .detail-table td { padding:10px; text-align:left; border-bottom:1px solid #e0e0e0; }
+        .detail-table thead { background:#f5f5f5; }
+        .detail-table th { font-weight:600; color:#555; }
+        .detail-table tfoot { font-weight:600; background:#fafafa; }
+        .close-modal { position:absolute; top:10px; right:15px; font-size:24px; cursor:pointer; color:#999; }
+        .close-modal:hover { color:#333; }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    <div id="modalOverlay" class="modal-overlay"></div>
+    <div id="detailModal" class="detail-modal">
+        <span class="close-modal" onclick="closeDetailModal()">×</span>
+        <div id="modalContent"></div>
+    </div>
+    <script>
+')
 
-          echo "📄 Sample of files to download:"
-          head -n 3 /tmp/polygon_paths.txt
-
-          downloaded=0
-          failed=0
-
-          sort -u /tmp/polygon_paths.txt | while read -r p; do
-            [ -n "$p" ] || continue
-            base=$(basename "$p")
-            echo "Downloading $p -> data/daily/$base"
+  html_parts[[2]] <- "
+        var map = L.map('map').setView([46.8, -71.2], 8);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
+            attribution:'© OpenStreetMap',
+            maxZoom:18
+        }).addTo(map);
+        
+        var allData = { daily: {}, total: null };
+        var currentLayer = null;
+        
+        async function loadAllDailyData() {
+            const totalResp = await fetch('total/total_exposure.geojson');
+            allData.total = await totalResp.json();
             
-            if curl -sS -X POST https://content.dropboxapi.com/2/files/download \
-              --header "Authorization: Bearer $DROPBOX_TOKEN" \
-              --header "Dropbox-API-Arg: {\"path\": \"$p\"}" \
-              --output "data/daily/$base"; then
-              
-              if [ -f "data/daily/$base" ]; then
-                size=$(stat -c%s "data/daily/$base" 2>/dev/null || stat -f%z "data/daily/$base" 2>/dev/null || echo "0")
-                echo "  ✓ Saved: $base (${size} bytes)"
-                downloaded=$((downloaded + 1))
-              else
-                echo "  ✗ Failed: $base"
-                failed=$((failed + 1))
-              fi
-            else
-              echo "  ✗ Download failed: $base"
-              failed=$((failed + 1))
-            fi
-          done
+            const dateSelect = document.getElementById('dateSelect');
+            const dates = [...new Set(allData.total.features.flatMap(f => {
+                return f.properties.datetimes_affected.split(',').map(dt => dt.split(' ')[0]);
+            }))].sort();
+            
+            for (const date of dates) {
+                const opt = document.createElement('option');
+                opt.value = date;
+                opt.textContent = date;
+                dateSelect.appendChild(opt);
+            }
+            
+            for (const date of dates) {
+                try {
+                    const resp = await fetch(`daily/daily_${date}.geojson`);
+                    allData.daily[date] = await resp.json();
+                } catch(e) {
+                    console.warn('Could not load daily data for', date);
+                }
+            }
+        }
+        
+        function filterDataByDateTime(date, hour) {
+            if (date === 'all') return allData.total;
+            
+            const dailyData = allData.daily[date];
+            if (!dailyData) return null;
+            
+            if (hour === 'all') return dailyData;
+            
+            const filtered = JSON.parse(JSON.stringify(dailyData));
+            filtered.features = filtered.features.map(f => {
+                const dts = f.properties.datetimes_affected.split(',');
+                const matchingDts = dts.filter(dt => {
+                    const dtHour = parseInt(dt.split(' ')[1].split(':')[0]);
+                    return dtHour === parseInt(hour);
+                });
+                
+                if (matchingDts.length === 0) return null;
+                
+                f.properties.filtered_hours_count = matchingDts.length;
+                return f;
+            }).filter(f => f !== null);
+            
+            return filtered;
+        }
+        
+        function updateMap() {
+            const date = document.getElementById('dateSelect').value;
+            const hour = document.getElementById('hourSelect').value;
+            
+            const data = filterDataByDateTime(date, hour);
+            if (!data) return;
+            
+            if (currentLayer) map.removeLayer(currentLayer);
+            
+            const isFiltered = date !== 'all';
+            const useFixedColor = isFiltered;
+            
+            currentLayer = L.geoJSON(data, {
+                style: f => ({
+                    fillColor: useFixedColor ? '#a50f15' : getColor(f.properties.hours_count),
+                    weight: 0.5,
+                    color: '#fff',
+                    fillOpacity: useFixedColor ? 0.8 : 0.75
+                }),
+                onEachFeature: (f, layer) => {
+                    const props = f.properties;
+                    const hoursCount = isFiltered ? props.filtered_hours_count : props.hours_count;
+                    
+                    var popup = '<b>Hexagone #' + props.hex_id + '</b><br>' +
+                               '<b>Nombre d\\'heures impactées:</b> ' + hoursCount + '<br>' +
+                               '<b>Nombre de jours impactés:</b> ' + props.days_affected + '<br>' +
+                               '<b>Coordonnées du centroïde:</b><br>' +
+                               'Lat: ' + props.centroid_lat.toFixed(6) + ', Lon: ' + props.centroid_lon.toFixed(6) + '<br>' +
+                               '<a class=\"detail-link\" onclick=\"showDetails(' + props.hex_id + ')\">Voir les détails complets</a>';
+                    
+                    layer.bindPopup(popup);
+                }
+            }).addTo(map);
+        }
+        
+        function showDetails(hexId) {
+            const feature = allData.total.features.find(f => f.properties.hex_id === hexId);
+            if (!feature) return;
+            
+            const props = feature.properties;
+            const datetimes = props.datetimes_affected.split(',').map(s => s.trim()).sort();
+            
+            const byDate = {};
+            datetimes.forEach(dt => {
+                const [date, time] = dt.split(' ');
+                if (!byDate[date]) byDate[date] = [];
+                byDate[date].push(time);
+            });
+            
+            let html = '<h3>Hexagone #' + hexId + '</h3>';
+            html += '<p><strong>Centroïde:</strong> ' + props.centroid_lat.toFixed(6) + ', ' + props.centroid_lon.toFixed(6) + '</p>';
+            html += '<table class=\"detail-table\">';
+            html += '<thead><tr><th>Date</th><th>Heures affectées</th><th>Nombre d\\'heures</th></tr></thead><tbody>';
+            
+            let totalDays = 0;
+            let totalHours = 0;
+            
+            Object.keys(byDate).sort().forEach(date => {
+                const times = byDate[date].sort();
+                const numHours = times.length;
+                const timeList = times.join(', ');
+                totalDays++;
+                totalHours += numHours;
+                html += '<tr><td>' + date + '</td><td>' + timeList + '</td><td>' + numHours + '</td></tr>';
+            });
+            
+            html += '</tbody><tfoot><tr><td><strong>Total</strong></td><td>' + totalDays + ' jours</td><td>' + totalHours + ' heures</td></tr></tfoot>';
+            html += '</table>';
+            
+            document.getElementById('modalContent').innerHTML = html;
+            document.getElementById('detailModal').classList.add('active');
+            document.getElementById('modalOverlay').classList.add('active');
+        }
+        
+        function closeDetailModal() {
+            document.getElementById('detailModal').classList.remove('active');
+            document.getElementById('modalOverlay').classList.remove('active');
+        }
+        
+        document.getElementById('modalOverlay').onclick = closeDetailModal;
+        
+        function getColor(d) {
+            return d>80?'#67000d':d>60?'##a50f15':d>40?'#cb181d':d>20?'#ef3b2c':
+                   d>10?'#fb6a4a':d>5?'#fc9272':d>2?'#fcbba1':'#fee5d9';
+        }
+        
+        loadAllDailyData().then(() => {
+            updateMap();
+        });
+        
+        var legend = L.control({position:'bottomright'});
+        legend.onAdd = () => {
+            var div = L.DomUtil.create('div','info legend');
+            div.innerHTML = '<h4>Heures (nombre)</h4>';
+            [0,2,5,10,20,40,60,80].forEach((g,i,a) => {
+                div.innerHTML += '<i style=\"background:' + getColor(g+1) + '\"></i>' + g + (a[i+1]?'–'+a[i+1]:'+') + '<br>';
+            });
+            return div;
+        };
+        legend.addTo(map);
+        
+        var geocoder = L.Control.geocoder({
+            defaultMarkGeocode: false,
+            placeholder: 'Rechercher une adresse...',
+            errorMessage: 'Adresse non trouvée'
+        })
+        .on('markgeocode', function(e) {
+            var bbox = e.geocode.bbox;
+            var poly = L.polygon([
+                bbox.getSouthEast(),
+                bbox.getNorthEast(),
+                bbox.getNorthWest(),
+                bbox.getSouthWest()
+            ]);
+            map.fitBounds(poly.getBounds());
+        })
+        .addTo(map);
+"
 
-          echo "✅ Download complete: $(ls -1 data/daily 2>/dev/null | wc -l) files"
-          echo "📊 Total size: $(du -sh data/daily 2>/dev/null | cut -f1)"
-          
-          # Verify we have files
-          geojson_count=$(ls -1 data/daily/*.geojson 2>/dev/null | wc -l)
-          csv_count=$(ls -1 data/daily/*.csv 2>/dev/null | wc -l)
-          if [ "$geojson_count" -eq 0 ]; then
-            echo "❌ ERROR: No GeoJSON files downloaded!"
-            exit 1
-          fi
-          
-          echo "✓ Verified: $geojson_count GeoJSON files ready for processing"
-          if [ "$csv_count" -gt 0 ]; then
-            echo "✓ Verified: $csv_count customer impact CSV files found"
-          fi
+  html_parts[[3]] <- paste0("
+        var info = L.control({position:'topright'});
+        info.onAdd = () => {
+            var div = L.DomUtil.create('div','info');
+            div.innerHTML = '<h4>Pannes de courant cumulatives</h4>' +
+                           '<p><b>Taille des hexagones:</b> ", hex_size_km, " km</p>' +
+                           '<p><b>Jours analysés:</b> ", num_days, "</p>' +
+                           '<p style=\"font-size:11px;color:#999;\">Mise à jour: ", current_date, "</p>';
+            return div;
+        };
+        info.addTo(map);
+        
+        var controls = L.control({position:'topleft'});
+        controls.onAdd = () => {
+            var div = L.DomUtil.create('div','controls');
+            div.innerHTML = '<h4>Filtres</h4>' +
+                           '<label>Date:</label>' +
+                           '<select id=\"dateSelect\" onchange=\"updateMap()\"><option value=\"all\">Résumé complet (défaut)</option></select>' +
+                           '<label>Heure:</label>' +
+                           '<select id=\"hourSelect\" onchange=\"updateMap()\"><option value=\"all\">Toutes</option>' +")
 
-      # ----------------------------------------------------------
-      # Restore previous outputs (for incremental updates)
-      # ----------------------------------------------------------
-      - name: Restore previous outputs
-        continue-on-error: true
-        uses: actions/cache/restore@v3
-        with:
-          path: |
-            public/daily
-            public/monthly
-            public/total
-            public/hex_grid_template.rds
-            public/cumulative_snapshots
-          key: hq-outages-cache-${{ github.run_number }}
-          restore-keys: |
-            hq-outages-cache-
+  html_parts[[4]] <- paste0(
+    paste(sapply(0:23, function(i) sprintf("'<option value=\"%d\">%d:00</option>'", i, i)), collapse=" + "),
+    " + '</select>';
+            return div;
+        };
+        controls.addTo(map);
+    </script>
+</body>
+</html>")
 
-      # ----------------------------------------------------------
-      # Build cumulative hex layer (INCREMENTAL)
-      # ----------------------------------------------------------
-      - name: Build cumulative hex layer (incremental)
-        run: |
-          echo "=== Starting INCREMENTAL Hexagonal Grid Analysis ==="
-          
-          # Verify R script exists
-          if [ ! -f "R/build_cumulative_hex.R" ]; then
-            echo "❌ ERROR: R/build_cumulative_hex.R not found!"
-            exit 1
-          fi
-          
-          echo "✓ R script found"
-          echo "Running incremental aggregation..."
-          Rscript R/build_cumulative_hex.R
-          
-          exit_code=$?
-          if [ $exit_code -ne 0 ]; then
-            echo "❌ ERROR: R script failed with exit code $exit_code"
-            exit $exit_code
-          fi
-          
-          echo ""
-          echo "Verifying outputs..."
-          ls -lh public/
-          
-          # Check for required output structure
-          if [ ! -d "public/total" ]; then
-            echo "❌ ERROR: public/total/ directory not found!"
-            exit 1
-          fi
-          
-          if [ ! -f "public/total/total_exposure.geojson" ]; then
-            echo "❌ ERROR: total_exposure.geojson not found!"
-            exit 1
-          fi
-          
-          if [ ! -f "public/total/total_stats.csv" ]; then
-            echo "❌ ERROR: total_stats.csv not found!"
-            exit 1
-          fi
-          
-          if [ ! -f "public/index.html" ]; then
-            echo "❌ ERROR: index.html not found!"
-            exit 1
-          fi
-          
-          echo "✅ All required outputs verified successfully"
-          
-          # Show snapshot history
-          if [ -d "public/cumulative_snapshots" ]; then
-            echo ""
-            echo "📸 Cumulative snapshots:"
-            ls -lh public/cumulative_snapshots/ | tail -5
-          fi
+  html <- paste(html_parts, collapse = "")
+  writeLines(html, file.path(output_dir, "index.html"))
+  cat("  ✓ HTML updated\n")
+  TRUE
+}, error = function(e) {
+  cat(sprintf("  ⚠ HTML update failed: %s\n", e$message))
+  FALSE
+})
 
-      # ----------------------------------------------------------
-      # Save outputs for next run
-      # ----------------------------------------------------------
-      - name: Save outputs for next run
-        uses: actions/cache/save@v3
-        with:
-          path: |
-            public/daily
-            public/monthly
-            public/total
-            public/hex_grid_template.rds
-            public/cumulative_snapshots
-          key: hq-outages-cache-${{ github.run_number }}
+# =================================================================
+# Cleanup old snapshots
+# =================================================================
+cat("\n[6] Managing snapshot history...\n")
+all_snapshots <- list.files(cumulative_snapshots_dir, pattern = "^cumulative_.*\\.geojson$", full.names = TRUE)
+if (length(all_snapshots) > 30) {
+  snapshot_info <- file.info(all_snapshots)
+  snapshot_info <- snapshot_info[order(snapshot_info$mtime, decreasing = TRUE), ]
+  snapshots_to_delete <- rownames(snapshot_info)[31:nrow(snapshot_info)]
+  
+  for (f in snapshots_to_delete) {
+    file.remove(f)
+  }
+  cat(sprintf("  ✓ Cleaned up %d old snapshots (keeping last 30)\n", length(snapshots_to_delete)))
+} else {
+  cat(sprintf("  ✓ Snapshot history: %d files (under 30-day limit)\n", length(all_snapshots)))
+}
 
-      # ----------------------------------------------------------
-      # Deploy to public repo
-      # ----------------------------------------------------------
-      - name: Deploy to public repo (gh-pages)
-        uses: peaceiris/actions-gh-pages@v3
-        with:
-          personal_token: ${{ secrets.PUBLIC_REPO_TOKEN }}
-          external_repository: evelynebrie/hq-outages-public
-          publish_branch: gh-pages
-          publish_dir: public
-          commit_message: "Update cumulative outage exposure - ${{ github.run_number }}"
+# =================================================================
+# Summary
+# =================================================================
+elapsed <- as.numeric(difftime(Sys.time(), start_time, units = "secs"))
+cat(sprintf("\n✅ MEMORY-EFFICIENT UPDATE COMPLETE in %.1f seconds\n", elapsed))
+
+cat("\n📊 PROCESSING SUMMARY:\n")
+cat(sprintf("  • New dates processed: %d\n", length(dates_to_process)))
+cat(sprintf("  • Total dates in system: %d\n", length(unique(files_dt$date))))
+cat(sprintf("  • Processing time: %.1f seconds (%.1f sec/date)\n", 
+            elapsed, if(length(dates_to_process) > 0) elapsed/length(dates_to_process) else 0))
+cat(sprintf("  • Mode: Memory-efficient sparse storage\n"))
+
+cat("\n✅ READY FOR DEPLOYMENT\n")
