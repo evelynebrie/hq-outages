@@ -1,253 +1,98 @@
-name: Publish cumulative exposure (from Dropbox) - INCREMENTAL
+name: Publish cumulative exposure - FAST incremental
 
 on:
   schedule:
-    - cron: "0 5 * * *"  # Run daily at 5 AM UTC
-  workflow_dispatch: {}
+    - cron: '30 3 * * *'
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
-
+    
     steps:
-      - uses: actions/checkout@v4
-
+      - uses: actions/checkout@v3
+      
       - name: Setup R
         uses: r-lib/actions/setup-r@v2
         with:
           use-public-rspm: true
 
-      - name: System libs for sf/gdal
+      - name: System libraries
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            libgdal-dev libgeos-dev libproj-dev libudunits2-dev jq curl
+          sudo apt-get install -y libgdal-dev libgeos-dev libproj-dev libudunits2-dev jq curl
+
+      - name: Cache R packages
+        uses: actions/cache@v3
+        with:
+          path: ${{ env.R_LIBS_USER }}
+          key: ${{ runner.os }}-r-packages-v2
+          restore-keys: ${{ runner.os }}-r-
 
       - name: Install R packages
         run: |
-          Rscript -e 'pkgs <- c("sf","dplyr","fs","purrr","jsonlite","parallel","data.table");
-                      inst <- setdiff(pkgs, rownames(installed.packages()));
-                      if(length(inst)) install.packages(inst, repos="https://cloud.r-project.org")'
+          Rscript -e 'pkgs <- c("sf","dplyr","fs","purrr","jsonlite","data.table"); inst <- setdiff(pkgs, rownames(installed.packages())); if(length(inst)) { cat("Installing", length(inst), "packages\n"); install.packages(inst, repos="https://cloud.r-project.org", Ncpus=2) } else { cat("All packages cached\n") }'
 
-      # ----------------------------------------------------------
-      # Get fresh Dropbox access token
-      # ----------------------------------------------------------
-      - name: Get fresh Dropbox access token
-        id: dropbox_token
-        run: |
-          set -euo pipefail
-          TOKENS=$(curl -sS -X POST https://api.dropboxapi.com/oauth2/token \
-            -d grant_type=refresh_token \
-            -d refresh_token="${{ secrets.DROPBOX_REFRESH_TOKEN }}" \
-            -u "${{ secrets.DROPBOX_APP_KEY }}:${{ secrets.DROPBOX_APP_SECRET }}")
+      - name: Restore data cache
+        uses: actions/cache@v3
+        with:
+          path: data/daily/
+          key: hq-daily-data-${{ github.run_id }}
+          restore-keys: hq-daily-data-
 
-          ACCESS=$(echo "$TOKENS" | jq -r '.access_token')
-          echo "token=$ACCESS" >> "$GITHUB_OUTPUT"
-
-      # ----------------------------------------------------------
-      # Download ALL polygon snapshots from Dropbox
-      # ----------------------------------------------------------
-      - name: Download GeoJSON snapshots from Dropbox
+      - name: Download NEW files from Dropbox
         env:
-          DROPBOX_TOKEN: ${{ steps.dropbox_token.outputs.token }}
+          DROPBOX_TOKEN: ${{ secrets.DROPBOX_TOKEN }}
         run: |
           set -eo pipefail
-
+          
+          echo "Listing Dropbox files..."
+          FILES=$(curl -s -X POST https://api.dropboxapi.com/2/files/list_folder \
+            -H "Authorization: Bearer $DROPBOX_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d '{"path": "/hq-outages", "recursive": true}' | jq -r '.entries[] | select(.".tag" == "file") | .path_display')
+          
+          POLYGONS=$(echo "$FILES" | grep "polygons_.*\.geojson$" || true)
+          CSV=$(echo "$FILES" | grep "outages_joined_.*\.csv$" || true)
+          
+          TOTAL=$(echo -e "$POLYGONS\n$CSV" | grep -v '^$' | wc -l)
+          echo "Found $TOTAL files in Dropbox"
+          
           mkdir -p data/daily
-
-          extract_paths () {
-            jq -r '
-              .entries? // [] |
-              map(select(.[".tag"] == "file")) |
-              map(select(.name | test("^(polygons_.*\\.geojson|outages_joined_.*\\.csv)$"; "i"))) |
-              .[].path_lower // empty
-            '
-          }
-
-          echo "📂 Listing Dropbox folder recursively..."
-
-          resp=$(curl -sS -X POST https://api.dropboxapi.com/2/files/list_folder \
-            --header "Authorization: Bearer $DROPBOX_TOKEN" \
-            --header "Content-Type: application/json" \
-            --data '{"path": "", "recursive": true}')
-
-          if echo "$resp" | jq -e '.error_summary?'; then
-            echo "❌ Dropbox error on list_folder"
-            exit 1
-          fi
-
-          extract_paths <<< "$resp" > /tmp/polygon_paths.txt
           
-          echo "📋 Found $(wc -l < /tmp/polygon_paths.txt) polygon and customer impact files"
+          CACHED=0
+          NEW=0
           
-          cursor=$(jq -r '.cursor // empty' <<< "$resp")
-          has_more=$(jq -r '.has_more // false' <<< "$resp")
-
-          while [ "$has_more" = "true" ]; do
-            resp=$(curl -sS -X POST https://api.dropboxapi.com/2/files/list_folder/continue \
-              --header "Authorization: Bearer $DROPBOX_TOKEN" \
-              --header "Content-Type: application/json" \
-              --data "{\"cursor\":\"$cursor\"}")
-
-            if echo "$resp" | jq -e '.error_summary?'; then
-              echo "❌ Dropbox pagination error"
-              exit 1
-            fi
-
-            extract_paths <<< "$resp" >> /tmp/polygon_paths.txt
-            cursor=$(jq -r '.cursor // empty' <<< "$resp")
-            has_more=$(jq -r '.has_more // false' <<< "$resp")
-          done
-
-          echo "⬇️ Downloading files..."
-
-          if [ ! -s /tmp/polygon_paths.txt ]; then
-            echo "⚠️ No polygon files found matching pattern"
-            exit 1
-          fi
-
-          echo "📄 Sample of files to download:"
-          head -n 3 /tmp/polygon_paths.txt
-
-          downloaded=0
-          failed=0
-
-          sort -u /tmp/polygon_paths.txt | while read -r p; do
-            [ -n "$p" ] || continue
-            base=$(basename "$p")
-            echo "Downloading $p -> data/daily/$base"
+          for file in $POLYGONS $CSV; do
+            fname=$(basename "$file")
             
-            if curl -sS -X POST https://content.dropboxapi.com/2/files/download \
-              --header "Authorization: Bearer $DROPBOX_TOKEN" \
-              --header "Dropbox-API-Arg: {\"path\": \"$p\"}" \
-              --output "data/daily/$base"; then
-              
-              if [ -f "data/daily/$base" ]; then
-                size=$(stat -c%s "data/daily/$base" 2>/dev/null || stat -f%z "data/daily/$base" 2>/dev/null || echo "0")
-                echo "  ✓ Saved: $base (${size} bytes)"
-                downloaded=$((downloaded + 1))
-              else
-                echo "  ✗ Failed: $base"
-                failed=$((failed + 1))
-              fi
+            if [ -f "data/daily/$fname" ]; then
+              # File already exists in cache
+              ((CACHED++))
             else
-              echo "  ✗ Download failed: $base"
-              failed=$((failed + 1))
+              # Download new file
+              ((NEW++))
+              [ $NEW -le 5 ] && echo "Downloading: $fname"
+              
+              curl -s -X POST https://content.dropboxapi.com/2/files/download \
+                -H "Authorization: Bearer $DROPBOX_TOKEN" \
+                -H "Dropbox-API-Arg: {\"path\": \"$file\"}" \
+                -o "data/daily/$fname"
             fi
           done
-
-          echo "✅ Download complete: $(ls -1 data/daily 2>/dev/null | wc -l) files"
-          echo "📊 Total size: $(du -sh data/daily 2>/dev/null | cut -f1)"
-          
-          # Verify we have files
-          geojson_count=$(ls -1 data/daily/*.geojson 2>/dev/null | wc -l)
-          csv_count=$(ls -1 data/daily/*.csv 2>/dev/null | wc -l)
-          if [ "$geojson_count" -eq 0 ]; then
-            echo "❌ ERROR: No GeoJSON files downloaded!"
-            exit 1
-          fi
-          
-          echo "✓ Verified: $geojson_count GeoJSON files ready for processing"
-          if [ "$csv_count" -gt 0 ]; then
-            echo "✓ Verified: $csv_count customer impact CSV files found"
-          fi
-
-      # ----------------------------------------------------------
-      # Restore previous outputs (for incremental updates)
-      # ----------------------------------------------------------
-      - name: Restore previous outputs
-        continue-on-error: true
-        uses: actions/cache/restore@v3
-        with:
-          path: |
-            public/daily
-            public/monthly
-            public/total
-            public/hex_grid_template.rds
-            public/cumulative_snapshots
-          key: hq-outages-cache-${{ github.run_number }}
-          restore-keys: |
-            hq-outages-cache-
-
-      # ----------------------------------------------------------
-      # Build cumulative hex layer (INCREMENTAL)
-      # ----------------------------------------------------------
-      - name: Build cumulative hex layer (incremental)
-        run: |
-          echo "=== Starting INCREMENTAL Hexagonal Grid Analysis ==="
-          
-          # Verify R script exists
-          if [ ! -f "R/build_cumulative_hex.R" ]; then
-            echo "❌ ERROR: R/build_cumulative_hex.R not found!"
-            exit 1
-          fi
-          
-          echo "✓ R script found"
-          echo "Running incremental aggregation..."
-          Rscript R/build_cumulative_hex.R
-          
-          exit_code=$?
-          if [ $exit_code -ne 0 ]; then
-            echo "❌ ERROR: R script failed with exit code $exit_code"
-            exit $exit_code
-          fi
           
           echo ""
-          echo "Verifying outputs..."
-          ls -lh public/
-          
-          # Check for required output structure
-          if [ ! -d "public/total" ]; then
-            echo "❌ ERROR: public/total/ directory not found!"
-            exit 1
-          fi
-          
-          if [ ! -f "public/total/total_exposure.geojson" ]; then
-            echo "❌ ERROR: total_exposure.geojson not found!"
-            exit 1
-          fi
-          
-          if [ ! -f "public/total/total_stats.csv" ]; then
-            echo "❌ ERROR: total_stats.csv not found!"
-            exit 1
-          fi
-          
-          if [ ! -f "public/index.html" ]; then
-            echo "❌ ERROR: index.html not found!"
-            exit 1
-          fi
-          
-          echo "✅ All required outputs verified successfully"
-          
-          # Show snapshot history
-          if [ -d "public/cumulative_snapshots" ]; then
-            echo ""
-            echo "📸 Cumulative snapshots:"
-            ls -lh public/cumulative_snapshots/ | tail -5
-          fi
+          echo "Summary: $CACHED cached, $NEW new, $TOTAL total"
 
-      # ----------------------------------------------------------
-      # Save outputs for next run
-      # ----------------------------------------------------------
-      - name: Save outputs for next run
-        uses: actions/cache/save@v3
-        with:
-          path: |
-            public/daily
-            public/monthly
-            public/total
-            public/hex_grid_template.rds
-            public/cumulative_snapshots
-          key: hq-outages-cache-${{ github.run_number }}
+      - name: Run R analysis
+        run: |
+          echo "Starting analysis..."
+          [ ! -f "R/build_cumulative_hex.R" ] && echo "ERROR: Script not found" && exit 1
+          Rscript R/build_cumulative_hex.R
 
-      # ----------------------------------------------------------
-      # Deploy to public repo
-      # ----------------------------------------------------------
-      - name: Deploy to public repo (gh-pages)
+      - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v3
         with:
-          personal_token: ${{ secrets.PUBLIC_REPO_TOKEN }}
-          external_repository: evelynebrie/hq-outages-public
-          publish_branch: gh-pages
-          publish_dir: public
-          commit_message: "Update cumulative outage exposure - ${{ github.run_number }}"
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./public
+          keep_files: true
