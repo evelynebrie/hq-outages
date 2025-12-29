@@ -73,7 +73,7 @@ jobs:
           echo "Found $ENTRY_COUNT total entries in Dropbox"
           
           # Parse files - handle empty array gracefully
-          FILES=$(echo "$RESPONSE" | jq -r '.entries[]? | select(.".tag" == "file") | .path_display' || echo "")
+          FILES=$(echo "$RESPONSE" | jq -r '.entries[]? | select(.".tag" == "file") | .path_display' || true)
           
           # If no files found, check if folder is just empty or if there's a real problem
           if [ -z "$FILES" ]; then
@@ -82,7 +82,7 @@ jobs:
               echo "✓ No new files to download, continuing with cached data..."
               mkdir -p data/daily
               # Count cached files
-              CACHED_COUNT=$(ls -1 data/daily/*.geojson 2>/dev/null | wc -l || echo 0)
+              CACHED_COUNT=$(find data/daily -name "*.geojson" 2>/dev/null | wc -l)
               echo "Using $CACHED_COUNT cached files from previous runs"
               
               # Continue to R analysis with existing cache
@@ -96,12 +96,20 @@ jobs:
           fi
           
           # Extract polygons and CSV files
-          POLYGONS=$(echo "$FILES" | grep "polygons_.*\.geojson$" || echo "")
-          CSV=$(echo "$FILES" | grep "outages_joined_.*\.csv$" || echo "")
+          POLYGONS=$(echo "$FILES" | grep "polygons_.*\.geojson$" || true)
+          CSV=$(echo "$FILES" | grep "outages_joined_.*\.csv$" || true)
           
-          # Count relevant files
-          POLY_COUNT=$(echo "$POLYGONS" | grep -c "polygons" || echo 0)
-          CSV_COUNT=$(echo "$CSV" | grep -c "outages" || echo 0)
+          # Count relevant files (safe way without grep -c)
+          POLY_COUNT=0
+          if [ ! -z "$POLYGONS" ]; then
+            POLY_COUNT=$(echo "$POLYGONS" | wc -l)
+          fi
+          
+          CSV_COUNT=0
+          if [ ! -z "$CSV" ]; then
+            CSV_COUNT=$(echo "$CSV" | wc -l)
+          fi
+          
           TOTAL=$((POLY_COUNT + CSV_COUNT))
           
           echo "Found $TOTAL relevant files ($POLY_COUNT polygons, $CSV_COUNT CSV)"
@@ -126,11 +134,13 @@ jobs:
             
             if [ -f "data/daily/$fname" ]; then
               # File already exists in cache
-              ((CACHED++))
+              CACHED=$((CACHED + 1))
             else
               # Download new file
-              ((NEW++))
-              [ $NEW -le 5 ] && echo "Downloading: $fname"
+              NEW=$((NEW + 1))
+              if [ $NEW -le 5 ]; then
+                echo "Downloading: $fname"
+              fi
               
               curl -s -X POST https://content.dropboxapi.com/2/files/download \
                 -H "Authorization: Bearer $DROPBOX_TOKEN" \
@@ -148,7 +158,7 @@ jobs:
           [ ! -f "R/build_cumulative_hex.R" ] && echo "ERROR: Script not found" && exit 1
           
           # Check if we have any data files
-          FILE_COUNT=$(ls -1 data/daily/*.geojson 2>/dev/null | wc -l || echo 0)
+          FILE_COUNT=$(find data/daily -name "*.geojson" 2>/dev/null | wc -l)
           if [ "$FILE_COUNT" -eq 0 ]; then
             echo "⚠️  No data files found to process"
             echo "This might be the first run, or all scraping attempts failed"
