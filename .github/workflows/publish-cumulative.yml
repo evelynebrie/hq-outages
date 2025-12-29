@@ -95,11 +95,11 @@ jobs:
             fi
           fi
           
-          # Extract polygons and CSV files
-          POLYGONS=$(echo "$FILES" | grep "polygons_.*\.geojson$" || true)
-          CSV=$(echo "$FILES" | grep "outages_joined_.*\.csv$" || true)
+          # Extract polygons and CSV files (from nested date=/hour= folders)
+          POLYGONS=$(echo "$FILES" | grep "/polygons_.*\.geojson$" || true)
+          CSV=$(echo "$FILES" | grep "/outages_joined_.*\.csv$" || true)
           
-          # Count relevant files (safe way without grep -c)
+          # Count relevant files (safe way)
           POLY_COUNT=0
           if [ ! -z "$POLYGONS" ]; then
             POLY_COUNT=$(echo "$POLYGONS" | wc -l)
@@ -125,32 +125,64 @@ jobs:
           
           CACHED=0
           NEW=0
+          DOWNLOADED=0
           
-          # Download files
-          for file in $POLYGONS $CSV; do
-            [ -z "$file" ] && continue  # Skip empty lines
+          # Function to download and flatten structure
+          download_file() {
+            local dropbox_path="$1"
+            local filename=$(basename "$dropbox_path")
+            local local_path="data/daily/$filename"
             
-            fname=$(basename "$file")
-            
-            if [ -f "data/daily/$fname" ]; then
+            if [ -f "$local_path" ]; then
               # File already exists in cache
-              CACHED=$((CACHED + 1))
+              return 1  # Return 1 to indicate "cached"
             else
-              # Download new file
-              NEW=$((NEW + 1))
-              if [ $NEW -le 5 ]; then
-                echo "Downloading: $fname"
-              fi
-              
+              # Download new file - flatten to data/daily/
               curl -s -X POST https://content.dropboxapi.com/2/files/download \
                 -H "Authorization: Bearer $DROPBOX_TOKEN" \
-                -H "Dropbox-API-Arg: {\"path\": \"$file\"}" \
-                -o "data/daily/$fname"
+                -H "Dropbox-API-Arg: {\"path\": \"$dropbox_path\"}" \
+                -o "$local_path"
+              return 0  # Return 0 to indicate "downloaded"
             fi
-          done
+          }
+          
+          echo "Processing polygon files..."
+          # Download polygons
+          while IFS= read -r file; do
+            [ -z "$file" ] && continue
+            
+            if download_file "$file"; then
+              NEW=$((NEW + 1))
+              DOWNLOADED=$((DOWNLOADED + 1))
+              if [ $DOWNLOADED -le 5 ]; then
+                echo "  Downloading: $(basename "$file")"
+              elif [ $DOWNLOADED -eq 6 ]; then
+                echo "  ... (showing first 5 downloads)"
+              fi
+            else
+              CACHED=$((CACHED + 1))
+            fi
+          done <<< "$POLYGONS"
+          
+          echo "Processing CSV files..."
+          # Download CSVs
+          while IFS= read -r file; do
+            [ -z "$file" ] && continue
+            
+            if download_file "$file"; then
+              NEW=$((NEW + 1))
+              DOWNLOADED=$((DOWNLOADED + 1))
+              if [ $DOWNLOADED -le 5 ]; then
+                echo "  Downloading: $(basename "$file")"
+              fi
+            else
+              CACHED=$((CACHED + 1))
+            fi
+          done <<< "$CSV"
           
           echo ""
           echo "📊 Summary: $CACHED cached, $NEW new, $TOTAL total files"
+          echo "Files are flattened into data/daily/ for R processing"
 
       - name: Run R analysis
         run: |
@@ -158,14 +190,14 @@ jobs:
           [ ! -f "R/build_cumulative_hex.R" ] && echo "ERROR: Script not found" && exit 1
           
           # Check if we have any data files
-          FILE_COUNT=$(find data/daily -name "*.geojson" 2>/dev/null | wc -l)
+          FILE_COUNT=$(find data/daily -name "polygons_*.geojson" 2>/dev/null | wc -l)
           if [ "$FILE_COUNT" -eq 0 ]; then
-            echo "⚠️  No data files found to process"
+            echo "⚠️  No polygon data files found to process"
             echo "This might be the first run, or all scraping attempts failed"
             exit 1
           fi
           
-          echo "Processing $FILE_COUNT data files..."
+          echo "Processing $FILE_COUNT polygon data files..."
           Rscript R/build_cumulative_hex.R
 
       - name: Deploy to GitHub Pages
