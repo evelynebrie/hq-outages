@@ -684,6 +684,9 @@ html_generated <- tryCatch({
 "
 
   html_parts[[3]] <- paste0("
+        // Info box removed to prevent popup on load
+        // To re-enable, uncomment the code below:
+        /*
         var info = L.control({position:'topright'});
         info.onAdd = () => {
             var div = L.DomUtil.create('div','info');
@@ -694,6 +697,7 @@ html_generated <- tryCatch({
             return div;
         };
         info.addTo(map);
+        */
         
         var controls = L.control({position:'topleft'});
         controls.onAdd = () => {
