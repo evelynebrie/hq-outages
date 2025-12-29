@@ -46,60 +46,94 @@ jobs:
         run: |
           set -eo pipefail
           
-          echo "Listing Dropbox files..."
+          echo "Listing Dropbox files (with pagination support)..."
           
-          # Make API call and save full response
-          RESPONSE=$(curl -s -X POST https://api.dropboxapi.com/2/files/list_folder \
-            -H "Authorization: Bearer $DROPBOX_TOKEN" \
-            -H "Content-Type: application/json" \
-            -d '{"path": "/hq-outages", "recursive": true}')
+          # Initialize
+          ALL_FILES=""
+          HAS_MORE=true
+          CURSOR=""
+          PAGE=1
           
-          # Check for API errors first
-          if echo "$RESPONSE" | jq -e '.error' > /dev/null 2>&1; then
-            echo "❌ Error from Dropbox API:"
-            echo "$RESPONSE" | jq '.error'
-            exit 1
-          fi
-          
-          # Check if entries field exists (even if empty array)
-          if ! echo "$RESPONSE" | jq -e '.entries' > /dev/null 2>&1; then
-            echo "❌ Unexpected response format (no .entries field)"
-            echo "$RESPONSE"
-            exit 1
-          fi
-          
-          # Count total entries
-          ENTRY_COUNT=$(echo "$RESPONSE" | jq '.entries | length')
-          echo "Found $ENTRY_COUNT total entries in Dropbox"
-          
-          # Parse files - handle empty array gracefully
-          FILES=$(echo "$RESPONSE" | jq -r '.entries[]? | select(.".tag" == "file") | .path_display' || true)
-          
-          # If no files found, check if folder is just empty or if there's a real problem
-          if [ -z "$FILES" ]; then
-            if [ "$ENTRY_COUNT" -eq 0 ]; then
-              echo "⚠️  Folder is empty - this is expected if scraping failed"
-              echo "✓ No new files to download, continuing with cached data..."
-              mkdir -p data/daily
-              # Count cached files
-              CACHED_COUNT=$(find data/daily -name "*.geojson" 2>/dev/null | wc -l)
-              echo "Using $CACHED_COUNT cached files from previous runs"
-              
-              # Continue to R analysis with existing cache
-              exit 0
+          # Fetch all pages
+          while [ "$HAS_MORE" = "true" ]; do
+            echo "Fetching page $PAGE..."
+            
+            if [ -z "$CURSOR" ]; then
+              # First request
+              RESPONSE=$(curl -s -X POST https://api.dropboxapi.com/2/files/list_folder \
+                -H "Authorization: Bearer $DROPBOX_TOKEN" \
+                -H "Content-Type: application/json" \
+                -d '{"path": "/hq-outages", "recursive": true}')
             else
-              echo "⚠️  Folder has $ENTRY_COUNT entries but no files found"
-              echo "This might indicate folders only, which is OK"
-              mkdir -p data/daily
-              exit 0
+              # Continue with cursor
+              RESPONSE=$(curl -s -X POST https://api.dropboxapi.com/2/files/list_folder/continue \
+                -H "Authorization: Bearer $DROPBOX_TOKEN" \
+                -H "Content-Type: application/json" \
+                -d "{\"cursor\": \"$CURSOR\"}")
             fi
+            
+            # Check for API errors
+            if echo "$RESPONSE" | jq -e '.error' > /dev/null 2>&1; then
+              echo "❌ Error from Dropbox API:"
+              echo "$RESPONSE" | jq '.error'
+              exit 1
+            fi
+            
+            # Check if entries field exists
+            if ! echo "$RESPONSE" | jq -e '.entries' > /dev/null 2>&1; then
+              echo "❌ Unexpected response format (no .entries field)"
+              echo "$RESPONSE"
+              exit 1
+            fi
+            
+            # Count entries in this page
+            PAGE_COUNT=$(echo "$RESPONSE" | jq '.entries | length')
+            echo "  Found $PAGE_COUNT entries in page $PAGE"
+            
+            # Extract file paths from this page
+            PAGE_FILES=$(echo "$RESPONSE" | jq -r '.entries[]? | select(.".tag" == "file") | .path_display' || true)
+            
+            # Append to all files
+            if [ ! -z "$PAGE_FILES" ]; then
+              if [ -z "$ALL_FILES" ]; then
+                ALL_FILES="$PAGE_FILES"
+              else
+                ALL_FILES="$ALL_FILES"$'\n'"$PAGE_FILES"
+              fi
+            fi
+            
+            # Check if there are more pages
+            HAS_MORE=$(echo "$RESPONSE" | jq -r '.has_more')
+            
+            if [ "$HAS_MORE" = "true" ]; then
+              CURSOR=$(echo "$RESPONSE" | jq -r '.cursor')
+              PAGE=$((PAGE + 1))
+            fi
+          done
+          
+          echo ""
+          echo "Completed pagination: fetched $PAGE page(s)"
+          
+          # Count total files
+          TOTAL_FILE_COUNT=0
+          if [ ! -z "$ALL_FILES" ]; then
+            TOTAL_FILE_COUNT=$(echo "$ALL_FILES" | wc -l)
+          fi
+          echo "Total files found: $TOTAL_FILE_COUNT"
+          
+          # If no files found
+          if [ -z "$ALL_FILES" ] || [ "$TOTAL_FILE_COUNT" -eq 0 ]; then
+            echo "⚠️  No files found in Dropbox"
+            echo "✓ Continuing with cached data..."
+            mkdir -p data/daily
+            exit 0
           fi
           
-          # Extract polygons and CSV files (from nested date=/hour= folders)
-          POLYGONS=$(echo "$FILES" | grep "/polygons_.*\.geojson$" || true)
-          CSV=$(echo "$FILES" | grep "/outages_joined_.*\.csv$" || true)
+          # Extract polygons and CSV files
+          POLYGONS=$(echo "$ALL_FILES" | grep "/polygons_.*\.geojson$" || true)
+          CSV=$(echo "$ALL_FILES" | grep "/outages_joined_.*\.csv$" || true)
           
-          # Count relevant files (safe way)
+          # Count relevant files
           POLY_COUNT=0
           if [ ! -z "$POLYGONS" ]; then
             POLY_COUNT=$(echo "$POLYGONS" | wc -l)
@@ -113,6 +147,21 @@ jobs:
           TOTAL=$((POLY_COUNT + CSV_COUNT))
           
           echo "Found $TOTAL relevant files ($POLY_COUNT polygons, $CSV_COUNT CSV)"
+          
+          # Show date range
+          if [ $POLY_COUNT -gt 0 ]; then
+            echo ""
+            echo "Date range in files:"
+            echo "$POLYGONS" | sed 's/.*polygons_\([0-9]\{8\}\).*/\1/' | sort -u | head -5 | while read date; do
+              formatted="${date:0:4}-${date:4:2}-${date:6:2}"
+              echo "  $formatted"
+            done
+            echo "  ..."
+            echo "$POLYGONS" | sed 's/.*polygons_\([0-9]\{8\}\).*/\1/' | sort -u | tail -5 | while read date; do
+              formatted="${date:0:4}-${date:4:2}-${date:6:2}"
+              echo "  $formatted"
+            done
+          fi
           
           if [ "$TOTAL" -eq 0 ]; then
             echo "⚠️  No polygon or CSV files found"
@@ -134,18 +183,17 @@ jobs:
             local local_path="data/daily/$filename"
             
             if [ -f "$local_path" ]; then
-              # File already exists in cache
-              return 1  # Return 1 to indicate "cached"
+              return 1  # Cached
             else
-              # Download new file - flatten to data/daily/
               curl -s -X POST https://content.dropboxapi.com/2/files/download \
                 -H "Authorization: Bearer $DROPBOX_TOKEN" \
                 -H "Dropbox-API-Arg: {\"path\": \"$dropbox_path\"}" \
                 -o "$local_path"
-              return 0  # Return 0 to indicate "downloaded"
+              return 0  # Downloaded
             fi
           }
           
+          echo ""
           echo "Processing polygon files..."
           # Download polygons
           while IFS= read -r file; do
@@ -172,9 +220,6 @@ jobs:
             if download_file "$file"; then
               NEW=$((NEW + 1))
               DOWNLOADED=$((DOWNLOADED + 1))
-              if [ $DOWNLOADED -le 5 ]; then
-                echo "  Downloading: $(basename "$file")"
-              fi
             else
               CACHED=$((CACHED + 1))
             fi
@@ -182,7 +227,7 @@ jobs:
           
           echo ""
           echo "📊 Summary: $CACHED cached, $NEW new, $TOTAL total files"
-          echo "Files are flattened into data/daily/ for R processing"
+          echo "Files flattened into data/daily/ for R processing"
 
       - name: Run R analysis
         run: |
@@ -193,7 +238,6 @@ jobs:
           FILE_COUNT=$(find data/daily -name "polygons_*.geojson" 2>/dev/null | wc -l)
           if [ "$FILE_COUNT" -eq 0 ]; then
             echo "⚠️  No polygon data files found to process"
-            echo "This might be the first run, or all scraping attempts failed"
             exit 1
           fi
           
