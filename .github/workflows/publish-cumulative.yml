@@ -47,23 +47,81 @@ jobs:
           set -eo pipefail
           
           echo "Listing Dropbox files..."
-          FILES=$(curl -s -X POST https://api.dropboxapi.com/2/files/list_folder \
+          
+          # Make API call and save full response
+          RESPONSE=$(curl -s -X POST https://api.dropboxapi.com/2/files/list_folder \
             -H "Authorization: Bearer $DROPBOX_TOKEN" \
             -H "Content-Type: application/json" \
-            -d '{"path": "/hq-outages", "recursive": true}' | jq -r '.entries[] | select(.".tag" == "file") | .path_display')
+            -d '{"path": "/hq-outages", "recursive": true}')
           
-          POLYGONS=$(echo "$FILES" | grep "polygons_.*\.geojson$" || true)
-          CSV=$(echo "$FILES" | grep "outages_joined_.*\.csv$" || true)
+          # Check for API errors first
+          if echo "$RESPONSE" | jq -e '.error' > /dev/null 2>&1; then
+            echo "❌ Error from Dropbox API:"
+            echo "$RESPONSE" | jq '.error'
+            exit 1
+          fi
           
-          TOTAL=$(echo -e "$POLYGONS\n$CSV" | grep -v '^$' | wc -l)
-          echo "Found $TOTAL files in Dropbox"
+          # Check if entries field exists (even if empty array)
+          if ! echo "$RESPONSE" | jq -e '.entries' > /dev/null 2>&1; then
+            echo "❌ Unexpected response format (no .entries field)"
+            echo "$RESPONSE"
+            exit 1
+          fi
+          
+          # Count total entries
+          ENTRY_COUNT=$(echo "$RESPONSE" | jq '.entries | length')
+          echo "Found $ENTRY_COUNT total entries in Dropbox"
+          
+          # Parse files - handle empty array gracefully
+          FILES=$(echo "$RESPONSE" | jq -r '.entries[]? | select(.".tag" == "file") | .path_display' || echo "")
+          
+          # If no files found, check if folder is just empty or if there's a real problem
+          if [ -z "$FILES" ]; then
+            if [ "$ENTRY_COUNT" -eq 0 ]; then
+              echo "⚠️  Folder is empty - this is expected if scraping failed"
+              echo "✓ No new files to download, continuing with cached data..."
+              mkdir -p data/daily
+              # Count cached files
+              CACHED_COUNT=$(ls -1 data/daily/*.geojson 2>/dev/null | wc -l || echo 0)
+              echo "Using $CACHED_COUNT cached files from previous runs"
+              
+              # Continue to R analysis with existing cache
+              exit 0
+            else
+              echo "⚠️  Folder has $ENTRY_COUNT entries but no files found"
+              echo "This might indicate folders only, which is OK"
+              mkdir -p data/daily
+              exit 0
+            fi
+          fi
+          
+          # Extract polygons and CSV files
+          POLYGONS=$(echo "$FILES" | grep "polygons_.*\.geojson$" || echo "")
+          CSV=$(echo "$FILES" | grep "outages_joined_.*\.csv$" || echo "")
+          
+          # Count relevant files
+          POLY_COUNT=$(echo "$POLYGONS" | grep -c "polygons" || echo 0)
+          CSV_COUNT=$(echo "$CSV" | grep -c "outages" || echo 0)
+          TOTAL=$((POLY_COUNT + CSV_COUNT))
+          
+          echo "Found $TOTAL relevant files ($POLY_COUNT polygons, $CSV_COUNT CSV)"
+          
+          if [ "$TOTAL" -eq 0 ]; then
+            echo "⚠️  No polygon or CSV files found"
+            echo "✓ Continuing with cached data..."
+            mkdir -p data/daily
+            exit 0
+          fi
           
           mkdir -p data/daily
           
           CACHED=0
           NEW=0
           
+          # Download files
           for file in $POLYGONS $CSV; do
+            [ -z "$file" ] && continue  # Skip empty lines
+            
             fname=$(basename "$file")
             
             if [ -f "data/daily/$fname" ]; then
@@ -82,12 +140,22 @@ jobs:
           done
           
           echo ""
-          echo "Summary: $CACHED cached, $NEW new, $TOTAL total"
+          echo "📊 Summary: $CACHED cached, $NEW new, $TOTAL total files"
 
       - name: Run R analysis
         run: |
           echo "Starting analysis..."
           [ ! -f "R/build_cumulative_hex.R" ] && echo "ERROR: Script not found" && exit 1
+          
+          # Check if we have any data files
+          FILE_COUNT=$(ls -1 data/daily/*.geojson 2>/dev/null | wc -l || echo 0)
+          if [ "$FILE_COUNT" -eq 0 ]; then
+            echo "⚠️  No data files found to process"
+            echo "This might be the first run, or all scraping attempts failed"
+            exit 1
+          fi
+          
+          echo "Processing $FILE_COUNT data files..."
           Rscript R/build_cumulative_hex.R
 
       - name: Deploy to GitHub Pages
