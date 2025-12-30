@@ -1,6 +1,164 @@
 # ============================================
-# IMPROVED ERROR HANDLING FOR HQ_FUNCTIONS.R
-# Add this to your hq_functions.R file
+# HQ_FUNCTIONS.R - UPDATED FOR ARCGIS API
+# ============================================
+
+library(httr)
+library(jsonlite)
+library(sf)
+library(dplyr)
+library(lubridate)
+
+# NEW: ArcGIS FeatureServer endpoint
+ARCGIS_LAYER3_URL <- "https://services5.arcgis.com/0akaykIdiPuMhFIy/arcgis/rest/services/bs_infoPannes_prd_vue/FeatureServer/3/query"
+
+# OLD API base (keeping for backward compatibility if needed)
+BASE <- "https://pannes.hydroquebec.com/pannes/donnees/v3_0/"
+
+# Helper: require package
+.hq_require_pkg <- function(pkg, purpose = "this operation") {
+  if (!requireNamespace(pkg, quietly = TRUE)) {
+    stop("Package '", pkg, "' is required for ", purpose, 
+         ". Install it with: install.packages('", pkg, "')")
+  }
+}
+
+# Helper: null coalescing
+`%||na%` <- function(x, y) if (is.null(x)) y else x
+
+# Helper: check if sf is available
+has_sf <- requireNamespace("sf", quietly = TRUE)
+
+# Helper: parse coordinates
+parse_coords <- function(coords_str) {
+  parts <- strsplit(as.character(coords_str), ",")[[1]]
+  if (length(parts) != 2) return(list(lon = NA_real_, lat = NA_real_))
+  list(lon = suppressWarnings(as.numeric(parts[1])),
+       lat = suppressWarnings(as.numeric(parts[2])))
+}
+
+# Helper: parse datetime
+parse_dt <- function(x, tz = "America/Toronto") {
+  suppressWarnings({
+    out <- lubridate::mdy_hm(x, tz = tz)
+    out[is.na(out)] <- lubridate::ymd_hms(x[is.na(out)], tz = tz)
+    out
+  })
+}
+
+# Helper: get JSON
+get_json <- function(url, ...) {
+  r <- httr::GET(url, ...)
+  httr::stop_for_status(r)
+  jsonlite::fromJSON(httr::content(r, as = "text", encoding = "UTF-8"), 
+                     simplifyVector = FALSE)
+}
+
+# Helper: extract version from old API
+extract_version <- function(obj) {
+  if (is.list(obj) && "version" %in% names(obj)) {
+    return(as.character(obj$version))
+  }
+  NA_character_
+}
+
+# ============================================
+# NEW: Get polygons from ArcGIS FeatureServer
+# ============================================
+get_hq_polygons <- function(add_metadata = TRUE, quiet = TRUE, retries = 3) {
+  .hq_require_pkg("sf", "polygons output")
+  
+  cat("Fetching polygons from ArcGIS FeatureServer...\n")
+  
+  # Query parameters for ArcGIS
+  params <- list(
+    where = "1=1",
+    outFields = "*",
+    returnGeometry = "true",
+    f = "geojson"
+  )
+  
+  # Retry logic
+  geojson_data <- NULL
+  for (attempt in 1:retries) {
+    tryCatch({
+      response <- httr::GET(ARCGIS_LAYER3_URL, query = params, httr::timeout(60))
+      
+      if (httr::status_code(response) == 200) {
+        geojson_text <- httr::content(response, as = "text", encoding = "UTF-8")
+        geojson_data <- jsonlite::fromJSON(geojson_text, simplifyVector = FALSE)
+        cat("✓ Successfully fetched polygon data\n")
+        break
+      } else {
+        cat(sprintf("✗ HTTP %d on attempt %d/%d\n", 
+                    httr::status_code(response), attempt, retries))
+      }
+    }, error = function(e) {
+      cat(sprintf("✗ Error on attempt %d/%d: %s\n", attempt, retries, e$message))
+    })
+    
+    if (attempt < retries) Sys.sleep(2)
+  }
+  
+  if (is.null(geojson_data)) {
+    stop("Failed to fetch polygons after ", retries, " attempts")
+  }
+  
+  # Convert to sf object
+  polygons_sf <- sf::st_read(jsonlite::toJSON(geojson_data, auto_unbox = TRUE), 
+                              quiet = quiet)
+  
+  # Transform to match expected format
+  TZ_local <- if (exists("TZ", inherits = FALSE)) get("TZ") else "America/Toronto"
+  
+  polygons_sf <- polygons_sf %>%
+    dplyr::mutate(
+      # Convert dateCreation from milliseconds to datetime
+      timestamp = lubridate::as_datetime(dateCreation / 1000, tz = TZ_local),
+      
+      # Create formatted fields
+      Name = idInterruption,
+      description = "",
+      begin = format(timestamp, "%Y-%m-%dT%H:%M:%S"),
+      end = "",
+      altitudeMode = "clampToGround",
+      tessellate = -1L,
+      extrude = 0L,
+      visibility = -1L,
+      drawOrder = 0L,
+      icon = ""
+    )
+  
+  # Calculate centroid
+  centroids <- sf::st_centroid(polygons_sf$geometry)
+  coords <- sf::st_coordinates(centroids)
+  polygons_sf$centroid <- paste0(
+    round(coords[, 1], 6), ",", round(coords[, 2], 6)
+  )
+  
+  # Add metadata if requested
+  if (isTRUE(add_metadata)) {
+    polygons_sf$hq_version <- format(polygons_sf$timestamp, "%Y%m%d%H%M%S")
+    polygons_sf$hq_retrieved_at <- format(
+      lubridate::with_tz(Sys.time(), TZ_local), 
+      "%Y-%m-%dT%H:%M:%S"
+    )
+  }
+  
+  # Select final columns
+  polygons_sf <- polygons_sf %>%
+    dplyr::select(
+      Name, description, timestamp, begin, end, altitudeMode,
+      tessellate, extrude, visibility, drawOrder, icon,
+      centroid, hq_version, hq_retrieved_at, geometry
+    )
+  
+  cat(sprintf("✓ Transformed %d polygons\n", nrow(polygons_sf)))
+  
+  polygons_sf
+}
+
+# ============================================
+# KEEP OLD FUNCTIONS FOR OUTAGES DATA
 # ============================================
 
 # Improved version fetching with fallback mechanisms
@@ -23,10 +181,8 @@ get_version_robust <- function(retries = 3) {
     })
     
     # Fallback: try to get current timestamp-based version
-    # HQ often uses format: YYYYMMDDHHmmss
     if (attempt == retries) {
       cat("Using fallback: generating version from current time\n")
-      # Round to nearest 5-minute interval (HQ updates every ~5 min)
       now <- lubridate::with_tz(Sys.time(), "America/Toronto")
       rounded_min <- floor(lubridate::minute(now) / 5) * 5
       now <- lubridate::floor_date(now, "hour") + lubridate::minutes(rounded_min)
@@ -41,58 +197,7 @@ get_version_robust <- function(retries = 3) {
   stop("Could not obtain valid version after ", retries, " attempts")
 }
 
-# REPLACE the get_hq_polygons function with this version:
-get_hq_polygons <- function(add_metadata = TRUE, quiet = TRUE) {
-  .hq_require_pkg("sf", "polygons output")
-  
-  # 1) Get version with robust retry logic
-  ver <- get_version_robust(retries = 3)
-  
-  # 2) Download KMZ with retry
-  kmz_url <- paste0(BASE, "bispoly", ver, ".kmz")
-  tmp_kmz <- tempfile(fileext = ".kmz")
-  tmp_dir <- tempfile()
-  dir.create(tmp_dir, recursive = TRUE, showWarnings = FALSE)
-  
-  download_success <- FALSE
-  for (attempt in 1:3) {
-    r <- try(httr::GET(kmz_url, httr::write_disk(tmp_kmz, overwrite = TRUE), 
-                       httr::timeout(60)), silent = TRUE)
-    
-    if (!inherits(r, "try-error") && httr::status_code(r) == 200) {
-      download_success <- TRUE
-      break
-    }
-    
-    cat("Download attempt", attempt, "failed, retrying...\n")
-    Sys.sleep(2)
-  }
-  
-  if (!download_success) {
-    stop("Failed to download polygons after 3 attempts from: ", kmz_url)
-  }
-  
-  # 3) Try direct KMZ read; if it fails, unzip -> read KML
-  poly <- try(sf::st_read(tmp_kmz, quiet = quiet), silent = TRUE)
-  if (inherits(poly, "try-error")) {
-    utils::unzip(tmp_kmz, exdir = tmp_dir)
-    kml <- list.files(tmp_dir, pattern = "\\.kml$", full.names = TRUE)[1]
-    if (is.na(kml)) stop("No .kml found inside the downloaded .kmz")
-    poly <- sf::st_read(kml, quiet = quiet)
-  }
-  
-  poly <- .hq_clean_polys(poly)
-  
-  if (isTRUE(add_metadata)) {
-    TZ_local <- if (exists("TZ", inherits = FALSE)) get("TZ") else "America/Toronto"
-    poly$hq_version      <- ver
-    poly$hq_retrieved_at <- as.character(lubridate::with_tz(Sys.time(), TZ_local))
-  }
-  
-  poly
-}
-
-# REPLACE the get_hq_outages function to use the robust version getter:
+# Get outages (keeping old API since polygons come from new API)
 get_hq_outages <- function(return_sf = FALSE) {
   # 1) Get version with robust retry
   ver <- get_version_robust(retries = 3)
@@ -110,7 +215,7 @@ get_hq_outages <- function(return_sf = FALSE) {
     stop("Failed to fetch outages after 3 attempts")
   }
   
-  # Rest of the function stays the same...
+  # Parse outages
   pannes <- raw$pannes %||na% raw$markers %||na% raw$outages
   if (is.null(pannes)) {
     if (is.list(raw) && length(raw) > 0 && is.list(raw[[1]])) {
@@ -123,7 +228,6 @@ get_hq_outages <- function(return_sf = FALSE) {
     return(tibble::tibble())
   }
   
-  # [Rest of the existing function code...]
   df <- lapply(pannes, function(row) {
     row <- c(row, rep(NA, 16))[1:16]
     coords <- as.character(row[[5]])
@@ -174,4 +278,40 @@ get_hq_outages <- function(return_sf = FALSE) {
   }
   
   df
+}
+
+# Clean polygons (helper function)
+.hq_clean_polys <- function(poly) {
+  poly
+}
+
+# Join outages with polygons
+hq_outages_join_polygons <- function(polygons_sf, outages_sf) {
+  if (!has_sf) {
+    stop("Package 'sf' required for spatial join")
+  }
+  
+  # Ensure same CRS
+  if (sf::st_crs(polygons_sf) != sf::st_crs(outages_sf)) {
+    outages_sf <- sf::st_transform(outages_sf, sf::st_crs(polygons_sf))
+  }
+  
+  # Spatial join
+  joined <- sf::st_join(outages_sf, polygons_sf, join = sf::st_within)
+  
+  # Summarize by polygon
+  summary <- joined %>%
+    sf::st_drop_geometry() %>%
+    dplyr::group_by(Name) %>%
+    dplyr::summarise(
+      n_outages = dplyr::n(),
+      customers_sum = sum(customers, na.rm = TRUE),
+      .groups = "drop"
+    ) %>%
+    dplyr::rename(poly_id = Name)
+  
+  list(
+    joined = joined,
+    summary = summary
+  )
 }
