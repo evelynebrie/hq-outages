@@ -40,9 +40,34 @@ jobs:
           key: hq-daily-data-${{ github.run_id }}
           restore-keys: hq-daily-data-
 
+      - name: Get Fresh Access Token
+        id: get_token
+        env:
+          DROPBOX_REFRESH_TOKEN: ${{ secrets.DROPBOX_REFRESH_TOKEN }}
+          DROPBOX_APP_KEY: ${{ secrets.DROPBOX_APP_KEY }}
+          DROPBOX_APP_SECRET: ${{ secrets.DROPBOX_APP_SECRET }}
+        run: |
+          echo "Getting fresh access token from refresh token..."
+          
+          RESPONSE=$(curl -s -X POST https://api.dropbox.com/oauth2/token \
+            -u "${DROPBOX_APP_KEY}:${DROPBOX_APP_SECRET}" \
+            -d "grant_type=refresh_token&refresh_token=${DROPBOX_REFRESH_TOKEN}")
+          
+          # Check if we got an access token
+          ACCESS_TOKEN=$(echo "$RESPONSE" | jq -r '.access_token // empty')
+          
+          if [ -z "$ACCESS_TOKEN" ]; then
+            echo "Failed to get access token. Response:"
+            echo "$RESPONSE"
+            exit 1
+          fi
+          
+          echo "✅ Successfully obtained fresh access token (never expires!)"
+          echo "access_token=$ACCESS_TOKEN" >> $GITHUB_OUTPUT
+
       - name: Download NEW files from Dropbox
         env:
-          DROPBOX_TOKEN: ${{ secrets.DROPBOX_TOKEN }}
+          DROPBOX_TOKEN: ${{ steps.get_token.outputs.access_token }}
         run: |
           set -eo pipefail
           
