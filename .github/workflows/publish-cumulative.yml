@@ -5,6 +5,12 @@ on:
     - cron: '30 3 * * *'
   workflow_dispatch:
 
+# ADD THIS SECTION - CRITICAL FOR DEPLOYMENT
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
