@@ -121,6 +121,21 @@ cat(sprintf("  ✓ Loaded %d polygons in %.1f seconds\n",
 
 # Combine all polygons into one sf object
 cat("  Combining polygons...\n")
+
+# Ensure all polygons have the same columns (only keep the ones we added)
+all_polys_list <- lapply(all_polys_list, function(poly) {
+  # Keep only the columns we need
+  poly_simple <- st_sf(
+    datetime = poly$datetime,
+    date = poly$date,
+    hour = poly$hour,
+    file_id = poly$file_id,
+    geometry = st_geometry(poly)
+  )
+  st_crs(poly_simple) <- st_crs(poly)
+  return(poly_simple)
+})
+
 all_polys <- do.call(rbind, all_polys_list)
 rm(all_polys_list)
 gc()
