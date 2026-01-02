@@ -408,7 +408,9 @@ cat("\n[STEP 7: Generating HTML map]\n")
 num_days <- length(unique(files_dt$date))
 hex_size_km <- round(HEX_SIZE / 1000, 1)
 
-# Generate HTML (we'll create a simplified version)
+# Generate HTML with detail modal and correct hour counting
+hour_options <- paste(sapply(0:23, function(i) sprintf('<option value="%d">%d:00</option>', i, i)), collapse="")
+
 html_template <- sprintf('<!DOCTYPE html>
 <html lang="fr">
 <head>
@@ -416,7 +418,9 @@ html_template <- sprintf('<!DOCTYPE html>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.css"/>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.js"></script>
     <style>
         body{margin:0;padding:0;font-family:-apple-system,system-ui,sans-serif}
         #map{position:absolute;top:0;bottom:0;width:100%%}
@@ -425,66 +429,173 @@ html_template <- sprintf('<!DOCTYPE html>
         .info p{margin:4px 0;font-size:13px}
         .legend{line-height:20px;font-size:12px}
         .legend i{width:18px;height:18px;float:left;margin-right:8px;opacity:0.8;border-radius:2px}
+        .controls{padding:10px;background:white;box-shadow:0 2px 10px rgba(0,0,0,0.1);border-radius:8px;max-width:250px}
+        .controls h4{margin:0 0 8px;font-size:14px;font-weight:600}
+        .controls label{display:block;margin:8px 0 4px;font-size:12px;font-weight:500}
+        .controls select{width:100%%;padding:6px;border-radius:4px;border:1px solid #ddd;font-size:12px}
+        .detail-link{color:#0066cc;cursor:pointer;text-decoration:underline;font-size:12px;margin-top:8px;display:inline-block}
+        .detail-link:hover{color:#0052a3}
+        .detail-modal{display:none;position:fixed;z-index:2000;left:50%%;top:50%%;transform:translate(-50%%,-50%%);
+                      background:white;padding:20px;border-radius:8px;box-shadow:0 4px 20px rgba(0,0,0,0.3);
+                      max-width:90vw;width:600px;max-height:85vh;overflow-y:auto}
+        .detail-modal.active{display:block}
+        .modal-overlay{display:none;position:fixed;z-index:1999;left:0;top:0;width:100%%;height:100%%;
+                       background:rgba(0,0,0,0.5)}
+        .modal-overlay.active{display:block}
+        .close-modal{float:right;font-size:24px;font-weight:bold;cursor:pointer;color:#999;line-height:1}
+        .close-modal:hover{color:#333}
+        .detail-table{width:100%%;border-collapse:collapse;margin-top:10px;font-size:13px}
+        .detail-table th,.detail-table td{text-align:left;padding:8px;border-bottom:1px solid #eee}
+        .detail-table th{font-weight:600;background:#f5f5f5;position:sticky;top:0}
+        .detail-table tfoot td{font-weight:600;background:#f9f9f9;border-top:2px solid #ccc}
+        @media (max-width: 768px) {
+            .detail-modal{width:95vw;max-height:90vh;padding:15px}
+            .detail-table{font-size:12px}
+            .detail-table th,.detail-table td{padding:6px}
+        }
     </style>
 </head>
 <body>
     <div id="map"></div>
+    <div class="modal-overlay" id="modalOverlay"></div>
+    <div class="detail-modal" id="detailModal">
+        <span class="close-modal" onclick="closeDetailModal()">&times;</span>
+        <div id="modalContent"></div>
+    </div>
     <script>
         var map = L.map("map").setView([46.2, -72.5], 9);
         L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{attribution:"© OSM"}).addTo(map);
-        
-        function getColor(d) {
-            return d>80?"#67000d":d>60?"#a50f15":d>40?"#cb181d":d>20?"#ef3b2c":
-                   d>10?"#fb6a4a":d>5?"#fc9272":d>2?"#fcbba1":"#fee5d9";
-        }
-        
-        fetch("total/total_exposure.geojson")
-            .then(r => r.json())
-            .then(data => {
-                L.geoJSON(data, {
-                    style: f => ({
-                        fillColor: getColor(f.properties.hours_count),
-                        weight: 1,
-                        opacity: 0.6,
-                        color: "#666",
-                        fillOpacity: 0.7
-                    }),
-                    onEachFeature: (f, layer) => {
-                        const p = f.properties;
-                        const popup = `<b>Hexagone #${p.hex_id}</b><br>
-                                      Heures affectées: <b>${p.hours_count}</b><br>
-                                      Jours affectés: <b>${p.days_affected}</b><br>
-                                      Centroïde: ${p.centroid_lat.toFixed(6)}, ${p.centroid_lon.toFixed(6)}`;
-                        layer.bindPopup(popup);
+        var currentLayer,allData={},legendControl=null;
+        function getColor(d){return d>80?"#67000d":d>60?"#a50f15":d>40?"#cb181d":d>20?"#ef3b2c":d>10?"#fb6a4a":d>5?"#fc9272":d>2?"#fcbba1":"#fee5d9";}
+        async function loadData(){
+            try{
+                const r=await fetch("total/total_exposure.geojson");
+                const data=await r.json();
+                allData.total=data;
+                const dates=new Set();
+                data.features.forEach(f=>{
+                    if(f.properties.datetimes_affected){
+                        f.properties.datetimes_affected.split(",").forEach(dt=>{
+                            const c=dt.trim();
+                            if(c){const d=c.split(" ")[0];dates.add(d);}
+                        });
                     }
-                }).addTo(map);
+                });
+                const sel=document.getElementById("dateSelect");
+                Array.from(dates).sort().forEach(d=>{const o=document.createElement("option");o.value=d;o.text=d;sel.appendChild(o);});
+                updateMap();
+            }catch(e){console.error("Error:",e);alert("Erreur de chargement");}
+        }
+        function updateMap(){
+            const df=document.getElementById("dateSelect").value;
+            const hf=document.getElementById("hourSelect").value;
+            if(currentLayer)map.removeLayer(currentLayer);
+            const isFilt=df!=="all"||hf!=="all";
+            currentLayer=L.geoJSON(allData.total,{
+                filter:f=>{
+                    if(!isFilt)return true;
+                    if(!f.properties.datetimes_affected)return false;
+                    return f.properties.datetimes_affected.split(",").map(s=>s.trim()).some(dt=>{
+                        if(!dt)return false;
+                        const p=dt.split(" ");
+                        if(p.length!==2)return false;
+                        const d=p[0],t=p[1],h=parseInt(t.split(":")[0]);
+                        return(df==="all"||d===df)&&(hf==="all"||h===parseInt(hf));
+                    });
+                },
+                style:f=>({fillColor:getColor(f.properties.hours_count),weight:1,opacity:0.6,color:"#666",fillOpacity:0.7}),
+                onEachFeature:(f,layer)=>{
+                    const p=f.properties;
+                    let dh=p.hours_count;
+                    if(isFilt&&p.datetimes_affected){
+                        const fdt=p.datetimes_affected.split(",").map(s=>s.trim()).filter(s=>s).filter(dt=>{
+                            const parts=dt.split(" ");
+                            if(parts.length!==2)return false;
+                            const d=parts[0],t=parts[1],h=parseInt(t.split(":")[0]);
+                            return(df==="all"||d===df)&&(hf==="all"||h===parseInt(hf));
+                        });
+                        dh=fdt.length;
+                    }
+                    const popup=`<div style="min-width:200px"><b>Hexagone #${p.hex_id}</b><br><b>Heures affectées:</b> ${dh}<br><b>Jours affectés:</b> ${p.days_affected}<br><b>Centroïde:</b> ${p.centroid_lat.toFixed(6)}, ${p.centroid_lon.toFixed(6)}<br><a class="detail-link" onclick="showDetails(${p.hex_id})">Voir les détails →</a></div>`;
+                    layer.bindPopup(popup);
+                }
+            }).addTo(map);
+            if(legendControl){if(isFilt){map.removeControl(legendControl);}else if(!map.hasControl(legendControl)){legendControl.addTo(map);}}
+        }
+        function showDetails(hexId){
+            const f=allData.total.features.find(f=>f.properties.hex_id===hexId);
+            if(!f){alert("Données non trouvées");return;}
+            const p=f.properties;
+            if(!p.datetimes_affected){alert("Aucune donnée temporelle");return;}
+            const dts=p.datetimes_affected.split(",").map(s=>s.trim()).filter(s=>s).sort();
+            if(dts.length===0){alert("Aucune donnée temporelle");return;}
+            const byDate={};
+            dts.forEach(dt=>{
+                const parts=dt.split(" ");
+                if(parts.length!==2)return;
+                const d=parts[0],t=parts[1];
+                if(!byDate[d])byDate[d]=[];
+                const hm=t.match(/^(\\d{1,2}):/);
+                if(hm){const h=parseInt(hm[1]);byDate[d].push(h);}
             });
-        
-        var info = L.control({position:"topright"});
-        info.onAdd = () => {
-            var div = L.DomUtil.create("div","info");
-            div.innerHTML = "<h4>Pannes cumulatives</h4>" +
-                           "<p><b>Hexagones:</b> %s km</p>" +
-                           "<p><b>Jours:</b> %d</p>" +
-                           "<p><b>Début analyse:</b> %s</p>";
+            let html="<h3>Hexagone #"+hexId+"</h3>";
+            html+="<p><strong>Centroïde:</strong> "+p.centroid_lat.toFixed(6)+", "+p.centroid_lon.toFixed(6)+"</p>";
+            html+="<h4>Heures affectées par date:</h4>";
+            html+="<table class=\\"detail-table\\"><thead><tr><th>Date</th><th>Heures affectées</th><th>Total</th></tr></thead><tbody>";
+            const sdates=Object.keys(byDate).sort();
+            let th=0;
+            sdates.forEach(d=>{
+                const hs=byDate[d].sort((a,b)=>a-b);
+                const hl=hs.map(h=>h+":00").join(", ");
+                const c=hs.length;
+                th+=c;
+                html+="<tr><td>"+d+"</td><td>"+hl+"</td><td><b>"+c+"</b></td></tr>";
+            });
+            html+="</tbody><tfoot><tr><td colspan=\\"2\\"><strong>Total</strong></td><td><strong>"+th+" heures sur "+sdates.length+" jours</strong></td></tr></tfoot></table>";
+            html+="<p style=\\"font-size:11px;color:#666;margin-top:10px;\\"><em>Chaque entrée représente une heure où ce secteur était marqué comme ayant une panne</em></p>";
+            document.getElementById("modalContent").innerHTML=html;
+            document.getElementById("detailModal").classList.add("active");
+            document.getElementById("modalOverlay").classList.add("active");
+        }
+        function closeDetailModal(){
+            document.getElementById("detailModal").classList.remove("active");
+            document.getElementById("modalOverlay").classList.remove("active");
+        }
+        document.getElementById("modalOverlay").onclick=closeDetailModal;
+        loadData();
+        legendControl=L.control({position:"bottomright"});
+        legendControl.onAdd=()=>{
+            var div=L.DomUtil.create("div","info legend");
+            div.innerHTML="<h4>Heures affectées</h4>";
+            [0,2,5,10,20,40,60,80].forEach((g,i,a)=>{
+                div.innerHTML+="<i style=\\"background:"+getColor(g+1)+"\\"></i>"+g+(a[i+1]?"–"+a[i+1]:"+")+  "<br>";
+            });
+            return div;
+        };
+        legendControl.addTo(map);
+        var geocoder=L.Control.geocoder({defaultMarkGeocode:false,placeholder:"Adresse ou code postal...",errorMessage:"Adresse non trouvée"})
+        .on("markgeocode",function(e){
+            var bbox=e.geocode.bbox;
+            var poly=L.polygon([bbox.getSouthEast(),bbox.getNorthEast(),bbox.getNorthWest(),bbox.getSouthWest()]);
+            map.fitBounds(poly.getBounds());
+        }).addTo(map);
+        var info=L.control({position:"topright"});
+        info.onAdd=()=>{
+            var div=L.DomUtil.create("div","info");
+            div.innerHTML="<h4>Pannes cumulatives</h4><p><b>Hexagones:</b> %s km</p><p><b>Jours:</b> %d</p><p><b>Début analyse:</b> %s</p>";
             return div;
         };
         info.addTo(map);
-        
-        var legend = L.control({position:"bottomright"});
-        legend.onAdd = () => {
-            var div = L.DomUtil.create("div","info legend");
-            div.innerHTML = "<h4>Heures affectées</h4>";
-            [0,2,5,10,20,40,60,80].forEach((g,i,a) => {
-                div.innerHTML += "<i style=\\"background:" + getColor(g+1) + "\\"></i>" + 
-                               g + (a[i+1]?"–"+a[i+1]:"+") + "<br>";
-            });
+        var controls=L.control({position:"topleft"});
+        controls.onAdd=()=>{
+            var div=L.DomUtil.create("div","controls");
+            div.innerHTML="<h4>Filtres</h4><label>Date:</label><select id=\\"dateSelect\\" onchange=\\"updateMap()\\"><option value=\\"all\\">Toutes (défaut)</option></select><label>Heure:</label><select id=\\"hourSelect\\" onchange=\\"updateMap()\\"><option value=\\"all\\">Toutes</option>%s</select>";
             return div;
         };
-        legend.addTo(map);
+        controls.addTo(map);
     </script>
 </body>
-</html>', hex_size_km, num_days, as.character(ANALYSIS_START_DATE))
+</html>', hex_size_km, num_days, as.character(ANALYSIS_START_DATE), hour_options)
 
 html_path <- file.path(output_dir, "index.html")
 writeLines(html_template, html_path)
