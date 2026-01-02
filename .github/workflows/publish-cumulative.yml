@@ -5,7 +5,6 @@ on:
     - cron: '30 3 * * *'
   workflow_dispatch:
 
-# ADD THIS SECTION - CRITICAL FOR DEPLOYMENT
 permissions:
   contents: write
   pages: write
@@ -37,7 +36,7 @@ jobs:
 
       - name: Install R packages
         run: |
-          Rscript -e 'pkgs <- c("sf","dplyr","fs","purrr","jsonlite","data.table"); inst <- setdiff(pkgs, rownames(installed.packages())); if(length(inst)) { cat("Installing", length(inst), "packages\n"); install.packages(inst, repos="https://cloud.r-project.org", Ncpus=2) } else { cat("All packages cached\n") }'
+          Rscript -e 'pkgs <- c("sf","dplyr","fs","purrr","jsonlite","data.table","lubridate"); inst <- setdiff(pkgs, rownames(installed.packages())); if(length(inst)) { cat("Installing", length(inst), "packages\n"); install.packages(inst, repos="https://cloud.r-project.org", Ncpus=2) } else { cat("All packages cached\n") }'
 
       - name: Restore data cache
         uses: actions/cache@v3
@@ -45,6 +44,30 @@ jobs:
           path: data/daily/
           key: hq-daily-data-${{ github.run_id }}
           restore-keys: hq-daily-data-
+
+      # NEW: Cache daily summaries for faster incremental processing
+      - name: Restore daily summaries cache
+        uses: actions/cache@v3
+        with:
+          path: public/daily_summaries/
+          key: hq-daily-summaries-${{ github.run_id }}
+          restore-keys: hq-daily-summaries-
+
+      # NEW: Cache monthly summaries for faster incremental processing
+      - name: Restore monthly summaries cache
+        uses: actions/cache@v3
+        with:
+          path: public/monthly_summaries/
+          key: hq-monthly-summaries-${{ github.run_id }}
+          restore-keys: hq-monthly-summaries-
+
+      # NEW: Cache hex grid template (created once, reused forever)
+      - name: Restore hex grid cache
+        uses: actions/cache@v3
+        with:
+          path: public/hex_grid_template.rds
+          key: hq-hex-grid-v1
+          restore-keys: hq-hex-grid-
 
       - name: Get Fresh Access Token
         id: get_token
@@ -68,7 +91,7 @@ jobs:
             exit 1
           fi
           
-          echo "✅ Successfully obtained fresh access token (never expires!)"
+          echo "✅ Successfully obtained fresh access token"
           echo "access_token=$ACCESS_TOKEN" >> $GITHUB_OUTPUT
 
       - name: Download NEW files from Dropbox
@@ -160,9 +183,8 @@ jobs:
             exit 0
           fi
           
-          # Extract polygons and CSV files
+          # Extract polygons only (no CSV needed for new system)
           POLYGONS=$(echo "$ALL_FILES" | grep "/polygons_.*\.geojson$" || true)
-          CSV=$(echo "$ALL_FILES" | grep "/outages_joined_.*\.csv$" || true)
           
           # Count relevant files
           POLY_COUNT=0
@@ -170,14 +192,7 @@ jobs:
             POLY_COUNT=$(echo "$POLYGONS" | wc -l)
           fi
           
-          CSV_COUNT=0
-          if [ ! -z "$CSV" ]; then
-            CSV_COUNT=$(echo "$CSV" | wc -l)
-          fi
-          
-          TOTAL=$((POLY_COUNT + CSV_COUNT))
-          
-          echo "Found $TOTAL relevant files ($POLY_COUNT polygons, $CSV_COUNT CSV)"
+          echo "Found $POLY_COUNT polygon files"
           
           # Show date range
           if [ $POLY_COUNT -gt 0 ]; then
@@ -194,8 +209,8 @@ jobs:
             done
           fi
           
-          if [ "$TOTAL" -eq 0 ]; then
-            echo "⚠️  No polygon or CSV files found"
+          if [ "$POLY_COUNT" -eq 0 ]; then
+            echo "⚠️  No polygon files found"
             echo "✓ Continuing with cached data..."
             mkdir -p data/daily
             exit 0
@@ -243,26 +258,13 @@ jobs:
             fi
           done <<< "$POLYGONS"
           
-          echo "Processing CSV files..."
-          # Download CSVs
-          while IFS= read -r file; do
-            [ -z "$file" ] && continue
-            
-            if download_file "$file"; then
-              NEW=$((NEW + 1))
-              DOWNLOADED=$((DOWNLOADED + 1))
-            else
-              CACHED=$((CACHED + 1))
-            fi
-          done <<< "$CSV"
-          
           echo ""
-          echo "📊 Summary: $CACHED cached, $NEW new, $TOTAL total files"
+          echo "📊 Summary: $CACHED cached, $NEW new, $POLY_COUNT total files"
           echo "Files flattened into data/daily/ for R processing"
 
-      - name: Run R analysis
+      - name: Run R analysis (incremental)
         run: |
-          echo "Starting analysis..."
+          echo "Starting incremental analysis..."
           [ ! -f "R/build_cumulative_hex.R" ] && echo "ERROR: Script not found" && exit 1
           
           # Check if we have any data files
@@ -273,6 +275,20 @@ jobs:
           fi
           
           echo "Processing $FILE_COUNT polygon data files..."
+          
+          # Check for existing summaries
+          DAILY_SUMMARIES=$(find public/daily_summaries -name "*.rds" 2>/dev/null | wc -l || echo 0)
+          MONTHLY_SUMMARIES=$(find public/monthly_summaries -name "*.rds" 2>/dev/null | wc -l || echo 0)
+          
+          echo "Found $DAILY_SUMMARIES existing daily summaries"
+          echo "Found $MONTHLY_SUMMARIES existing monthly summaries"
+          
+          if [ $DAILY_SUMMARIES -gt 0 ]; then
+            echo "✅ Incremental mode: Will reuse existing summaries"
+          else
+            echo "🔄 First run: Will build all summaries (this takes longer)"
+          fi
+          
           Rscript R/build_cumulative_hex.R
 
       - name: Deploy to GitHub Pages
