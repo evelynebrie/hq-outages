@@ -27,16 +27,45 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libgdal-dev libgeos-dev libproj-dev libudunits2-dev jq curl
 
-      - name: Cache R packages
+      # NEW: renv-based package management (much faster, more reliable)
+      - name: Cache R packages (renv)
         uses: actions/cache@v3
         with:
-          path: ${{ env.R_LIBS_USER }}
-          key: ${{ runner.os }}-r-packages-v2
-          restore-keys: ${{ runner.os }}-r-
+          path: ~/.local/share/renv
+          key: ${{ runner.os }}-renv-${{ hashFiles('**/renv.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-renv-
 
-      - name: Install R packages
+      - name: Restore R package library
         run: |
-          Rscript -e 'pkgs <- c("sf","dplyr","fs","purrr","jsonlite","data.table","lubridate"); inst <- setdiff(pkgs, rownames(installed.packages())); if(length(inst)) { cat("Installing", length(inst), "packages\n"); install.packages(inst, repos="https://cloud.r-project.org", Ncpus=2) } else { cat("All packages cached\n") }'
+          if [ ! -f "renv.lock" ]; then
+            echo "No renv.lock found - creating one..."
+            Rscript -e '
+              if (!requireNamespace("renv", quietly = TRUE)) install.packages("renv")
+              renv::init(bare = TRUE, restart = FALSE)
+              renv::install(c("sf","dplyr","fs","purrr","jsonlite","data.table","lubridate"))
+              renv::snapshot(prompt = FALSE)
+            '
+          else
+            echo "Found renv.lock - restoring packages..."
+            Rscript -e '
+              if (!requireNamespace("renv", quietly = TRUE)) install.packages("renv")
+              renv::restore(prompt = FALSE)
+            '
+          fi
+          
+          # Verify packages loaded correctly
+          echo ""
+          echo "Verifying packages:"
+          Rscript -e '
+            pkgs <- c("sf","dplyr","jsonlite","data.table","lubridate")
+            status <- sapply(pkgs, function(p) {
+              loaded <- suppressPackageStartupMessages(require(p, character.only=TRUE, quietly=TRUE))
+              cat(sprintf("  %s %s\n", if(loaded) "✓" else "✗", p))
+              loaded
+            })
+            if(!all(status)) stop("Some packages failed to load")
+          '
 
       - name: Restore data cache
         uses: actions/cache@v3
@@ -45,7 +74,6 @@ jobs:
           key: hq-daily-data-${{ github.run_id }}
           restore-keys: hq-daily-data-
 
-      # NEW: Cache daily summaries for faster incremental processing
       - name: Restore daily summaries cache
         uses: actions/cache@v3
         with:
@@ -53,7 +81,6 @@ jobs:
           key: hq-daily-summaries-${{ github.run_id }}
           restore-keys: hq-daily-summaries-
 
-      # NEW: Cache monthly summaries for faster incremental processing
       - name: Restore monthly summaries cache
         uses: actions/cache@v3
         with:
@@ -61,7 +88,6 @@ jobs:
           key: hq-monthly-summaries-${{ github.run_id }}
           restore-keys: hq-monthly-summaries-
 
-      # NEW: Cache hex grid template (created once, reused forever)
       - name: Restore hex grid cache
         uses: actions/cache@v3
         with:
@@ -82,7 +108,6 @@ jobs:
             -u "${DROPBOX_APP_KEY}:${DROPBOX_APP_SECRET}" \
             -d "grant_type=refresh_token&refresh_token=${DROPBOX_REFRESH_TOKEN}")
           
-          # Check if we got an access token
           ACCESS_TOKEN=$(echo "$RESPONSE" | jq -r '.access_token // empty')
           
           if [ -z "$ACCESS_TOKEN" ]; then
@@ -102,52 +127,43 @@ jobs:
           
           echo "Listing Dropbox files (with pagination support)..."
           
-          # Initialize
           ALL_FILES=""
           HAS_MORE=true
           CURSOR=""
           PAGE=1
           
-          # Fetch all pages
           while [ "$HAS_MORE" = "true" ]; do
             echo "Fetching page $PAGE..."
             
             if [ -z "$CURSOR" ]; then
-              # First request
               RESPONSE=$(curl -s -X POST https://api.dropboxapi.com/2/files/list_folder \
                 -H "Authorization: Bearer $DROPBOX_TOKEN" \
                 -H "Content-Type: application/json" \
                 -d '{"path": "/hq-outages", "recursive": true}')
             else
-              # Continue with cursor
               RESPONSE=$(curl -s -X POST https://api.dropboxapi.com/2/files/list_folder/continue \
                 -H "Authorization: Bearer $DROPBOX_TOKEN" \
                 -H "Content-Type: application/json" \
                 -d "{\"cursor\": \"$CURSOR\"}")
             fi
             
-            # Check for API errors
             if echo "$RESPONSE" | jq -e '.error' > /dev/null 2>&1; then
               echo "❌ Error from Dropbox API:"
               echo "$RESPONSE" | jq '.error'
               exit 1
             fi
             
-            # Check if entries field exists
             if ! echo "$RESPONSE" | jq -e '.entries' > /dev/null 2>&1; then
               echo "❌ Unexpected response format (no .entries field)"
               echo "$RESPONSE"
               exit 1
             fi
             
-            # Count entries in this page
             PAGE_COUNT=$(echo "$RESPONSE" | jq '.entries | length')
             echo "  Found $PAGE_COUNT entries in page $PAGE"
             
-            # Extract file paths from this page
             PAGE_FILES=$(echo "$RESPONSE" | jq -r '.entries[]? | select(.".tag" == "file") | .path_display' || true)
             
-            # Append to all files
             if [ ! -z "$PAGE_FILES" ]; then
               if [ -z "$ALL_FILES" ]; then
                 ALL_FILES="$PAGE_FILES"
@@ -156,7 +172,6 @@ jobs:
               fi
             fi
             
-            # Check if there are more pages
             HAS_MORE=$(echo "$RESPONSE" | jq -r '.has_more')
             
             if [ "$HAS_MORE" = "true" ]; then
@@ -168,14 +183,12 @@ jobs:
           echo ""
           echo "Completed pagination: fetched $PAGE page(s)"
           
-          # Count total files
           TOTAL_FILE_COUNT=0
           if [ ! -z "$ALL_FILES" ]; then
             TOTAL_FILE_COUNT=$(echo "$ALL_FILES" | wc -l)
           fi
           echo "Total files found: $TOTAL_FILE_COUNT"
           
-          # If no files found
           if [ -z "$ALL_FILES" ] || [ "$TOTAL_FILE_COUNT" -eq 0 ]; then
             echo "⚠️  No files found in Dropbox"
             echo "✓ Continuing with cached data..."
@@ -183,10 +196,8 @@ jobs:
             exit 0
           fi
           
-          # Extract polygons only (no CSV needed for new system)
           POLYGONS=$(echo "$ALL_FILES" | grep "/polygons_.*\.geojson$" || true)
           
-          # Count relevant files
           POLY_COUNT=0
           if [ ! -z "$POLYGONS" ]; then
             POLY_COUNT=$(echo "$POLYGONS" | wc -l)
@@ -194,7 +205,6 @@ jobs:
           
           echo "Found $POLY_COUNT polygon files"
           
-          # Show date range
           if [ $POLY_COUNT -gt 0 ]; then
             echo ""
             echo "Date range in files:"
@@ -222,26 +232,24 @@ jobs:
           NEW=0
           DOWNLOADED=0
           
-          # Function to download and flatten structure
           download_file() {
             local dropbox_path="$1"
             local filename=$(basename "$dropbox_path")
             local local_path="data/daily/$filename"
             
             if [ -f "$local_path" ]; then
-              return 1  # Cached
+              return 1
             else
               curl -s -X POST https://content.dropboxapi.com/2/files/download \
                 -H "Authorization: Bearer $DROPBOX_TOKEN" \
                 -H "Dropbox-API-Arg: {\"path\": \"$dropbox_path\"}" \
                 -o "$local_path"
-              return 0  # Downloaded
+              return 0
             fi
           }
           
           echo ""
           echo "Processing polygon files..."
-          # Download polygons
           while IFS= read -r file; do
             [ -z "$file" ] && continue
             
@@ -267,7 +275,6 @@ jobs:
           echo "Starting incremental analysis..."
           [ ! -f "R/build_cumulative_hex.R" ] && echo "ERROR: Script not found" && exit 1
           
-          # Check if we have any data files
           FILE_COUNT=$(find data/daily -name "polygons_*.geojson" 2>/dev/null | wc -l)
           if [ "$FILE_COUNT" -eq 0 ]; then
             echo "⚠️  No polygon data files found to process"
@@ -276,7 +283,6 @@ jobs:
           
           echo "Processing $FILE_COUNT polygon data files..."
           
-          # Check for existing summaries
           DAILY_SUMMARIES=$(find public/daily_summaries -name "*.rds" 2>/dev/null | wc -l || echo 0)
           MONTHLY_SUMMARIES=$(find public/monthly_summaries -name "*.rds" 2>/dev/null | wc -l || echo 0)
           
@@ -290,6 +296,17 @@ jobs:
           fi
           
           Rscript R/build_cumulative_hex.R
+
+      # NEW: Commit renv.lock if it was created/updated
+      - name: Commit renv.lock if changed
+        run: |
+          if [ -f "renv.lock" ]; then
+            git config --local user.email "github-actions[bot]@users.noreply.github.com"
+            git config --local user.name "github-actions[bot]"
+            git add renv.lock
+            git diff --staged --quiet || git commit -m "Update renv.lock [skip ci]"
+            git push || echo "No changes to push"
+          fi
 
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v3
