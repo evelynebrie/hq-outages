@@ -1,316 +1,366 @@
-# HQ Outages - OPTIMIZED Single-Pass Hex Processing
-# Load ALL polygons first, then intersect with hex grid ONCE
+# HQ Outages - OPTIMIZED with Daily & Monthly Summaries
+# Works directly with GeoJSON polygons (no CSV customer data required)
+# Creates persistent summaries for faster future runs
 
 suppressPackageStartupMessages({
   library(sf)
   library(dplyr)
   library(jsonlite)
   library(data.table)
+  library(lubridate)
 })
 
-cat("=== HQ Outages OPTIMIZED Single-Pass Processing ===\n")
-cat("Strategy: Load all polygons, create hex grid once, count intersections\n")
+cat("=== HQ Outages with Daily & Monthly Summaries ===\n")
+cat("Strategy: Build daily summaries incrementally, aggregate to monthly, then to total\n")
 cat(sprintf("\nStarting at: %s\n", format(Sys.time(), "%Y-%m-%d %H:%M:%S")))
 start_time <- Sys.time()
 
 # Config
-data_path <- "data/daily"
+data_path <- "data"  # hourly data in date=YYYY-MM-DD/hour=HH structure
 output_dir <- "public"
-cumulative_snapshots_dir <- file.path(output_dir, "cumulative_snapshots")
+daily_summaries_dir <- file.path(output_dir, "daily_summaries")
+monthly_summaries_dir <- file.path(output_dir, "monthly_summaries")
 
 HEX_SIZE <- 1000
 SIMPLIFY <- 200
+ANALYSIS_START_DATE <- as.Date("2026-01-01")  # Start analysis from this date
 
+# Create directories
 dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
-dir.create(file.path(output_dir, "daily"), recursive = TRUE, showWarnings = FALSE)
-dir.create(file.path(output_dir, "monthly"), recursive = TRUE, showWarnings = FALSE)
+dir.create(daily_summaries_dir, recursive = TRUE, showWarnings = FALSE)
+dir.create(monthly_summaries_dir, recursive = TRUE, showWarnings = FALSE)
 dir.create(file.path(output_dir, "total"), recursive = TRUE, showWarnings = FALSE)
-dir.create(cumulative_snapshots_dir, recursive = TRUE, showWarnings = FALSE)
 
 # =================================================================
-# STEP 1: Load ALL polygon files with timestamps
+# HELPER FUNCTIONS
 # =================================================================
-cat("\n[1] Loading ALL polygon files...\n")
 
-files <- list.files(data_path, pattern = "^polygons_.*\\.geojson$", full.names = TRUE)
-if (length(files) == 0) stop("No polygon files found")
-
-cat(sprintf("  Found %d polygon files\n", length(files)))
-
-# Parse all timestamps
-cat("  Parsing timestamps...\n")
-basenames <- basename(files)
-timestamps <- regmatches(basenames, regexpr("\\d{8}t\\d{6}", basenames, ignore.case = TRUE))
-
-date_parts <- substr(timestamps, 1, 8)
-dates <- sprintf("%s-%s-%s", 
-                substr(date_parts, 1, 4), 
-                substr(date_parts, 5, 6), 
-                substr(date_parts, 7, 8))
-
-hours <- as.integer(substr(timestamps, 10, 11))
-minutes <- substr(timestamps, 12, 13)
-seconds <- substr(timestamps, 14, 15)
-
-datetimes <- sprintf("%s %s:%s:%s", dates, 
-                    substr(timestamps, 10, 11), minutes, seconds)
-
-files_dt <- data.table(
-  file = files,
-  date = dates,
-  hour = hours,
-  datetime = datetimes,
-  timestamp_sort = as.numeric(as.POSIXct(datetimes, format="%Y-%m-%d %H:%M:%S"))
-)
-
-# Select latest file per hour (deduplication)
-cat("  Deduplicating to latest file per hour...\n")
-setkey(files_dt, date, hour, timestamp_sort)
-files_dt <- files_dt[, .SD[.N], by = .(date, hour)]
-setorder(files_dt, timestamp_sort)
-
-cat(sprintf("  After deduplication: %d unique hourly snapshots\n", nrow(files_dt)))
-cat(sprintf("  Date range: %s to %s\n", min(files_dt$date), max(files_dt$date)))
-cat(sprintf("  Total unique dates: %d\n", length(unique(files_dt$date))))
-
-# Load all polygons
-cat("\n  Loading and processing all polygons...\n")
-cat("  This may take a few minutes...\n")
-
-all_polys_list <- list()
-load_start <- Sys.time()
-
-for (i in seq_len(nrow(files_dt))) {
-  if (i %% 50 == 0) {
-    cat(sprintf("    Loaded %d/%d files (%.1f%%)\n", i, nrow(files_dt), 100*i/nrow(files_dt)))
-  }
+# Find all GeoJSON files in the hourly data structure
+find_polygon_files <- function(data_path, start_date = NULL) {
+  cat("\n[Finding polygon files]\n")
   
-  tryCatch({
-    poly <- st_read(files_dt$file[i], quiet = TRUE) %>%
-      st_transform(32618) %>%
-      st_simplify(dTolerance = SIMPLIFY, preserveTopology = FALSE)
+  # Find all date directories
+  date_dirs <- list.dirs(data_path, recursive = FALSE, full.names = TRUE)
+  date_dirs <- date_dirs[grepl("date=\\d{4}-\\d{2}-\\d{2}", basename(date_dirs))]
+  
+  files_list <- list()
+  
+  for (date_dir in date_dirs) {
+    date_str <- sub("date=", "", basename(date_dir))
+    date_val <- as.Date(date_str)
     
-    # Union multiple polygons into one
-    if (nrow(poly) > 1) {
-      poly <- st_union(poly) %>% st_sf()
+    # Skip dates before analysis start
+    if (!is.null(start_date) && date_val < start_date) {
+      next
     }
     
-    # Add metadata
-    poly$datetime <- files_dt$datetime[i]
-    poly$date <- files_dt$date[i]
-    poly$hour <- files_dt$hour[i]
-    poly$file_id <- i
+    # Find hour directories
+    hour_dirs <- list.dirs(date_dir, recursive = FALSE, full.names = TRUE)
+    hour_dirs <- hour_dirs[grepl("hour=\\d{1,2}", basename(hour_dirs))]
     
-    all_polys_list[[i]] <- poly
+    for (hour_dir in hour_dirs) {
+      hour_str <- sub("hour=", "", basename(hour_dir))
+      hour_val <- as.integer(hour_str)
+      
+      # Find polygon files in this hour
+      files <- list.files(hour_dir, pattern = "^polygons_.*\\.geojson$", full.names = TRUE)
+      
+      if (length(files) > 0) {
+        # Take the latest file if multiple exist (based on timestamp in filename)
+        if (length(files) > 1) {
+          timestamps <- regmatches(basename(files), 
+                                   regexpr("\\d{8}T\\d{6}", basename(files), ignore.case = TRUE))
+          files <- files[which.max(timestamps)]
+        }
+        
+        files_list[[length(files_list) + 1]] <- data.table(
+          file = files[1],
+          date = date_str,
+          hour = hour_val,
+          datetime = sprintf("%s %02d:00:00", date_str, hour_val)
+        )
+      }
+    }
+  }
+  
+  if (length(files_list) == 0) {
+    stop("No polygon files found in ", data_path)
+  }
+  
+  files_dt <- rbindlist(files_list)
+  setorder(files_dt, date, hour)
+  
+  cat(sprintf("  Found %d hourly snapshots\n", nrow(files_dt)))
+  cat(sprintf("  Date range: %s to %s\n", min(files_dt$date), max(files_dt$date)))
+  cat(sprintf("  Total unique dates: %d\n", length(unique(files_dt$date))))
+  
+  return(files_dt)
+}
+
+# Load or create hex grid
+get_or_create_hex_grid <- function(output_dir, bbox = NULL) {
+  hex_grid_path <- file.path(output_dir, "hex_grid_template.rds")
+  
+  if (file.exists(hex_grid_path)) {
+    cat("  Loading existing hex grid...\n")
+    hex_grid <- readRDS(hex_grid_path)
+  } else {
+    cat("  Creating new hex grid...\n")
     
-  }, error = function(e) {
-    cat(sprintf("    Warning: Failed to load file %d\n", i))
+    if (is.null(bbox)) {
+      stop("Cannot create hex grid without bounding box")
+    }
+    
+    hex_grid <- st_make_grid(
+      st_as_sfc(bbox), 
+      cellsize = HEX_SIZE, 
+      square = FALSE
+    ) %>%
+      st_sf() %>%
+      mutate(hex_id = row_number())
+    
+    # Add centroids
+    hex_centroids <- st_centroid(hex_grid) %>%
+      st_transform(4326) %>%
+      st_coordinates() %>%
+      as.data.frame() %>%
+      rename(centroid_lon = X, centroid_lat = Y)
+    
+    hex_grid$centroid_lon <- hex_centroids$centroid_lon
+    hex_grid$centroid_lat <- hex_centroids$centroid_lat
+    
+    saveRDS(hex_grid, hex_grid_path)
+    cat(sprintf("  ✓ Hex grid saved: %d hexagons\n", nrow(hex_grid)))
+  }
+  
+  return(hex_grid)
+}
+
+# Process a single day's data and create daily summary
+process_daily_summary <- function(date_str, files_dt, hex_grid, daily_summaries_dir) {
+  daily_summary_path <- file.path(daily_summaries_dir, sprintf("daily_%s.rds", date_str))
+  
+  # Check if already processed
+  if (file.exists(daily_summary_path)) {
+    cat(sprintf("  [%s] Loading existing summary\n", date_str))
+    return(readRDS(daily_summary_path))
+  }
+  
+  cat(sprintf("  [%s] Processing new summary\n", date_str))
+  
+  # Get files for this date
+  date_files <- files_dt[date == date_str]
+  
+  if (nrow(date_files) == 0) {
+    return(NULL)
+  }
+  
+  # Load all polygons for this date
+  polys_list <- list()
+  for (i in seq_len(nrow(date_files))) {
+    tryCatch({
+      poly <- st_read(date_files$file[i], quiet = TRUE) %>%
+        st_transform(32618) %>%
+        st_simplify(dTolerance = SIMPLIFY, preserveTopology = FALSE)
+      
+      if (nrow(poly) > 1) {
+        poly <- st_union(poly) %>% st_sf()
+      }
+      
+      poly$datetime <- date_files$datetime[i]
+      poly$hour <- date_files$hour[i]
+      
+      polys_list[[length(polys_list) + 1]] <- poly
+    }, error = function(e) {
+      cat(sprintf("    Warning: Failed to load %s\n", basename(date_files$file[i])))
+    })
+  }
+  
+  if (length(polys_list) == 0) {
+    return(NULL)
+  }
+  
+  # Combine polygons
+  polys_list <- lapply(polys_list, function(poly) {
+    st_sf(
+      datetime = poly$datetime,
+      hour = poly$hour,
+      geometry = st_geometry(poly)
+    )
   })
-}
-
-# Remove NULL entries
-all_polys_list <- all_polys_list[!sapply(all_polys_list, is.null)]
-
-if (length(all_polys_list) == 0) {
-  stop("No polygons could be loaded!")
-}
-
-cat(sprintf("  ✓ Loaded %d polygons in %.1f seconds\n", 
-            length(all_polys_list), 
-            as.numeric(difftime(Sys.time(), load_start, units = "secs"))))
-
-# Combine all polygons into one sf object
-cat("  Combining polygons...\n")
-
-# Ensure all polygons have the same columns (only keep the ones we added)
-all_polys_list <- lapply(all_polys_list, function(poly) {
-  # Keep only the columns we need
-  poly_simple <- st_sf(
-    datetime = poly$datetime,
-    date = poly$date,
-    hour = poly$hour,
-    file_id = poly$file_id,
-    geometry = st_geometry(poly)
+  
+  all_polys <- do.call(rbind, polys_list)
+  
+  # Find intersections
+  intersections <- st_intersects(hex_grid, all_polys, sparse = TRUE)
+  
+  # Build daily results
+  daily_results <- data.table(
+    hex_id = integer(),
+    hours_count = integer(),
+    hours_list = character(),
+    datetimes_list = character()
   )
-  st_crs(poly_simple) <- st_crs(poly)
-  return(poly_simple)
-})
-
-all_polys <- do.call(rbind, all_polys_list)
-rm(all_polys_list)
-gc()
-
-cat(sprintf("  ✓ Combined into single sf object with %d rows\n", nrow(all_polys)))
-
-# =================================================================
-# STEP 2: Create hex grid ONCE
-# =================================================================
-cat("\n[2] Creating hex grid (once)...\n")
-
-hex_grid_path <- file.path(output_dir, "hex_grid_template.rds")
-
-if (file.exists(hex_grid_path)) {
-  cat("  Loading existing hex grid...\n")
-  hex_grid <- readRDS(hex_grid_path)
-} else {
-  cat("  Creating new hex grid...\n")
-  
-  # Get bounding box from all polygons
-  bbox <- st_bbox(all_polys)
-  bbox["xmin"] <- bbox["xmin"] - 50000
-  bbox["xmax"] <- bbox["xmax"] + 50000
-  bbox["ymin"] <- bbox["ymin"] - 50000
-  bbox["ymax"] <- bbox["ymax"] + 50000
-  class(bbox) <- "bbox"
-  attr(bbox, "crs") <- st_crs(32618)
-  
-  hex_grid <- st_make_grid(
-    st_as_sfc(bbox), 
-    cellsize = HEX_SIZE, 
-    square = FALSE
-  ) %>%
-    st_sf() %>%
-    mutate(hex_id = row_number())
-  
-  # Add centroids
-  hex_centroids <- st_centroid(hex_grid) %>%
-    st_transform(4326) %>%
-    st_coordinates() %>%
-    as.data.frame() %>%
-    rename(centroid_lon = X, centroid_lat = Y)
-  
-  hex_grid$centroid_lon <- hex_centroids$centroid_lon
-  hex_grid$centroid_lat <- hex_centroids$centroid_lat
-  
-  saveRDS(hex_grid, hex_grid_path)
-  cat(sprintf("  ✓ Hex grid saved: %d hexagons\n", nrow(hex_grid)))
-}
-
-cat(sprintf("  Grid size: %d hexagons\n", nrow(hex_grid)))
-
-# =================================================================
-# STEP 3: Single-pass intersection (THE MAGIC!)
-# =================================================================
-cat("\n[3] Computing intersections (single pass)...\n")
-cat("  This is the key optimization - checking each hex once against all polygons\n")
-
-intersect_start <- Sys.time()
-
-# Find which polygons intersect each hexagon
-cat("  Running spatial intersection...\n")
-intersections <- st_intersects(hex_grid, all_polys, sparse = TRUE)
-
-cat("  Processing results...\n")
-
-# For each hexagon, extract the datetimes of intersecting polygons
-hex_results <- data.table(hex_id = integer(), 
-                         hours_count = integer(),
-                         datetimes_affected = character(),
-                         days_affected = integer())
-
-affected_count <- 0
-
-for (i in seq_len(nrow(hex_grid))) {
-  if (i %% 50000 == 0) {
-    cat(sprintf("    Processed %d/%d hexagons (%.1f%%)\n", 
-                i, nrow(hex_grid), 100*i/nrow(hex_grid)))
-  }
-  
-  poly_indices <- intersections[[i]]
-  
-  if (length(poly_indices) > 0) {
-    affected_count <- affected_count + 1
-    
-    affected_datetimes <- all_polys$datetime[poly_indices]
-    affected_dates <- all_polys$date[poly_indices]
-    
-    hex_results <- rbind(hex_results, data.table(
-      hex_id = hex_grid$hex_id[i],
-      hours_count = length(affected_datetimes),
-      datetimes_affected = paste(sort(affected_datetimes), collapse = ","),
-      days_affected = length(unique(affected_dates))
-    ))
-  }
-}
-
-intersect_elapsed <- as.numeric(difftime(Sys.time(), intersect_start, units = "secs"))
-cat(sprintf("\n  ✓ Intersection complete in %.1f seconds\n", intersect_elapsed))
-cat(sprintf("  ✓ Found %d affected hexagons (out of %d total)\n", affected_count, nrow(hex_grid)))
-
-# Join results with hex grid geometry
-cat("  Creating final spatial object...\n")
-hex_results_sf <- hex_grid %>%
-  inner_join(hex_results, by = "hex_id") %>%
-  st_transform(4326) %>%
-  st_make_valid()
-
-cat(sprintf("  ✓ Final dataset: %d hexagons with outage data\n", nrow(hex_results_sf)))
-
-# =================================================================
-# STEP 4: Save daily summaries
-# =================================================================
-cat("\n[4] Creating daily summaries...\n")
-
-all_dates <- unique(files_dt$date)
-cat(sprintf("  Processing %d unique dates\n", length(all_dates)))
-
-for (date in all_dates) {
-  # Filter to polygons from this date
-  date_poly_ids <- which(all_polys$date == date)
-  
-  if (length(date_poly_ids) == 0) next
-  
-  # For each hex, check if any of its intersecting polygons are from this date
-  daily_results <- data.table(hex_id = integer(), 
-                             count = integer(),
-                             datetimes_affected = character())
   
   for (i in seq_len(nrow(hex_grid))) {
     poly_indices <- intersections[[i]]
-    date_poly_match <- poly_indices[poly_indices %in% date_poly_ids]
     
-    if (length(date_poly_match) > 0) {
-      affected_datetimes <- all_polys$datetime[date_poly_match]
+    if (length(poly_indices) > 0) {
+      affected_datetimes <- all_polys$datetime[poly_indices]
+      affected_hours <- all_polys$hour[poly_indices]
       
       daily_results <- rbind(daily_results, data.table(
         hex_id = hex_grid$hex_id[i],
-        count = length(affected_datetimes),
-        datetimes_affected = paste(sort(affected_datetimes), collapse = ",")
+        hours_count = length(unique(affected_hours)),  # Count unique hours
+        hours_list = paste(sort(unique(affected_hours)), collapse = ","),
+        datetimes_list = paste(sort(affected_datetimes), collapse = ",")
       ))
     }
   }
   
   if (nrow(daily_results) > 0) {
-    daily_sf <- hex_grid %>%
-      inner_join(daily_results, by = "hex_id") %>%
-      mutate(
-        date = date,
-        n_files = sum(files_dt$date == date)
-      ) %>%
-      st_transform(4326) %>%
-      st_make_valid()
-    
-    daily_path <- file.path(output_dir, "daily", sprintf("daily_%s.geojson", date))
-    st_write(daily_sf, daily_path, delete_dsn = TRUE, quiet = TRUE)
-    
-    cat(sprintf("  ✓ %s: %d hexes\n", date, nrow(daily_sf)))
+    daily_results$date <- date_str
+    saveRDS(daily_results, daily_summary_path)
   }
+  
+  return(daily_results)
+}
+
+# Aggregate daily summaries into monthly summary
+process_monthly_summary <- function(year, month, daily_summaries_dir, monthly_summaries_dir) {
+  monthly_summary_path <- file.path(monthly_summaries_dir, 
+                                     sprintf("monthly_%04d-%02d.rds", year, month))
+  
+  # Check if already processed
+  if (file.exists(monthly_summary_path)) {
+    cat(sprintf("  [%04d-%02d] Loading existing monthly summary\n", year, month))
+    return(readRDS(monthly_summary_path))
+  }
+  
+  cat(sprintf("  [%04d-%02d] Creating new monthly summary\n", year, month))
+  
+  # Find all daily summaries for this month
+  pattern <- sprintf("daily_%04d-%02d-.*\\.rds", year, month)
+  daily_files <- list.files(daily_summaries_dir, pattern = pattern, full.names = TRUE)
+  
+  if (length(daily_files) == 0) {
+    return(NULL)
+  }
+  
+  # Load and combine all daily summaries
+  all_dailies <- lapply(daily_files, readRDS)
+  all_dailies <- rbindlist(all_dailies)
+  
+  # Aggregate by hex_id
+  monthly_results <- all_dailies[, .(
+    total_hours = sum(hours_count),
+    days_affected = .N,
+    dates_affected = paste(sort(unique(date)), collapse = ","),
+    all_datetimes = paste(unique(unlist(strsplit(datetimes_list, ","))), collapse = ",")
+  ), by = hex_id]
+  
+  monthly_results$year <- year
+  monthly_results$month <- month
+  
+  saveRDS(monthly_results, monthly_summary_path)
+  
+  return(monthly_results)
 }
 
 # =================================================================
-# STEP 5: Save total cumulative
+# MAIN PROCESSING
 # =================================================================
-cat("\n[5] Saving total cumulative...\n")
+
+# Step 1: Find all polygon files
+cat("\n[STEP 1: Finding polygon files]\n")
+files_dt <- find_polygon_files(data_path, start_date = ANALYSIS_START_DATE)
+
+# Step 2: Create or load hex grid
+cat("\n[STEP 2: Setting up hex grid]\n")
+
+# First, we need to get bounding box from a sample of polygons
+sample_files <- head(files_dt$file, min(10, nrow(files_dt)))
+sample_polys <- lapply(sample_files, function(f) {
+  st_read(f, quiet = TRUE) %>% st_transform(32618)
+}) %>% do.call(rbind, .)
+
+bbox <- st_bbox(sample_polys)
+bbox["xmin"] <- bbox["xmin"] - 50000
+bbox["xmax"] <- bbox["xmax"] + 50000
+bbox["ymin"] <- bbox["ymin"] - 50000
+bbox["ymax"] <- bbox["ymax"] + 50000
+class(bbox) <- "bbox"
+attr(bbox, "crs") <- st_crs(32618)
+
+hex_grid <- get_or_create_hex_grid(output_dir, bbox)
+cat(sprintf("  Grid size: %d hexagons\n", nrow(hex_grid)))
+
+# Step 3: Process daily summaries
+cat("\n[STEP 3: Processing daily summaries]\n")
+unique_dates <- unique(files_dt$date)
+cat(sprintf("  Processing %d unique dates\n", length(unique_dates)))
+
+daily_summaries <- list()
+for (date_str in unique_dates) {
+  daily_result <- process_daily_summary(date_str, files_dt, hex_grid, daily_summaries_dir)
+  if (!is.null(daily_result)) {
+    daily_summaries[[date_str]] <- daily_result
+  }
+}
+
+# Step 4: Process monthly summaries
+cat("\n[STEP 4: Processing monthly summaries]\n")
+dates <- as.Date(unique_dates)
+year_months <- unique(format(dates, "%Y-%m"))
+cat(sprintf("  Processing %d unique months\n", length(year_months)))
+
+monthly_summaries <- list()
+for (ym in year_months) {
+  parts <- strsplit(ym, "-")[[1]]
+  year <- as.integer(parts[1])
+  month <- as.integer(parts[2])
+  
+  monthly_result <- process_monthly_summary(year, month, daily_summaries_dir, monthly_summaries_dir)
+  if (!is.null(monthly_result)) {
+    monthly_summaries[[ym]] <- monthly_result
+  }
+}
+
+# Step 5: Create total cumulative from monthly summaries
+cat("\n[STEP 5: Creating total cumulative]\n")
+
+# Combine all monthly summaries
+all_monthly <- rbindlist(monthly_summaries)
+
+# Aggregate to total
+total_results <- all_monthly[, .(
+  hours_count = sum(total_hours),
+  days_affected = length(unique(unlist(strsplit(dates_affected, ",")))),
+  datetimes_affected = paste(unique(unlist(strsplit(all_datetimes, ","))), collapse = ",")
+), by = hex_id]
+
+# Calculate number of times each datetime appears (for proper hour counting)
+total_results[, hours_count := sapply(datetimes_affected, function(dt_str) {
+  if (is.na(dt_str) || dt_str == "") return(0L)
+  length(strsplit(dt_str, ",")[[1]])
+})]
+
+cat(sprintf("  Total hexagons affected: %d\n", nrow(total_results)))
+
+# Join with hex grid geometry
+hex_results_sf <- hex_grid %>%
+  inner_join(total_results, by = "hex_id") %>%
+  st_transform(4326) %>%
+  st_make_valid()
+
+# Step 6: Save total cumulative
+cat("\n[STEP 6: Saving total cumulative]\n")
 
 current_date <- format(Sys.time(), "%Y-%m-%d")
 total_path <- file.path(output_dir, "total", "total_exposure.geojson")
-snapshot_path <- file.path(cumulative_snapshots_dir, sprintf("cumulative_%s.geojson", current_date))
 
 st_write(hex_results_sf, total_path, delete_dsn = TRUE, quiet = TRUE)
-st_write(hex_results_sf, snapshot_path, delete_dsn = TRUE, quiet = TRUE)
-
 cat(sprintf("  ✓ Total exposure saved: %d hexagons\n", nrow(hex_results_sf)))
-cat(sprintf("  ✓ Snapshot saved: %s\n", basename(snapshot_path)))
 
 # Save statistics CSV
 stats_csv <- as.data.frame(hex_results_sf) %>%
@@ -324,16 +374,19 @@ cat("  ✓ Stats CSV saved\n")
 summary_data <- list(
   generated_at = format(Sys.time(), "%Y-%m-%d %H:%M:%S %Z"),
   last_update_date = current_date,
+  analysis_start_date = as.character(ANALYSIS_START_DATE),
   total_hexes_affected = nrow(hex_results_sf),
-  total_hours_scraped = sum(hex_results_sf$hours_count),
+  total_hours_tracked = sum(hex_results_sf$hours_count),
   date_range = list(
     first = min(files_dt$date),
     last = max(files_dt$date)
   ),
   hex_size_meters = HEX_SIZE,
   processing_info = list(
-    method = "single-pass spatial intersection",
-    total_polygon_files = nrow(files_dt)
+    method = "incremental daily/monthly summaries",
+    total_polygon_files = nrow(files_dt),
+    daily_summaries = length(daily_summaries),
+    monthly_summaries = length(monthly_summaries)
   ),
   stats = list(
     mean_hours = mean(hex_results_sf$hours_count),
@@ -349,29 +402,105 @@ summary_path <- file.path(output_dir, "total", "summary.json")
 writeLines(jsonlite::toJSON(summary_data, auto_unbox = TRUE, pretty = TRUE), summary_path)
 cat("  ✓ Summary JSON saved\n")
 
-# =================================================================
-# STEP 6: Generate HTML
-# =================================================================
-cat("\n[6] Generating HTML map...\n")
+# Step 7: Generate HTML
+cat("\n[STEP 7: Generating HTML map]\n")
 
 num_days <- length(unique(files_dt$date))
 hex_size_km <- round(HEX_SIZE / 1000, 1)
 
-source("R/generate_html_only.R")  # Use existing HTML generator
+# Generate HTML (we'll create a simplified version)
+html_template <- sprintf('<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <title>Pannes de courant cumulatives - Hydro-Québec</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        body{margin:0;padding:0;font-family:-apple-system,system-ui,sans-serif}
+        #map{position:absolute;top:0;bottom:0;width:100%%}
+        .info{padding:12px;background:white;box-shadow:0 2px 10px rgba(0,0,0,0.1);border-radius:8px}
+        .info h4{margin:0 0 8px;font-size:15px;font-weight:600}
+        .info p{margin:4px 0;font-size:13px}
+        .legend{line-height:20px;font-size:12px}
+        .legend i{width:18px;height:18px;float:left;margin-right:8px;opacity:0.8;border-radius:2px}
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    <script>
+        var map = L.map("map").setView([46.2, -72.5], 9);
+        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{attribution:"© OSM"}).addTo(map);
+        
+        function getColor(d) {
+            return d>80?"#67000d":d>60?"#a50f15":d>40?"#cb181d":d>20?"#ef3b2c":
+                   d>10?"#fb6a4a":d>5?"#fc9272":d>2?"#fcbba1":"#fee5d9";
+        }
+        
+        fetch("total/total_exposure.geojson")
+            .then(r => r.json())
+            .then(data => {
+                L.geoJSON(data, {
+                    style: f => ({
+                        fillColor: getColor(f.properties.hours_count),
+                        weight: 1,
+                        opacity: 0.6,
+                        color: "#666",
+                        fillOpacity: 0.7
+                    }),
+                    onEachFeature: (f, layer) => {
+                        const p = f.properties;
+                        const popup = `<b>Hexagone #${p.hex_id}</b><br>
+                                      Heures affectées: <b>${p.hours_count}</b><br>
+                                      Jours affectés: <b>${p.days_affected}</b><br>
+                                      Centroïde: ${p.centroid_lat.toFixed(6)}, ${p.centroid_lon.toFixed(6)}`;
+                        layer.bindPopup(popup);
+                    }
+                }).addTo(map);
+            });
+        
+        var info = L.control({position:"topright"});
+        info.onAdd = () => {
+            var div = L.DomUtil.create("div","info");
+            div.innerHTML = "<h4>Pannes cumulatives</h4>" +
+                           "<p><b>Hexagones:</b> %s km</p>" +
+                           "<p><b>Jours:</b> %d</p>" +
+                           "<p><b>Début analyse:</b> %s</p>";
+            return div;
+        };
+        info.addTo(map);
+        
+        var legend = L.control({position:"bottomright"});
+        legend.onAdd = () => {
+            var div = L.DomUtil.create("div","info legend");
+            div.innerHTML = "<h4>Heures affectées</h4>";
+            [0,2,5,10,20,40,60,80].forEach((g,i,a) => {
+                div.innerHTML += "<i style=\\"background:" + getColor(g+1) + "\\"></i>" + 
+                               g + (a[i+1]?"–"+a[i+1]:"+") + "<br>";
+            });
+            return div;
+        };
+        legend.addTo(map);
+    </script>
+</body>
+</html>', hex_size_km, num_days, as.character(ANALYSIS_START_DATE))
 
-# =================================================================
+html_path <- file.path(output_dir, "index.html")
+writeLines(html_template, html_path)
+cat(sprintf("  ✓ HTML saved: %s\n", html_path))
+
 # Summary
-# =================================================================
 elapsed <- as.numeric(difftime(Sys.time(), start_time, units = "secs"))
-cat(sprintf("\n✅ OPTIMIZED PROCESSING COMPLETE in %.1f seconds (%.1f minutes)\n", 
+cat(sprintf("\n✅ PROCESSING COMPLETE in %.1f seconds (%.1f minutes)\n", 
             elapsed, elapsed/60))
 
 cat("\n📊 PROCESSING SUMMARY:\n")
+cat(sprintf("  • Analysis start date: %s\n", ANALYSIS_START_DATE))
 cat(sprintf("  • Total polygon files: %d\n", nrow(files_dt)))
-cat(sprintf("  • Unique dates: %d\n", length(all_dates)))
+cat(sprintf("  • Daily summaries: %d\n", length(daily_summaries)))
+cat(sprintf("  • Monthly summaries: %d\n", length(monthly_summaries)))
 cat(sprintf("  • Hexagons affected: %d\n", nrow(hex_results_sf)))
 cat(sprintf("  • Processing time: %.1f minutes\n", elapsed/60))
-cat(sprintf("  • Speed improvement: ~%dx faster than sequential processing\n", 
-            round(nrow(files_dt) * 67 / elapsed)))
 
 cat("\n✅ READY FOR DEPLOYMENT\n")
