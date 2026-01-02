@@ -1,5 +1,5 @@
 # HQ Outages - OPTIMIZED with Daily & Monthly Summaries
-# Works directly with GeoJSON polygons (no CSV customer data required)
+# Works with FLATTENED data/daily/ structure (as used by GitHub Actions)
 # Creates persistent summaries for faster future runs
 
 suppressPackageStartupMessages({
@@ -16,7 +16,7 @@ cat(sprintf("\nStarting at: %s\n", format(Sys.time(), "%Y-%m-%d %H:%M:%S")))
 start_time <- Sys.time()
 
 # Config
-data_path <- "data/daily"  # Read flattened files
+data_path <- "data/daily"  # Flattened structure used by workflow
 output_dir <- "public"
 daily_summaries_dir <- file.path(output_dir, "daily_summaries")
 monthly_summaries_dir <- file.path(output_dir, "monthly_summaries")
@@ -35,62 +35,57 @@ dir.create(file.path(output_dir, "total"), recursive = TRUE, showWarnings = FALS
 # HELPER FUNCTIONS
 # =================================================================
 
-# Find all GeoJSON files in the hourly data structure
+# Find all GeoJSON files in the FLATTENED data/daily structure
 find_polygon_files <- function(data_path, start_date = NULL) {
   cat("\n[Finding polygon files]\n")
   
-  # Find all date directories
-  date_dirs <- list.dirs(data_path, recursive = FALSE, full.names = TRUE)
-  date_dirs <- date_dirs[grepl("date=\\d{4}-\\d{2}-\\d{2}", basename(date_dirs))]
+  # Find all polygon files in flattened structure
+  files <- list.files(data_path, pattern = "^polygons_.*\\.geojson$", full.names = TRUE)
   
-  files_list <- list()
-  
-  for (date_dir in date_dirs) {
-    date_str <- sub("date=", "", basename(date_dir))
-    date_val <- as.Date(date_str)
-    
-    # Skip dates before analysis start
-    if (!is.null(start_date) && date_val < start_date) {
-      next
-    }
-    
-    # Find hour directories
-    hour_dirs <- list.dirs(date_dir, recursive = FALSE, full.names = TRUE)
-    hour_dirs <- hour_dirs[grepl("hour=\\d{1,2}", basename(hour_dirs))]
-    
-    for (hour_dir in hour_dirs) {
-      hour_str <- sub("hour=", "", basename(hour_dir))
-      hour_val <- as.integer(hour_str)
-      
-      # Find polygon files in this hour
-      files <- list.files(hour_dir, pattern = "^polygons_.*\\.geojson$", full.names = TRUE)
-      
-      if (length(files) > 0) {
-        # Take the latest file if multiple exist (based on timestamp in filename)
-        if (length(files) > 1) {
-          timestamps <- regmatches(basename(files), 
-                                   regexpr("\\d{8}T\\d{6}", basename(files), ignore.case = TRUE))
-          files <- files[which.max(timestamps)]
-        }
-        
-        files_list[[length(files_list) + 1]] <- data.table(
-          file = files[1],
-          date = date_str,
-          hour = hour_val,
-          datetime = sprintf("%s %02d:00:00", date_str, hour_val)
-        )
-      }
-    }
-  }
-  
-  if (length(files_list) == 0) {
+  if (length(files) == 0) {
     stop("No polygon files found in ", data_path)
   }
   
-  files_dt <- rbindlist(files_list)
-  setorder(files_dt, date, hour)
+  cat(sprintf("  Found %d polygon files\n", length(files)))
   
-  cat(sprintf("  Found %d hourly snapshots\n", nrow(files_dt)))
+  # Parse timestamps from filenames
+  basenames <- basename(files)
+  timestamps <- regmatches(basenames, regexpr("\\d{8}T\\d{6}", basenames, ignore.case = TRUE))
+  
+  # Extract date and hour
+  date_parts <- substr(timestamps, 1, 8)
+  dates <- sprintf("%s-%s-%s", 
+                  substr(date_parts, 1, 4), 
+                  substr(date_parts, 5, 6), 
+                  substr(date_parts, 7, 8))
+  
+  hours <- as.integer(substr(timestamps, 10, 11))
+  minutes <- substr(timestamps, 12, 13)
+  seconds <- substr(timestamps, 14, 15)
+  
+  datetimes <- sprintf("%s %02d:%s:%s", dates, hours, minutes, seconds)
+  
+  files_dt <- data.table(
+    file = files,
+    date = dates,
+    hour = hours,
+    datetime = datetimes,
+    timestamp_sort = as.numeric(as.POSIXct(datetimes, format="%Y-%m-%d %H:%M:%S"))
+  )
+  
+  # Filter by start date if specified
+  if (!is.null(start_date)) {
+    date_vals <- as.Date(files_dt$date)
+    files_dt <- files_dt[date_vals >= start_date]
+    cat(sprintf("  After filtering (>= %s): %d files\n", start_date, nrow(files_dt)))
+  }
+  
+  # Deduplicate: keep latest file per hour
+  setkey(files_dt, date, hour, timestamp_sort)
+  files_dt <- files_dt[, .SD[.N], by = .(date, hour)]
+  setorder(files_dt, timestamp_sort)
+  
+  cat(sprintf("  After deduplication: %d unique hourly snapshots\n", nrow(files_dt)))
   cat(sprintf("  Date range: %s to %s\n", min(files_dt$date), max(files_dt$date)))
   cat(sprintf("  Total unique dates: %d\n", length(unique(files_dt$date))))
   
@@ -211,7 +206,7 @@ process_daily_summary <- function(date_str, files_dt, hex_grid, daily_summaries_
       
       daily_results <- rbind(daily_results, data.table(
         hex_id = hex_grid$hex_id[i],
-        hours_count = length(unique(affected_hours)),  # Count unique hours
+        hours_count = length(affected_datetimes),  # Count each appearance
         hours_list = paste(sort(unique(affected_hours)), collapse = ","),
         datetimes_list = paste(sort(affected_datetimes), collapse = ",")
       ))
@@ -274,6 +269,10 @@ process_monthly_summary <- function(year, month, daily_summaries_dir, monthly_su
 # Step 1: Find all polygon files
 cat("\n[STEP 1: Finding polygon files]\n")
 files_dt <- find_polygon_files(data_path, start_date = ANALYSIS_START_DATE)
+
+if (nrow(files_dt) == 0) {
+  stop("No files to process after filtering")
+}
 
 # Step 2: Create or load hex grid
 cat("\n[STEP 2: Setting up hex grid]\n")
@@ -338,12 +337,6 @@ total_results <- all_monthly[, .(
   days_affected = length(unique(unlist(strsplit(dates_affected, ",")))),
   datetimes_affected = paste(unique(unlist(strsplit(all_datetimes, ","))), collapse = ",")
 ), by = hex_id]
-
-# Calculate number of times each datetime appears (for proper hour counting)
-total_results[, hours_count := sapply(datetimes_affected, function(dt_str) {
-  if (is.na(dt_str) || dt_str == "") return(0L)
-  length(strsplit(dt_str, ",")[[1]])
-})]
 
 cat(sprintf("  Total hexagons affected: %d\n", nrow(total_results)))
 
