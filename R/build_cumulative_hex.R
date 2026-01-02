@@ -16,7 +16,7 @@ cat(sprintf("\nStarting at: %s\n", format(Sys.time(), "%Y-%m-%d %H:%M:%S")))
 start_time <- Sys.time()
 
 # Config
-data_path <- "data"  # hourly data in date=YYYY-MM-DD/hour=HH structure
+data_path <- "data/daily"  # Read flattened files
 output_dir <- "public"
 daily_summaries_dir <- file.path(output_dir, "daily_summaries")
 monthly_summaries_dir <- file.path(output_dir, "monthly_summaries")
