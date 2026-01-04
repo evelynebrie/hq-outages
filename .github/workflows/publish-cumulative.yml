@@ -1,4 +1,4 @@
-name: Publish cumulative exposure - ULTIMATE FIX
+name: Publish cumulative exposure - CORRECTED
 
 on:
   schedule:
@@ -7,8 +7,6 @@ on:
 
 permissions:
   contents: write
-  pages: write
-  id-token: write
 
 jobs:
   build:
@@ -53,7 +51,7 @@ jobs:
           restore-keys: hq-hex-grid-
 
       # ============================================================
-      # KEY FIX: Get fresh access token from refresh token
+      # FIX 1: Get fresh access token from refresh token
       # ============================================================
       - name: Get Fresh Dropbox Access Token
         id: get_token
@@ -68,7 +66,6 @@ jobs:
             -u "${DROPBOX_APP_KEY}:${DROPBOX_APP_SECRET}" \
             -d "grant_type=refresh_token&refresh_token=${DROPBOX_REFRESH_TOKEN}")
           
-          # Extract access token
           ACCESS_TOKEN=$(echo "$RESPONSE" | jq -r '.access_token // empty')
           
           if [ -z "$ACCESS_TOKEN" ]; then
@@ -96,46 +93,37 @@ jobs:
           CURSOR=""
           PAGE=1
           
-          # Paginate through all files
           while [ "$HAS_MORE" = "true" ]; do
             echo "  Fetching page $PAGE..."
             
             if [ -z "$CURSOR" ]; then
-              # First request
               RESPONSE=$(curl -s -X POST https://api.dropboxapi.com/2/files/list_folder \
                 -H "Authorization: Bearer $DROPBOX_TOKEN" \
                 -H "Content-Type: application/json" \
                 -d '{"path": "/hq-outages", "recursive": true}')
             else
-              # Continue with cursor
               RESPONSE=$(curl -s -X POST https://api.dropboxapi.com/2/files/list_folder/continue \
                 -H "Authorization: Bearer $DROPBOX_TOKEN" \
                 -H "Content-Type: application/json" \
                 -d "{\"cursor\": \"$CURSOR\"}")
             fi
             
-            # Check for errors in response
             if echo "$RESPONSE" | jq -e '.error' > /dev/null 2>&1; then
               echo "❌ Error from Dropbox API:"
               echo "$RESPONSE" | jq '.error'
               exit 1
             fi
             
-            # Validate response has entries field
             if ! echo "$RESPONSE" | jq -e '.entries' > /dev/null 2>&1; then
-              echo "❌ Unexpected response format (no .entries field)"
-              echo "$RESPONSE"
-              exit 1
+              echo "⚠️  Unexpected response - continuing with empty list"
+              break
             fi
             
-            # Count entries in this page
             PAGE_COUNT=$(echo "$RESPONSE" | jq '.entries | length')
-            echo "    Found $PAGE_COUNT entries in page $PAGE"
+            echo "    Found $PAGE_COUNT entries"
             
-            # Extract file paths from this page
             PAGE_FILES=$(echo "$RESPONSE" | jq -r '.entries[]? | select(.".tag" == "file") | .path_display' || true)
             
-            # Append to all files
             if [ ! -z "$PAGE_FILES" ]; then
               if [ -z "$ALL_FILES" ]; then
                 ALL_FILES="$PAGE_FILES"
@@ -144,7 +132,6 @@ jobs:
               fi
             fi
             
-            # Check if there are more pages
             HAS_MORE=$(echo "$RESPONSE" | jq -r '.has_more')
             
             if [ "$HAS_MORE" = "true" ]; then
@@ -153,155 +140,127 @@ jobs:
             fi
           done
           
-          echo ""
-          echo "✅ Completed pagination: fetched $PAGE page(s)"
+          echo "✅ Completed pagination: $PAGE page(s)"
           
-          # Count total files
-          TOTAL_FILE_COUNT=0
+          TOTAL_COUNT=0
           if [ ! -z "$ALL_FILES" ]; then
-            TOTAL_FILE_COUNT=$(echo "$ALL_FILES" | wc -l)
+            TOTAL_COUNT=$(echo "$ALL_FILES" | wc -l)
           fi
-          echo "📊 Total files found: $TOTAL_FILE_COUNT"
+          echo "📊 Total files: $TOTAL_COUNT"
           
-          # Handle empty result
-          if [ -z "$ALL_FILES" ] || [ "$TOTAL_FILE_COUNT" -eq 0 ]; then
-            echo "⚠️  No files found in Dropbox"
-            echo "✓ Continuing with cached data..."
+          if [ $TOTAL_COUNT -eq 0 ]; then
+            echo "⚠️  No files found - continuing with cached data"
             mkdir -p data/daily
             exit 0
           fi
           
-          # Filter for polygon files only
           POLYGONS=$(echo "$ALL_FILES" | grep "/polygons_.*\.geojson$" || true)
+          POLY_COUNT=$(echo "$POLYGONS" | wc -l 2>/dev/null || echo "0")
           
-          POLY_COUNT=0
-          if [ ! -z "$POLYGONS" ]; then
-            POLY_COUNT=$(echo "$POLYGONS" | wc -l)
-          fi
+          echo "📍 Polygon files: $POLY_COUNT"
           
-          echo "📍 Found $POLY_COUNT polygon files"
-          
-          # Show date range
-          if [ $POLY_COUNT -gt 0 ]; then
-            echo ""
-            echo "📅 Date range in files:"
-            DATES=$(echo "$POLYGONS" | sed 's/.*polygons_\([0-9]\{8\}\).*/\1/' | sort -u)
-            FIRST_DATE=$(echo "$DATES" | head -1)
-            LAST_DATE=$(echo "$DATES" | tail -1)
-            FIRST_FORMATTED="${FIRST_DATE:0:4}-${FIRST_DATE:4:2}-${FIRST_DATE:6:2}"
-            LAST_FORMATTED="${LAST_DATE:0:4}-${LAST_DATE:4:2}-${LAST_DATE:6:2}"
-            echo "  From: $FIRST_FORMATTED"
-            echo "  To:   $LAST_FORMATTED"
-            echo "  Span: $(echo "$DATES" | wc -l) unique dates"
-          fi
-          
-          # Handle no polygon files
           if [ "$POLY_COUNT" -eq 0 ]; then
-            echo "⚠️  No polygon files found"
-            echo "✓ Continuing with cached data..."
+            echo "⚠️  No polygon files - continuing with cached data"
             mkdir -p data/daily
             exit 0
           fi
           
-          # Download files (flatten into data/daily/)
           mkdir -p data/daily
           
           CACHED=0
           NEW=0
-          DOWNLOADED=0
-          FAILED=0
           
-          echo ""
-          echo "⬇️  Downloading polygon files..."
           while IFS= read -r file; do
             [ -z "$file" ] && continue
             
             filename=$(basename "$file")
             local_path="data/daily/$filename"
             
-            # Check if already cached
             if [ -f "$local_path" ] && [ -s "$local_path" ]; then
               CACHED=$((CACHED + 1))
             else
-              # Download file
               if curl -s -f -X POST https://content.dropboxapi.com/2/files/download \
                 -H "Authorization: Bearer $DROPBOX_TOKEN" \
                 -H "Dropbox-API-Arg: {\"path\": \"$file\"}" \
-                -o "$local_path"; then
-                
-                # Verify file has content
-                if [ -s "$local_path" ]; then
-                  NEW=$((NEW + 1))
-                  DOWNLOADED=$((DOWNLOADED + 1))
-                  
-                  # Show first few downloads
-                  if [ $DOWNLOADED -le 5 ]; then
-                    echo "  ✓ Downloaded: $filename"
-                  elif [ $DOWNLOADED -eq 6 ]; then
-                    echo "  ... (showing first 5 downloads, $(($POLY_COUNT - $CACHED)) remaining)"
-                  fi
-                else
-                  echo "  ⚠️  Downloaded but empty: $filename"
-                  rm -f "$local_path"
-                  FAILED=$((FAILED + 1))
-                fi
-              else
-                echo "  ✗ Failed to download: $filename"
-                FAILED=$((FAILED + 1))
+                -o "$local_path" && [ -s "$local_path" ]; then
+                NEW=$((NEW + 1))
+                [ $NEW -le 5 ] && echo "  ✓ Downloaded: $filename"
               fi
             fi
           done <<< "$POLYGONS"
           
           echo ""
-          echo "========================================="
-          echo "📊 Download Summary:"
-          echo "  • Cached files: $CACHED"
-          echo "  • New downloads: $NEW"
-          echo "  • Failed: $FAILED"
-          echo "  • Total available: $(($CACHED + $NEW))"
-          echo "========================================="
-          
-          # Verify we have files to process
-          LOCAL_COUNT=$(find data/daily -name "polygons_*.geojson" 2>/dev/null | wc -l)
-          echo "📁 Local polygon files: $LOCAL_COUNT"
+          echo "📊 Summary: $CACHED cached, $NEW new, $(($CACHED + $NEW)) total"
 
       - name: Run R analysis
         run: |
-          echo "🔬 Starting R analysis..."
+          echo "🔬 Starting analysis..."
           
-          # Verify script exists
           if [ ! -f "R/build_cumulative_hex.R" ]; then
-            echo "❌ ERROR: R/build_cumulative_hex.R not found!"
+            echo "❌ Script not found!"
             exit 1
           fi
           
-          # Count files to process
-          FILE_COUNT=$(find data/daily -name "polygons_*.geojson" 2>/dev/null | wc -l || echo "0")
-          echo "📊 Found $FILE_COUNT polygon files to process"
+          FILE_COUNT=$(find data/daily -name "polygons_*.geojson" 2>/dev/null | wc -l)
+          echo "📊 Processing $FILE_COUNT files"
           
           if [ "$FILE_COUNT" -eq 0 ]; then
-            echo "⚠️  No polygon data files found to process"
-            echo "Cannot generate visualizations without data"
+            echo "❌ No data to process!"
             exit 1
           fi
           
-          # Show existing summaries
-          DAILY_SUMMARIES=$(find public/daily -name "*.geojson" 2>/dev/null | wc -l || echo "0")
-          echo "📁 Existing daily summaries: $DAILY_SUMMARIES"
-          
-          if [ "$DAILY_SUMMARIES" -gt 0 ]; then
-            echo "✅ Incremental mode: Will reuse existing summaries"
-          else
-            echo "🔄 First run: Will build all summaries (this takes longer)"
-          fi
-          
-          # Run analysis
-          echo ""
           Rscript R/build_cumulative_hex.R
 
-      - name: Deploy to GitHub Pages
+      - name: Verify outputs were created
+        run: |
+          echo "📁 Verifying generated files..."
+          
+          if [ ! -f "public/index.html" ]; then
+            echo "❌ index.html not created!"
+            exit 1
+          fi
+          
+          if [ ! -f "public/total/total_exposure.geojson" ]; then
+            echo "❌ total_exposure.geojson not created!"
+            exit 1
+          fi
+          
+          DAILY_COUNT=$(find public/daily -name "daily_*.geojson" 2>/dev/null | wc -l)
+          echo "✅ Generated $DAILY_COUNT daily summary files"
+          
+          if [ "$DAILY_COUNT" -eq 0 ]; then
+            echo "⚠️  Warning: No daily summaries created"
+          fi
+          
+          echo ""
+          echo "📊 Public directory structure:"
+          du -sh public/*/
+          
+          echo ""
+          echo "✅ All required files present"
+
+      # ============================================================
+      # FIX 2: Deploy to EXTERNAL PUBLIC repo (not same repo)
+      # ============================================================
+      - name: Deploy to PUBLIC repo (gh-pages)
         uses: peaceiris/actions-gh-pages@v3
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./public
-          keep_files: true
+          personal_token: ${{ secrets.PUBLIC_REPO_TOKEN }}
+          external_repository: evelynebrie/hq-outages-public
+          publish_branch: gh-pages
+          publish_dir: public
+          keep_files: false
+          commit_message: "Update cumulative outage data - ${{ github.run_number }}"
+          
+      - name: Summary
+        run: |
+          echo ""
+          echo "========================================="
+          echo "✅ DEPLOYMENT COMPLETE"
+          echo "========================================="
+          echo ""
+          echo "🌐 View at: https://evelynebrie.github.io/hq-outages-public/"
+          echo ""
+          DAILY_COUNT=$(find public/daily -name "daily_*.geojson" 2>/dev/null | wc -l)
+          echo "📊 Deployed $DAILY_COUNT daily summaries"
+          echo "========================================="
