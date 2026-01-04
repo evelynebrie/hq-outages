@@ -1,9 +1,14 @@
-name: Publish cumulative exposure - FAST incremental (FIXED)
+name: Publish cumulative exposure - ULTIMATE FIX
 
 on:
   schedule:
     - cron: '30 3 * * *'
   workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
 
 jobs:
   build:
@@ -40,128 +45,258 @@ jobs:
           key: hq-daily-data-${{ github.run_id }}
           restore-keys: hq-daily-data-
 
-      - name: Download NEW files from Dropbox (FIXED)
+      - name: Restore hex grid cache
+        uses: actions/cache@v3
+        with:
+          path: public/hex_grid_template.rds
+          key: hq-hex-grid-v1
+          restore-keys: hq-hex-grid-
+
+      # ============================================================
+      # KEY FIX: Get fresh access token from refresh token
+      # ============================================================
+      - name: Get Fresh Dropbox Access Token
+        id: get_token
         env:
-          DROPBOX_TOKEN: ${{ secrets.DROPBOX_TOKEN }}
+          DROPBOX_REFRESH_TOKEN: ${{ secrets.DROPBOX_REFRESH_TOKEN }}
+          DROPBOX_APP_KEY: ${{ secrets.DROPBOX_APP_KEY }}
+          DROPBOX_APP_SECRET: ${{ secrets.DROPBOX_APP_SECRET }}
+        run: |
+          echo "🔑 Getting fresh access token from refresh token..."
+          
+          RESPONSE=$(curl -s -X POST https://api.dropbox.com/oauth2/token \
+            -u "${DROPBOX_APP_KEY}:${DROPBOX_APP_SECRET}" \
+            -d "grant_type=refresh_token&refresh_token=${DROPBOX_REFRESH_TOKEN}")
+          
+          # Extract access token
+          ACCESS_TOKEN=$(echo "$RESPONSE" | jq -r '.access_token // empty')
+          
+          if [ -z "$ACCESS_TOKEN" ]; then
+            echo "❌ Failed to get access token. Response:"
+            echo "$RESPONSE" | jq '.'
+            exit 1
+          fi
+          
+          echo "✅ Successfully obtained fresh access token"
+          echo "access_token=$ACCESS_TOKEN" >> $GITHUB_OUTPUT
+
+      # ============================================================
+      # Download files using FRESH token with pagination
+      # ============================================================
+      - name: Download files from Dropbox (with pagination)
+        env:
+          DROPBOX_TOKEN: ${{ steps.get_token.outputs.access_token }}
         run: |
           set -eo pipefail
           
-          echo "Listing Dropbox files..."
+          echo "📥 Listing Dropbox files (with pagination support)..."
           
-          # Fetch the response and check if it's valid
-          RESPONSE=$(curl -s -X POST https://api.dropboxapi.com/2/files/list_folder \
-            -H "Authorization: Bearer $DROPBOX_TOKEN" \
-            -H "Content-Type: application/json" \
-            -d '{"path": "/hq-outages", "recursive": true}')
+          ALL_FILES=""
+          HAS_MORE=true
+          CURSOR=""
+          PAGE=1
           
-          # Check if response contains entries
-          if echo "$RESPONSE" | jq -e '.entries' > /dev/null 2>&1; then
-            echo "✓ Valid response from Dropbox"
-          else
-            echo "⚠ Warning: Invalid or empty response from Dropbox"
-            echo "Response: $RESPONSE"
-            echo "Continuing with empty file list..."
-            RESPONSE='{"entries": []}'
-          fi
-          
-          # Extract file paths (will be empty if no entries)
-          FILES=$(echo "$RESPONSE" | jq -r '.entries[]? | select(.".tag" == "file") | .path_display' || echo "")
-          
-          # Filter for polygon and CSV files
-          POLYGONS=$(echo "$FILES" | grep "polygons_.*\.geojson$" || true)
-          CSV=$(echo "$FILES" | grep "outages_joined_.*\.csv$" || true)
-          
-          # Count total files
-          TOTAL=$(echo -e "$POLYGONS\n$CSV" | grep -v '^$' | wc -l)
-          echo "Found $TOTAL files in Dropbox"
-          
-          # Show breakdown
-          POLYGON_COUNT=$(echo "$POLYGONS" | grep -v '^$' | wc -l)
-          CSV_COUNT=$(echo "$CSV" | grep -v '^$' | wc -l)
-          echo "  - Polygon files: $POLYGON_COUNT"
-          echo "  - CSV files: $CSV_COUNT"
-          
-          if [ $TOTAL -eq 0 ]; then
-            echo "⚠ Warning: No files found in Dropbox!"
-            echo "This might be expected if this is the first run or if no data has been collected yet."
-          fi
-          
-          mkdir -p data/daily
-          
-          CACHED=0
-          NEW=0
-          FAILED=0
-          
-          # Process files (will skip if lists are empty)
-          for file in $POLYGONS $CSV; do
-            # Skip empty iterations
-            [ -z "$file" ] && continue
+          # Paginate through all files
+          while [ "$HAS_MORE" = "true" ]; do
+            echo "  Fetching page $PAGE..."
             
-            fname=$(basename "$file")
-            
-            if [ -f "data/daily/$fname" ]; then
-              # File already exists in cache
-              ((CACHED++))
-              [ $CACHED -le 3 ] && echo "Cached: $fname"
-            else
-              # Download new file
-              ((NEW++))
-              [ $NEW -le 5 ] && echo "Downloading: $fname"
-              
-              # Download with error handling
-              if curl -s -f -X POST https://content.dropboxapi.com/2/files/download \
+            if [ -z "$CURSOR" ]; then
+              # First request
+              RESPONSE=$(curl -s -X POST https://api.dropboxapi.com/2/files/list_folder \
                 -H "Authorization: Bearer $DROPBOX_TOKEN" \
-                -H "Dropbox-API-Arg: {\"path\": \"$file\"}" \
-                -o "data/daily/$fname"; then
-                # Verify file was downloaded and has content
-                if [ ! -s "data/daily/$fname" ]; then
-                  echo "  ⚠ Downloaded file is empty: $fname"
-                  rm -f "data/daily/$fname"
-                  ((FAILED++))
-                  ((NEW--))
-                fi
+                -H "Content-Type: application/json" \
+                -d '{"path": "/hq-outages", "recursive": true}')
+            else
+              # Continue with cursor
+              RESPONSE=$(curl -s -X POST https://api.dropboxapi.com/2/files/list_folder/continue \
+                -H "Authorization: Bearer $DROPBOX_TOKEN" \
+                -H "Content-Type: application/json" \
+                -d "{\"cursor\": \"$CURSOR\"}")
+            fi
+            
+            # Check for errors in response
+            if echo "$RESPONSE" | jq -e '.error' > /dev/null 2>&1; then
+              echo "❌ Error from Dropbox API:"
+              echo "$RESPONSE" | jq '.error'
+              exit 1
+            fi
+            
+            # Validate response has entries field
+            if ! echo "$RESPONSE" | jq -e '.entries' > /dev/null 2>&1; then
+              echo "❌ Unexpected response format (no .entries field)"
+              echo "$RESPONSE"
+              exit 1
+            fi
+            
+            # Count entries in this page
+            PAGE_COUNT=$(echo "$RESPONSE" | jq '.entries | length')
+            echo "    Found $PAGE_COUNT entries in page $PAGE"
+            
+            # Extract file paths from this page
+            PAGE_FILES=$(echo "$RESPONSE" | jq -r '.entries[]? | select(.".tag" == "file") | .path_display' || true)
+            
+            # Append to all files
+            if [ ! -z "$PAGE_FILES" ]; then
+              if [ -z "$ALL_FILES" ]; then
+                ALL_FILES="$PAGE_FILES"
               else
-                echo "  ✗ Failed to download: $fname"
-                ((FAILED++))
-                ((NEW--))
+                ALL_FILES="$ALL_FILES"$'\n'"$PAGE_FILES"
               fi
+            fi
+            
+            # Check if there are more pages
+            HAS_MORE=$(echo "$RESPONSE" | jq -r '.has_more')
+            
+            if [ "$HAS_MORE" = "true" ]; then
+              CURSOR=$(echo "$RESPONSE" | jq -r '.cursor')
+              PAGE=$((PAGE + 1))
             fi
           done
           
           echo ""
-          echo "========================================="
-          echo "Download Summary:"
-          echo "  • Cached files: $CACHED"
-          echo "  • New downloads: $NEW"
-          echo "  • Failed downloads: $FAILED"
-          echo "  • Total files: $TOTAL"
-          echo "========================================="
+          echo "✅ Completed pagination: fetched $PAGE page(s)"
           
-          # List what we have locally
-          LOCAL_COUNT=$(ls -1 data/daily/*.geojson 2>/dev/null | wc -l)
-          echo "Local polygon files available: $LOCAL_COUNT"
-
-      - name: Run R analysis
-        run: |
-          echo "Starting analysis..."
-          
-          # Check if script exists
-          if [ ! -f "R/build_cumulative_hex.R" ]; then
-            echo "ERROR: R/build_cumulative_hex.R not found!"
-            exit 1
+          # Count total files
+          TOTAL_FILE_COUNT=0
+          if [ ! -z "$ALL_FILES" ]; then
+            TOTAL_FILE_COUNT=$(echo "$ALL_FILES" | wc -l)
           fi
+          echo "📊 Total files found: $TOTAL_FILE_COUNT"
           
-          # Check if we have data to process
-          POLYGON_COUNT=$(ls -1 data/daily/polygons_*.geojson 2>/dev/null | wc -l || echo "0")
-          echo "Found $POLYGON_COUNT polygon files to process"
-          
-          if [ "$POLYGON_COUNT" -eq 0 ]; then
-            echo "⚠ Warning: No polygon files found to process!"
-            echo "Skipping analysis - nothing to do."
+          # Handle empty result
+          if [ -z "$ALL_FILES" ] || [ "$TOTAL_FILE_COUNT" -eq 0 ]; then
+            echo "⚠️  No files found in Dropbox"
+            echo "✓ Continuing with cached data..."
+            mkdir -p data/daily
             exit 0
           fi
           
-          # Run the analysis
+          # Filter for polygon files only
+          POLYGONS=$(echo "$ALL_FILES" | grep "/polygons_.*\.geojson$" || true)
+          
+          POLY_COUNT=0
+          if [ ! -z "$POLYGONS" ]; then
+            POLY_COUNT=$(echo "$POLYGONS" | wc -l)
+          fi
+          
+          echo "📍 Found $POLY_COUNT polygon files"
+          
+          # Show date range
+          if [ $POLY_COUNT -gt 0 ]; then
+            echo ""
+            echo "📅 Date range in files:"
+            DATES=$(echo "$POLYGONS" | sed 's/.*polygons_\([0-9]\{8\}\).*/\1/' | sort -u)
+            FIRST_DATE=$(echo "$DATES" | head -1)
+            LAST_DATE=$(echo "$DATES" | tail -1)
+            FIRST_FORMATTED="${FIRST_DATE:0:4}-${FIRST_DATE:4:2}-${FIRST_DATE:6:2}"
+            LAST_FORMATTED="${LAST_DATE:0:4}-${LAST_DATE:4:2}-${LAST_DATE:6:2}"
+            echo "  From: $FIRST_FORMATTED"
+            echo "  To:   $LAST_FORMATTED"
+            echo "  Span: $(echo "$DATES" | wc -l) unique dates"
+          fi
+          
+          # Handle no polygon files
+          if [ "$POLY_COUNT" -eq 0 ]; then
+            echo "⚠️  No polygon files found"
+            echo "✓ Continuing with cached data..."
+            mkdir -p data/daily
+            exit 0
+          fi
+          
+          # Download files (flatten into data/daily/)
+          mkdir -p data/daily
+          
+          CACHED=0
+          NEW=0
+          DOWNLOADED=0
+          FAILED=0
+          
+          echo ""
+          echo "⬇️  Downloading polygon files..."
+          while IFS= read -r file; do
+            [ -z "$file" ] && continue
+            
+            filename=$(basename "$file")
+            local_path="data/daily/$filename"
+            
+            # Check if already cached
+            if [ -f "$local_path" ] && [ -s "$local_path" ]; then
+              CACHED=$((CACHED + 1))
+            else
+              # Download file
+              if curl -s -f -X POST https://content.dropboxapi.com/2/files/download \
+                -H "Authorization: Bearer $DROPBOX_TOKEN" \
+                -H "Dropbox-API-Arg: {\"path\": \"$file\"}" \
+                -o "$local_path"; then
+                
+                # Verify file has content
+                if [ -s "$local_path" ]; then
+                  NEW=$((NEW + 1))
+                  DOWNLOADED=$((DOWNLOADED + 1))
+                  
+                  # Show first few downloads
+                  if [ $DOWNLOADED -le 5 ]; then
+                    echo "  ✓ Downloaded: $filename"
+                  elif [ $DOWNLOADED -eq 6 ]; then
+                    echo "  ... (showing first 5 downloads, $(($POLY_COUNT - $CACHED)) remaining)"
+                  fi
+                else
+                  echo "  ⚠️  Downloaded but empty: $filename"
+                  rm -f "$local_path"
+                  FAILED=$((FAILED + 1))
+                fi
+              else
+                echo "  ✗ Failed to download: $filename"
+                FAILED=$((FAILED + 1))
+              fi
+            fi
+          done <<< "$POLYGONS"
+          
+          echo ""
+          echo "========================================="
+          echo "📊 Download Summary:"
+          echo "  • Cached files: $CACHED"
+          echo "  • New downloads: $NEW"
+          echo "  • Failed: $FAILED"
+          echo "  • Total available: $(($CACHED + $NEW))"
+          echo "========================================="
+          
+          # Verify we have files to process
+          LOCAL_COUNT=$(find data/daily -name "polygons_*.geojson" 2>/dev/null | wc -l)
+          echo "📁 Local polygon files: $LOCAL_COUNT"
+
+      - name: Run R analysis
+        run: |
+          echo "🔬 Starting R analysis..."
+          
+          # Verify script exists
+          if [ ! -f "R/build_cumulative_hex.R" ]; then
+            echo "❌ ERROR: R/build_cumulative_hex.R not found!"
+            exit 1
+          fi
+          
+          # Count files to process
+          FILE_COUNT=$(find data/daily -name "polygons_*.geojson" 2>/dev/null | wc -l || echo "0")
+          echo "📊 Found $FILE_COUNT polygon files to process"
+          
+          if [ "$FILE_COUNT" -eq 0 ]; then
+            echo "⚠️  No polygon data files found to process"
+            echo "Cannot generate visualizations without data"
+            exit 1
+          fi
+          
+          # Show existing summaries
+          DAILY_SUMMARIES=$(find public/daily -name "*.geojson" 2>/dev/null | wc -l || echo "0")
+          echo "📁 Existing daily summaries: $DAILY_SUMMARIES"
+          
+          if [ "$DAILY_SUMMARIES" -gt 0 ]; then
+            echo "✅ Incremental mode: Will reuse existing summaries"
+          else
+            echo "🔄 First run: Will build all summaries (this takes longer)"
+          fi
+          
+          # Run analysis
+          echo ""
           Rscript R/build_cumulative_hex.R
 
       - name: Deploy to GitHub Pages
