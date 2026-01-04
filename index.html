@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pannes de courant Hydro-Québec - Analyse cumulative</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.css"/>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.js"></script>
+    <style>
+        body { margin:0; padding:0; font-family: -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
+        #map { position:absolute; top:0; bottom:0; width:100%; }
+        .info { padding:10px; background:white; border-radius:5px; box-shadow:0 0 15px rgba(0,0,0,0.2); max-width:300px; }
+        .info h4 { margin:0 0 10px; font-size:16px; color:#333; }
+        .info p { margin:5px 0; font-size:13px; color:#666; }
+        .legend { line-height:20px; color:#555; background:white; padding:10px; border-radius:5px; box-shadow:0 0 15px rgba(0,0,0,0.2); }
+        .legend i { width:18px; height:18px; float:left; margin-right:8px; opacity:0.8; }
+        .legend h4 { margin:0 0 8px; font-size:14px; }
+        .controls { background:white; padding:15px; border-radius:5px; box-shadow:0 0 15px rgba(0,0,0,0.2); min-width:200px; }
+        .controls h4 { margin:0 0 10px; font-size:14px; color:#333; }
+        .controls label { display:block; margin:8px 0 4px; font-size:12px; color:#666; font-weight:500; }
+        .controls select { width:100%; padding:6px; border:1px solid #ddd; border-radius:4px; font-size:13px; }
+        .detail-link { color:#1e88e5; cursor:pointer; text-decoration:underline; font-size:12px; }
+        .detail-link:hover { color:#1565c0; }
+        .modal-overlay { display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.5); z-index:2000; }
+        .modal-overlay.active { display:block; }
+        .detail-modal { display:none; position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); background:white; padding:25px; border-radius:8px; box-shadow:0 4px 20px rgba(0,0,0,0.3); z-index:2001; max-width:90%; max-height:90%; overflow-y:auto; }
+        .detail-modal.active { display:block; }
+        .detail-modal h3 { margin:0 0 15px; color:#333; }
+        .detail-modal p { margin:10px 0; color:#666; }
+        .detail-table { width:100%; border-collapse:collapse; margin:15px 0; font-size:13px; }
+        .detail-table th, .detail-table td { padding:10px; text-align:left; border-bottom:1px solid #e0e0e0; }
+        .detail-table thead { background:#f5f5f5; }
+        .detail-table th { font-weight:600; color:#555; }
+        .detail-table tfoot { font-weight:600; background:#fafafa; }
+        .close-modal { position:absolute; top:10px; right:15px; font-size:24px; cursor:pointer; color:#999; }
+        .close-modal:hover { color:#333; }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    <div id="modalOverlay" class="modal-overlay"></div>
+    <div id="detailModal" class="detail-modal">
+        <span class="close-modal" onclick="closeDetailModal()">×</span>
+        <div id="modalContent"></div>
+    </div>
+    <script>
+
+        var map = L.map('map').setView([46.8, -71.2], 8);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
+            attribution:'© OpenStreetMap',
+            maxZoom:18
+        }).addTo(map);
+        
+        var allData = { daily: {}, total: null };
+        var currentLayer = null;
+        
+        async function loadAllDailyData() {
+            const totalResp = await fetch('total/total_exposure.geojson');
+            allData.total = await totalResp.json();
+            
+            const dateSelect = document.getElementById('dateSelect');
+            const dates = [...new Set(allData.total.features.flatMap(f => {
+                return f.properties.datetimes_affected.split(',').map(dt => dt.split(' ')[0]);
+            }))].sort();
+            
+            for (const date of dates) {
+                const opt = document.createElement('option');
+                opt.value = date;
+                opt.textContent = date;
+                dateSelect.appendChild(opt);
+            }
+            
+            for (const date of dates) {
+                try {
+                    const resp = await fetch(`daily/daily_${date}.geojson`);
+                    allData.daily[date] = await resp.json();
+                } catch(e) {
+                    console.warn('Could not load daily data for', date);
+                }
+            }
+        }
+        
+        function filterDataByDateTime(date, hour) {
+            if (date === 'all') return allData.total;
+            
+            const dailyData = allData.daily[date];
+            if (!dailyData) return null;
+            
+            if (hour === 'all') return dailyData;
+            
+            const filtered = JSON.parse(JSON.stringify(dailyData));
+            filtered.features = filtered.features.map(f => {
+                const dts = f.properties.datetimes_affected.split(',');
+                const matchingDts = dts.filter(dt => {
+                    const dtHour = parseInt(dt.split(' ')[1].split(':')[0]);
+                    return dtHour === parseInt(hour);
+                });
+                
+                if (matchingDts.length === 0) return null;
+                
+                f.properties.filtered_hours_count = matchingDts.length;
+                return f;
+            }).filter(f => f !== null);
+            
+            return filtered;
+        }
+        
+        function updateMap() {
+            const date = document.getElementById('dateSelect').value;
+            const hour = document.getElementById('hourSelect').value;
+            
+            const data = filterDataByDateTime(date, hour);
+            if (!data) return;
+            
+            if (currentLayer) map.removeLayer(currentLayer);
+            
+            const isFiltered = date !== 'all';
+            const useFixedColor = isFiltered;
+            
+            currentLayer = L.geoJSON(data, {
+                style: f => ({
+                    fillColor: useFixedColor ? '#a50f15' : getColor(f.properties.hours_count),
+                    weight: 0.5,
+                    color: '#fff',
+                    fillOpacity: useFixedColor ? 0.8 : 0.75
+                }),
+                onEachFeature: (f, layer) => {
+                    const props = f.properties;
+                    const hoursCount = isFiltered ? props.filtered_hours_count : props.hours_count;
+                    
+                    var popup = '<b>Hexagone #' + props.hex_id + '</b><br>' +
+                               '<b>Nombre d\'heures impactées:</b> ' + hoursCount + '<br>' +
+                               '<b>Nombre de jours impactés:</b> ' + props.days_affected + '<br>' +
+                               '<b>Coordonnées du centroïde:</b><br>' +
+                               'Lat: ' + props.centroid_lat.toFixed(6) + ', Lon: ' + props.centroid_lon.toFixed(6) + '<br>' +
+                               '<a class="detail-link" onclick="showDetails(' + props.hex_id + ')">Voir les détails complets</a>';
+                    
+                    layer.bindPopup(popup);
+                }
+            }).addTo(map);
+        }
+        
+        function showDetails(hexId) {
+            const feature = allData.total.features.find(f => f.properties.hex_id === hexId);
+            if (!feature) return;
+            
+            const props = feature.properties;
+            const datetimes = props.datetimes_affected.split(',').map(s => s.trim()).sort();
+            
+            const byDate = {};
+            datetimes.forEach(dt => {
+                const [date, time] = dt.split(' ');
+                if (!byDate[date]) byDate[date] = [];
+                byDate[date].push(time);
+            });
+            
+            let html = '<h3>Hexagone #' + hexId + '</h3>';
+            html += '<p><strong>Centroïde:</strong> ' + props.centroid_lat.toFixed(6) + ', ' + props.centroid_lon.toFixed(6) + '</p>';
+            html += '<table class="detail-table">';
+            html += '<thead><tr><th>Date</th><th>Heures affectées</th><th>Nombre d\'heures</th></tr></thead><tbody>';
+            
+            let totalDays = 0;
+            let totalHours = 0;
+            
+            Object.keys(byDate).sort().forEach(date => {
+                const times = byDate[date].sort();
+                const numHours = times.length;
+                const timeList = times.join(', ');
+                totalDays++;
+                totalHours += numHours;
+                html += '<tr><td>' + date + '</td><td>' + timeList + '</td><td>' + numHours + '</td></tr>';
+            });
+            
+            html += '</tbody><tfoot><tr><td><strong>Total</strong></td><td>' + totalDays + ' jours</td><td>' + totalHours + ' heures</td></tr></tfoot>';
+            html += '</table>';
+            
+            document.getElementById('modalContent').innerHTML = html;
+            document.getElementById('detailModal').classList.add('active');
+            document.getElementById('modalOverlay').classList.add('active');
+        }
+        
+        function closeDetailModal() {
+            document.getElementById('detailModal').classList.remove('active');
+            document.getElementById('modalOverlay').classList.remove('active');
+        }
+        
+        document.getElementById('modalOverlay').onclick = closeDetailModal;
+        
+        function getColor(d) {
+            return d>80?'#67000d':d>60?'##a50f15':d>40?'#cb181d':d>20?'#ef3b2c':
+                   d>10?'#fb6a4a':d>5?'#fc9272':d>2?'#fcbba1':'#fee5d9';
+        }
+        
+        loadAllDailyData().then(() => {
+            updateMap();
+        });
+        
+        var legend = L.control({position:'bottomright'});
+        legend.onAdd = () => {
+            var div = L.DomUtil.create('div','info legend');
+            div.innerHTML = '<h4>Heures (nombre)</h4>';
+            [0,2,5,10,20,40,60,80].forEach((g,i,a) => {
+                div.innerHTML += '<i style="background:' + getColor(g+1) + '"></i>' + g + (a[i+1]?'–'+a[i+1]:'+') + '<br>';
+            });
+            return div;
+        };
+        legend.addTo(map);
+        
+        var geocoder = L.Control.geocoder({
+            defaultMarkGeocode: false,
+            placeholder: 'Rechercher une adresse...',
+            errorMessage: 'Adresse non trouvée'
+        })
+        .on('markgeocode', function(e) {
+            var bbox = e.geocode.bbox;
+            var poly = L.polygon([
+                bbox.getSouthEast(),
+                bbox.getNorthEast(),
+                bbox.getNorthWest(),
+                bbox.getSouthWest()
+            ]);
+            map.fitBounds(poly.getBounds());
+        })
+        .addTo(map);
+
+        var info = L.control({position:'topright'});
+        info.onAdd = () => {
+            var div = L.DomUtil.create('div','info');
+            div.innerHTML = '<h4>Pannes de courant cumulatives</h4>' +
+                           '<p><b>Taille des hexagones:</b> 1 km</p>' +
+                           '<p><b>Jours analysés:</b> 3</p>' +
+                           '<p style="font-size:11px;color:#999;">Mise à jour: 2026-01-04</p>';
+            return div;
+        };
+        info.addTo(map);
+        
+        var controls = L.control({position:'topleft'});
+        controls.onAdd = () => {
+            var div = L.DomUtil.create('div','controls');
+            div.innerHTML = '<h4>Filtres</h4>' +
+                           '<label>Date:</label>' +
+                           '<select id="dateSelect" onchange="updateMap()"><option value="all">Résumé complet (défaut)</option></select>' +
+                           '<label>Heure:</label>' +
+                           '<select id="hourSelect" onchange="updateMap()"><option value="all">Toutes</option>' +'<option value="0">0:00</option>' + '<option value="1">1:00</option>' + '<option value="2">2:00</option>' + '<option value="3">3:00</option>' + '<option value="4">4:00</option>' + '<option value="5">5:00</option>' + '<option value="6">6:00</option>' + '<option value="7">7:00</option>' + '<option value="8">8:00</option>' + '<option value="9">9:00</option>' + '<option value="10">10:00</option>' + '<option value="11">11:00</option>' + '<option value="12">12:00</option>' + '<option value="13">13:00</option>' + '<option value="14">14:00</option>' + '<option value="15">15:00</option>' + '<option value="16">16:00</option>' + '<option value="17">17:00</option>' + '<option value="18">18:00</option>' + '<option value="19">19:00</option>' + '<option value="20">20:00</option>' + '<option value="21">21:00</option>' + '<option value="22">22:00</option>' + '<option value="23">23:00</option>' + '</select>';
+            return div;
+        };
+        controls.addTo(map);
+    </script>
+</body>
+</html>
