@@ -1,0 +1,203 @@
+name: Diagnostic - Check Daily Summaries
+
+on:
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Setup R
+        uses: r-lib/actions/setup-r@v2
+        with:
+          use-public-rspm: true
+
+      - name: System libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgdal-dev libgeos-dev libproj-dev libudunits2-dev
+
+      - name: Install R packages
+        run: |
+          Rscript -e 'install.packages(c("sf", "data.table"), repos="https://cloud.r-project.org")'
+
+      - name: Restore data cache
+        uses: actions/cache@v3
+        with:
+          path: data/daily/
+          key: hq-daily-data-${{ github.run_id }}
+          restore-keys: hq-daily-data-
+
+      # Get fresh Dropbox token
+      - name: Get Fresh Dropbox Access Token
+        id: get_token
+        env:
+          DROPBOX_REFRESH_TOKEN: ${{ secrets.DROPBOX_REFRESH_TOKEN }}
+          DROPBOX_APP_KEY: ${{ secrets.DROPBOX_APP_KEY }}
+          DROPBOX_APP_SECRET: ${{ secrets.DROPBOX_APP_SECRET }}
+        run: |
+          echo "🔑 Getting fresh access token..."
+          
+          RESPONSE=$(curl -s -X POST https://api.dropbox.com/oauth2/token \
+            -u "${DROPBOX_APP_KEY}:${DROPBOX_APP_SECRET}" \
+            -d "grant_type=refresh_token&refresh_token=${DROPBOX_REFRESH_TOKEN}")
+          
+          ACCESS_TOKEN=$(echo "$RESPONSE" | jq -r '.access_token // empty')
+          
+          if [ -z "$ACCESS_TOKEN" ]; then
+            echo "❌ Failed to get access token"
+            echo "$RESPONSE" | jq '.'
+            exit 1
+          fi
+          
+          echo "✅ Token obtained"
+          echo "access_token=$ACCESS_TOKEN" >> $GITHUB_OUTPUT
+
+      # Download some sample files
+      - name: Download sample files from Dropbox
+        env:
+          DROPBOX_TOKEN: ${{ steps.get_token.outputs.access_token }}
+        run: |
+          set -eo pipefail
+          
+          echo "📥 Downloading sample files for diagnosis..."
+          mkdir -p data/daily
+          
+          # List files
+          RESPONSE=$(curl -s -X POST https://api.dropboxapi.com/2/files/list_folder \
+            -H "Authorization: Bearer $DROPBOX_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d '{"path": "/hq-outages", "recursive": true, "limit": 100}')
+          
+          if ! echo "$RESPONSE" | jq -e '.entries' > /dev/null 2>&1; then
+            echo "⚠️ No valid response"
+            echo "$RESPONSE"
+            exit 0
+          fi
+          
+          # Get polygon files
+          POLYGONS=$(echo "$RESPONSE" | jq -r '.entries[]? | select(.".tag" == "file") | select(.path_display | test("polygons_.*\\.geojson$")) | .path_display' | head -20)
+          
+          COUNT=0
+          for file in $POLYGONS; do
+            fname=$(basename "$file")
+            
+            curl -s -f -X POST https://content.dropboxapi.com/2/files/download \
+              -H "Authorization: Bearer $DROPBOX_TOKEN" \
+              -H "Dropbox-API-Arg: {\"path\": \"$file\"}" \
+              -o "data/daily/$fname" && ((COUNT++))
+            
+            [ $COUNT -ge 10 ] && break
+          done
+          
+          echo "Downloaded $COUNT sample files"
+
+      - name: Check if processed summaries exist
+        run: |
+          if [ -d "public/daily" ] && [ "$(ls -A public/daily 2>/dev/null)" ]; then
+            echo "✅ Found existing daily summaries in public/daily"
+            ls -lh public/daily/ | head -10
+          else
+            echo "⚠️ No processed daily summaries found"
+            echo "Creating dummy structure for diagnosis..."
+            mkdir -p public/daily
+          fi
+
+      - name: Run diagnostic script
+        run: |
+          echo "🔬 Running diagnostic..."
+          
+          if [ ! -f "R/diagnose_daily_summaries.R" ]; then
+            echo "❌ Diagnostic script not found at R/diagnose_daily_summaries.R"
+            echo "Please add the diagnostic script to your repository"
+            exit 1
+          fi
+          
+          Rscript R/diagnose_daily_summaries.R || echo "Diagnostic completed with warnings"
+
+      - name: Show file structure
+        run: |
+          echo ""
+          echo "========================================="
+          echo "FILE STRUCTURE ANALYSIS"
+          echo "========================================="
+          echo ""
+          
+          echo "📁 Source files in data/daily/:"
+          if [ -d "data/daily" ]; then
+            FILE_COUNT=$(ls -1 data/daily/*.geojson 2>/dev/null | wc -l)
+            echo "  Total: $FILE_COUNT files"
+            
+            if [ $FILE_COUNT -gt 0 ]; then
+              echo ""
+              echo "Sample filenames:"
+              ls -1 data/daily/*.geojson | head -10 | while read f; do
+                fname=$(basename "$f")
+                # Extract date and time
+                tstamp=$(echo "$fname" | grep -oP '\d{8}t\d{6}' || echo "unknown")
+                if [ "$tstamp" != "unknown" ]; then
+                  date="${tstamp:0:4}-${tstamp:4:2}-${tstamp:6:2}"
+                  time="${tstamp:9:2}:${tstamp:11:2}:${tstamp:13:2}"
+                  echo "  $fname → $date $time"
+                else
+                  echo "  $fname"
+                fi
+              done
+              
+              echo ""
+              echo "Date distribution:"
+              ls -1 data/daily/*.geojson 2>/dev/null | while read f; do
+                fname=$(basename "$f")
+                tstamp=$(echo "$fname" | grep -oP '\d{8}' | head -1 || echo "")
+                if [ -n "$tstamp" ]; then
+                  echo "${tstamp:0:4}-${tstamp:4:2}-${tstamp:6:2}"
+                fi
+              done | sort | uniq -c | sort -rn | head -10
+            fi
+          else
+            echo "  Directory not found"
+          fi
+          
+          echo ""
+          echo "📁 Processed summaries in public/daily/:"
+          if [ -d "public/daily" ]; then
+            SUMMARY_COUNT=$(ls -1 public/daily/*.geojson 2>/dev/null | wc -l)
+            echo "  Total: $SUMMARY_COUNT files"
+            
+            if [ $SUMMARY_COUNT -gt 0 ]; then
+              echo ""
+              echo "Available dates:"
+              ls -1 public/daily/daily_*.geojson 2>/dev/null | while read f; do
+                basename "$f" | sed 's/daily_\(.*\)\.geojson/\1/'
+              done | sort | head -10
+            fi
+          else
+            echo "  Directory not found"
+          fi
+          
+          echo ""
+          echo "========================================="
+
+      - name: Summary and recommendations
+        run: |
+          echo ""
+          echo "========================================="
+          echo "DIAGNOSTIC SUMMARY"
+          echo "========================================="
+          echo ""
+          echo "This diagnostic checked:"
+          echo "  1. How many source files you have per date"
+          echo "  2. The hour distribution of those files"
+          echo "  3. What's in your processed daily summaries"
+          echo ""
+          echo "Next steps:"
+          echo "  - Review the output above"
+          echo "  - Check if you have 1 file/day or 24 files/day"
+          echo "  - If count=1 everywhere, you need hourly scraping"
+          echo "  - If same hexes appear every day, that's expected"
+          echo "    for long-duration outages"
+          echo ""
+          echo "========================================="
