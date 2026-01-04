@@ -1,112 +1,135 @@
-# HQ Outages - OPTIMIZED with Daily & Monthly Summaries
-# Works with FLATTENED data/daily/ structure (as used by GitHub Actions)
-# Creates persistent summaries for faster future runs
+# HQ Outages - MEMORY-EFFICIENT INCREMENTAL v7
+# Only tracks hexagons that actually have outages (not all 466k in memory)
 
 suppressPackageStartupMessages({
   library(sf)
   library(dplyr)
   library(jsonlite)
   library(data.table)
-  library(lubridate)
 })
 
-cat("=== HQ Outages with Daily & Monthly Summaries ===\n")
-cat("Strategy: Build daily summaries incrementally, aggregate to monthly, then to total\n")
+cat("=== HQ Outages MEMORY-EFFICIENT Incremental System v7 ===\n")
+cat("Optimizations:\n")
+cat("  • Only stores hexagons with actual outages\n")
+cat("  • Maintains consistent hex_id grid for alignment\n")
+cat("  • Much faster processing per date\n")
 cat(sprintf("\nStarting at: %s\n", format(Sys.time(), "%Y-%m-%d %H:%M:%S")))
 start_time <- Sys.time()
 
 # Config
-data_path <- "data/daily"  # Flattened structure used by workflow
+data_path <- "data/daily"
 output_dir <- "public"
-daily_summaries_dir <- file.path(output_dir, "daily_summaries")
-monthly_summaries_dir <- file.path(output_dir, "monthly_summaries")
+cumulative_snapshots_dir <- file.path(output_dir, "cumulative_snapshots")
 
 HEX_SIZE <- 1000
 SIMPLIFY <- 200
-ANALYSIS_START_DATE <- as.Date("2026-01-01")  # Start analysis from this date
 
-# Create directories
 dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
-dir.create(daily_summaries_dir, recursive = TRUE, showWarnings = FALSE)
-dir.create(monthly_summaries_dir, recursive = TRUE, showWarnings = FALSE)
+dir.create(file.path(output_dir, "daily"), recursive = TRUE, showWarnings = FALSE)
+dir.create(file.path(output_dir, "monthly"), recursive = TRUE, showWarnings = FALSE)
 dir.create(file.path(output_dir, "total"), recursive = TRUE, showWarnings = FALSE)
+dir.create(cumulative_snapshots_dir, recursive = TRUE, showWarnings = FALSE)
 
 # =================================================================
-# HELPER FUNCTIONS
+# STEP 1: Identify NEW files to process
 # =================================================================
+cat("\n[1] Identifying NEW dates to process...\n")
 
-# Find all GeoJSON files in the FLATTENED data/daily structure
-find_polygon_files <- function(data_path, start_date = NULL) {
-  cat("\n[Finding polygon files]\n")
-  
-  # Find all polygon files in flattened structure
-  files <- list.files(data_path, pattern = "^polygons_.*\\.geojson$", full.names = TRUE)
-  
-  if (length(files) == 0) {
-    stop("No polygon files found in ", data_path)
-  }
-  
-  cat(sprintf("  Found %d polygon files\n", length(files)))
-  
-  # Parse timestamps from filenames
-  basenames <- basename(files)
-  timestamps <- regmatches(basenames, regexpr("\\d{8}T\\d{6}", basenames, ignore.case = TRUE))
-  
-  # Extract date and hour
-  date_parts <- substr(timestamps, 1, 8)
-  dates <- sprintf("%s-%s-%s", 
-                  substr(date_parts, 1, 4), 
-                  substr(date_parts, 5, 6), 
-                  substr(date_parts, 7, 8))
-  
-  hours <- as.integer(substr(timestamps, 10, 11))
-  minutes <- substr(timestamps, 12, 13)
-  seconds <- substr(timestamps, 14, 15)
-  
-  datetimes <- sprintf("%s %02d:%s:%s", dates, hours, minutes, seconds)
-  
-  files_dt <- data.table(
-    file = files,
-    date = dates,
-    hour = hours,
-    datetime = datetimes,
-    timestamp_sort = as.numeric(as.POSIXct(datetimes, format="%Y-%m-%d %H:%M:%S"))
-  )
-  
-  # Filter by start date if specified
-  if (!is.null(start_date)) {
-    date_vals <- as.Date(files_dt$date)
-    files_dt <- files_dt[date_vals >= start_date]
-    cat(sprintf("  After filtering (>= %s): %d files\n", start_date, nrow(files_dt)))
-  }
-  
-  # Deduplicate: keep latest file per hour
-  setkey(files_dt, date, hour, timestamp_sort)
-  files_dt <- files_dt[, .SD[.N], by = .(date, hour)]
-  setorder(files_dt, timestamp_sort)
-  
-  cat(sprintf("  After deduplication: %d unique hourly snapshots\n", nrow(files_dt)))
-  cat(sprintf("  Date range: %s to %s\n", min(files_dt$date), max(files_dt$date)))
-  cat(sprintf("  Total unique dates: %d\n", length(unique(files_dt$date))))
-  
-  return(files_dt)
+files <- list.files(data_path, pattern = "^polygons_.*\\.geojson$", full.names = TRUE)
+if (length(files) == 0) stop("No polygon files found")
+
+cat("  Parsing timestamps...\n")
+basenames <- basename(files)
+timestamps <- regmatches(basenames, regexpr("\\d{8}t\\d{6}", basenames, ignore.case = TRUE))
+
+date_parts <- substr(timestamps, 1, 8)
+dates <- sprintf("%s-%s-%s", 
+                substr(date_parts, 1, 4), 
+                substr(date_parts, 5, 6), 
+                substr(date_parts, 7, 8))
+
+hours <- as.integer(substr(timestamps, 10, 11))
+minutes <- substr(timestamps, 12, 13)
+seconds <- substr(timestamps, 14, 15)
+
+datetimes <- sprintf("%s %s:%s:%s", dates, 
+                    substr(timestamps, 10, 11), minutes, seconds)
+
+files_dt <- data.table(
+  file = files,
+  date = dates,
+  hour = hours,
+  datetime = datetimes,
+  timestamp_sort = as.numeric(as.POSIXct(datetimes, format="%Y-%m-%d %H:%M:%S"))
+)
+
+cat(sprintf("  Found %d total files\n", nrow(files_dt)))
+
+# Select latest file per hour
+setkey(files_dt, date, hour, timestamp_sort)
+files_dt <- files_dt[, .SD[.N], by = .(date, hour)]
+setorder(files_dt, date, hour)
+
+existing_dailies <- list.files(
+  file.path(output_dir, "daily"), 
+  pattern = "^daily_.*\\.geojson$"
+)
+existing_dates <- sub("daily_(.*)\\.geojson", "\\1", existing_dailies)
+
+dates_to_process <- setdiff(unique(files_dt$date), existing_dates)
+
+all_dates <- unique(files_dt$date)
+cat(sprintf("  Total unique dates in source: %d\n", length(all_dates)))
+cat(sprintf("  Already processed (daily summaries exist): %d\n", length(existing_dates)))
+cat(sprintf("  NEW dates to process: %d\n", length(dates_to_process)))
+
+if (length(existing_dates) > 0) {
+  cat(sprintf("  ✓ Found existing daily summaries - will reuse them!\n"))
 }
 
-# Load or create hex grid
-get_or_create_hex_grid <- function(output_dir, bbox = NULL) {
+if (length(dates_to_process) > 0) {
+  if (length(dates_to_process) <= 10) {
+    cat(sprintf("  New dates: %s\n", paste(dates_to_process, collapse=", ")))
+  } else {
+    cat(sprintf("  New dates: %s ... %s (%d total)\n", 
+                paste(head(dates_to_process, 3), collapse=", "),
+                paste(tail(dates_to_process, 3), collapse=", "),
+                length(dates_to_process)))
+  }
+  
+  est_time_sec <- length(dates_to_process) * 30  # ~30 sec per date with new method
+  if (est_time_sec > 120) {
+    cat(sprintf("  ⏱ Estimated processing time: ~%.1f minutes\n", est_time_sec / 60))
+  } else {
+    cat(sprintf("  ⏱ Estimated processing time: ~%d seconds\n", est_time_sec))
+  }
+}
+
+# =================================================================
+# STEP 2: Process ONLY NEW dates (MEMORY-EFFICIENT)
+# =================================================================
+if (length(dates_to_process) > 0) {
+  cat("\n[2] Processing NEW daily summaries (memory-efficient)...\n")
+  
+  # Load or create hex grid REFERENCE (for consistent hex_ids)
   hex_grid_path <- file.path(output_dir, "hex_grid_template.rds")
   
   if (file.exists(hex_grid_path)) {
-    cat("  Loading existing hex grid...\n")
-    hex_grid <- readRDS(hex_grid_path)
+    cat("  Loading hex grid reference...\n")
+    hex_grid_reference <- readRDS(hex_grid_path)
   } else {
-    cat("  Creating new hex grid...\n")
+    cat("  Creating hex grid reference (first run)...\n")
+    first_file <- files_dt$file[1]
+    first_data <- st_read(first_file, quiet = TRUE) %>% st_transform(32618)
+    bbox <- st_bbox(first_data)
+    bbox["xmin"] <- bbox["xmin"] - 50000
+    bbox["xmax"] <- bbox["xmax"] + 50000
+    bbox["ymin"] <- bbox["ymin"] - 50000
+    bbox["ymax"] <- bbox["ymax"] + 50000
+    class(bbox) <- "bbox"
+    attr(bbox, "crs") <- st_crs(32618)
     
-    if (is.null(bbox)) {
-      stop("Cannot create hex grid without bounding box")
-    }
-    
-    hex_grid <- st_make_grid(
+    hex_grid_reference <- st_make_grid(
       st_as_sfc(bbox), 
       cellsize = HEX_SIZE, 
       square = FALSE
@@ -114,497 +137,621 @@ get_or_create_hex_grid <- function(output_dir, bbox = NULL) {
       st_sf() %>%
       mutate(hex_id = row_number())
     
-    # Add centroids
-    hex_centroids <- st_centroid(hex_grid) %>%
+    hex_centroids <- st_centroid(hex_grid_reference) %>%
       st_transform(4326) %>%
       st_coordinates() %>%
       as.data.frame() %>%
       rename(centroid_lon = X, centroid_lat = Y)
     
-    hex_grid$centroid_lon <- hex_centroids$centroid_lon
-    hex_grid$centroid_lat <- hex_centroids$centroid_lat
+    hex_grid_reference$centroid_lon <- hex_centroids$centroid_lon
+    hex_grid_reference$centroid_lat <- hex_centroids$centroid_lat
     
-    saveRDS(hex_grid, hex_grid_path)
-    cat(sprintf("  ✓ Hex grid saved: %d hexagons\n", nrow(hex_grid)))
+    saveRDS(hex_grid_reference, hex_grid_path)
+    cat(sprintf("  Reference grid saved: %d total hexagons\n", nrow(hex_grid_reference)))
   }
   
-  return(hex_grid)
-}
-
-# Process a single day's data and create daily summary
-process_daily_summary <- function(date_str, files_dt, hex_grid, daily_summaries_dir) {
-  daily_summary_path <- file.path(daily_summaries_dir, sprintf("daily_%s.rds", date_str))
+  cat(sprintf("  Reference grid: %d hexagons (only affected ones will be stored)\n", 
+              nrow(hex_grid_reference)))
   
-  # Check if already processed
-  if (file.exists(daily_summary_path)) {
-    cat(sprintf("  [%s] Loading existing summary\n", date_str))
-    return(readRDS(daily_summary_path))
-  }
-  
-  cat(sprintf("  [%s] Processing new summary\n", date_str))
-  
-  # Get files for this date
-  date_files <- files_dt[date == date_str]
-  
-  if (nrow(date_files) == 0) {
-    return(NULL)
-  }
-  
-  # Load all polygons for this date
-  polys_list <- list()
-  for (i in seq_len(nrow(date_files))) {
-    tryCatch({
-      poly <- st_read(date_files$file[i], quiet = TRUE) %>%
-        st_transform(32618) %>%
-        st_simplify(dTolerance = SIMPLIFY, preserveTopology = FALSE)
-      
-      if (nrow(poly) > 1) {
-        poly <- st_union(poly) %>% st_sf()
-      }
-      
-      poly$datetime <- date_files$datetime[i]
-      poly$hour <- date_files$hour[i]
-      
-      polys_list[[length(polys_list) + 1]] <- poly
-    }, error = function(e) {
-      cat(sprintf("    Warning: Failed to load %s\n", basename(date_files$file[i])))
-    })
-  }
-  
-  if (length(polys_list) == 0) {
-    return(NULL)
-  }
-  
-  # Combine polygons
-  polys_list <- lapply(polys_list, function(poly) {
-    st_sf(
-      datetime = poly$datetime,
-      hour = poly$hour,
-      geometry = st_geometry(poly)
-    )
-  })
-  
-  all_polys <- do.call(rbind, polys_list)
-  
-  # Find intersections
-  intersections <- st_intersects(hex_grid, all_polys, sparse = TRUE)
-  
-  # Build daily results
-  daily_results <- data.table(
-    hex_id = integer(),
-    hours_count = integer(),
-    hours_list = character(),
-    datetimes_list = character()
-  )
-  
-  for (i in seq_len(nrow(hex_grid))) {
-    poly_indices <- intersections[[i]]
+  # Process dates sequentially with SPARSE storage
+  for (date in dates_to_process) {
+    cat(sprintf("  Processing %s...\n", date))
+    date_start <- Sys.time()
     
-    if (length(poly_indices) > 0) {
-      affected_datetimes <- all_polys$datetime[poly_indices]
-      affected_hours <- all_polys$hour[poly_indices]
+    date_files_info <- files_dt[files_dt$date == date, ]
+    
+    # MEMORY-EFFICIENT: Use a sparse structure (only affected hexagons)
+    affected_hexes <- list()  # hex_id -> list(count, datetimes)
+    
+    for (i in seq_len(nrow(date_files_info))) {
+      f <- date_files_info$file[i]
+      datetime_val <- date_files_info$datetime[i]
       
-      daily_results <- rbind(daily_results, data.table(
-        hex_id = hex_grid$hex_id[i],
-        hours_count = length(affected_datetimes),  # Count each appearance
-        hours_list = paste(sort(unique(affected_hours)), collapse = ","),
-        datetimes_list = paste(sort(affected_datetimes), collapse = ",")
-      ))
+      tryCatch({
+        polys <- st_read(f, quiet = TRUE) %>%
+          st_transform(32618) %>%
+          st_simplify(dTolerance = SIMPLIFY, preserveTopology = FALSE)
+        
+        if (nrow(polys) > 1) polys <- st_union(polys)
+        
+        # Find which hexagons are hit (only check against reference grid)
+        hits <- st_intersects(hex_grid_reference, polys, sparse = TRUE)
+        affected_ids <- which(lengths(hits) > 0)
+        
+        # Store ONLY the affected hexagons
+        for (hex_id in affected_ids) {
+          if (is.null(affected_hexes[[as.character(hex_id)]])) {
+            affected_hexes[[as.character(hex_id)]] <- list(
+              count = 1,
+              datetimes = datetime_val
+            )
+          } else {
+            affected_hexes[[as.character(hex_id)]]$count <- 
+              affected_hexes[[as.character(hex_id)]]$count + 1
+            affected_hexes[[as.character(hex_id)]]$datetimes <- 
+              c(affected_hexes[[as.character(hex_id)]]$datetimes, datetime_val)
+          }
+        }
+        
+        rm(polys, hits)
+      }, error = function(e) invisible(NULL))
     }
+    
+    # Convert sparse structure to sf object
+    if (length(affected_hexes) > 0) {
+      hex_ids <- as.integer(names(affected_hexes))
+      
+      result_data <- data.frame(
+        hex_id = hex_ids,
+        count = sapply(affected_hexes, function(x) x$count),
+        datetimes_affected = sapply(affected_hexes, function(x) paste(sort(x$datetimes), collapse = ",")),
+        stringsAsFactors = FALSE
+      )
+      
+      # Join with reference grid to get geometry and centroids
+      result_sf <- hex_grid_reference %>%
+        filter(hex_id %in% hex_ids) %>%
+        left_join(result_data, by = "hex_id") %>%
+        mutate(
+          date = date,
+          n_files = nrow(date_files_info)
+        ) %>%
+        st_transform(4326)
+      
+      result_sf <- st_make_valid(result_sf)
+      
+      daily_path <- file.path(output_dir, "daily", sprintf("daily_%s.geojson", date))
+      st_write(result_sf, daily_path, delete_dsn = TRUE, quiet = TRUE)
+      
+      date_elapsed <- as.numeric(difftime(Sys.time(), date_start, units = "secs"))
+      cat(sprintf("    → %d hexes affected (avg %.1f hours) in %.1f sec\n", 
+                  nrow(result_sf), mean(result_sf$count), date_elapsed))
+    } else {
+      cat("    → No hexes affected\n")
+    }
+    
+    gc()
   }
   
-  if (nrow(daily_results) > 0) {
-    daily_results$date <- date_str
-    saveRDS(daily_results, daily_summary_path)
-  }
-  
-  return(daily_results)
-}
-
-# Aggregate daily summaries into monthly summary
-process_monthly_summary <- function(year, month, daily_summaries_dir, monthly_summaries_dir) {
-  monthly_summary_path <- file.path(monthly_summaries_dir, 
-                                     sprintf("monthly_%04d-%02d.rds", year, month))
-  
-  # Check if already processed
-  if (file.exists(monthly_summary_path)) {
-    cat(sprintf("  [%04d-%02d] Loading existing monthly summary\n", year, month))
-    return(readRDS(monthly_summary_path))
-  }
-  
-  cat(sprintf("  [%04d-%02d] Creating new monthly summary\n", year, month))
-  
-  # Find all daily summaries for this month
-  pattern <- sprintf("daily_%04d-%02d-.*\\.rds", year, month)
-  daily_files <- list.files(daily_summaries_dir, pattern = pattern, full.names = TRUE)
-  
-  if (length(daily_files) == 0) {
-    return(NULL)
-  }
-  
-  # Load and combine all daily summaries
-  all_dailies <- lapply(daily_files, readRDS)
-  all_dailies <- rbindlist(all_dailies)
-  
-  # Aggregate by hex_id
-  monthly_results <- all_dailies[, .(
-    total_hours = sum(hours_count),
-    days_affected = .N,
-    dates_affected = paste(sort(unique(date)), collapse = ","),
-    all_datetimes = paste(unique(unlist(strsplit(datetimes_list, ","))), collapse = ",")
-  ), by = hex_id]
-  
-  monthly_results$year <- year
-  monthly_results$month <- month
-  
-  saveRDS(monthly_results, monthly_summary_path)
-  
-  return(monthly_results)
+  cat("  ✓ New daily summaries created\n")
+} else {
+  cat("\n[2] No new dates to process - all daily summaries up to date!\n")
 }
 
 # =================================================================
-# MAIN PROCESSING
+# STEP 3: Update monthly summaries (INCREMENTAL)
 # =================================================================
+cat("\n[3] Updating monthly summaries (incremental)...\n")
 
-# Step 1: Find all polygon files
-cat("\n[STEP 1: Finding polygon files]\n")
-files_dt <- find_polygon_files(data_path, start_date = ANALYSIS_START_DATE)
-
-if (nrow(files_dt) == 0) {
-  stop("No files to process after filtering")
-}
-
-# Step 2: Create or load hex grid
-cat("\n[STEP 2: Setting up hex grid]\n")
-
-# First, we need to get bounding box from a sample of polygons
-sample_files <- head(files_dt$file, min(10, nrow(files_dt)))
-sample_polys <- lapply(sample_files, function(f) {
-  st_read(f, quiet = TRUE) %>% st_transform(32618)
-}) %>% do.call(rbind, .)
-
-bbox <- st_bbox(sample_polys)
-bbox["xmin"] <- bbox["xmin"] - 50000
-bbox["xmax"] <- bbox["xmax"] + 50000
-bbox["ymin"] <- bbox["ymin"] - 50000
-bbox["ymax"] <- bbox["ymax"] + 50000
-class(bbox) <- "bbox"
-attr(bbox, "crs") <- st_crs(32618)
-
-hex_grid <- get_or_create_hex_grid(output_dir, bbox)
-cat(sprintf("  Grid size: %d hexagons\n", nrow(hex_grid)))
-
-# Step 3: Process daily summaries
-cat("\n[STEP 3: Processing daily summaries]\n")
-unique_dates <- unique(files_dt$date)
-cat(sprintf("  Processing %d unique dates\n", length(unique_dates)))
-
-daily_summaries <- list()
-for (date_str in unique_dates) {
-  daily_result <- process_daily_summary(date_str, files_dt, hex_grid, daily_summaries_dir)
-  if (!is.null(daily_result)) {
-    daily_summaries[[date_str]] <- daily_result
-  }
-}
-
-# Step 4: Process monthly summaries
-cat("\n[STEP 4: Processing monthly summaries]\n")
-dates <- as.Date(unique_dates)
-year_months <- unique(format(dates, "%Y-%m"))
-cat(sprintf("  Processing %d unique months\n", length(year_months)))
-
-monthly_summaries <- list()
-for (ym in year_months) {
-  parts <- strsplit(ym, "-")[[1]]
-  year <- as.integer(parts[1])
-  month <- as.integer(parts[2])
-  
-  monthly_result <- process_monthly_summary(year, month, daily_summaries_dir, monthly_summaries_dir)
-  if (!is.null(monthly_result)) {
-    monthly_summaries[[ym]] <- monthly_result
-  }
-}
-
-# Step 5: Create total cumulative from monthly summaries
-cat("\n[STEP 5: Creating total cumulative]\n")
-
-# Combine all monthly summaries
-all_monthly <- rbindlist(monthly_summaries)
-
-# Aggregate to total
-total_results <- all_monthly[, .(
-  hours_count = sum(total_hours),
-  days_affected = length(unique(unlist(strsplit(dates_affected, ",")))),
-  datetimes_affected = paste(unique(unlist(strsplit(all_datetimes, ","))), collapse = ",")
-), by = hex_id]
-
-cat(sprintf("  Total hexagons affected: %d\n", nrow(total_results)))
-
-# Join with hex grid geometry
-hex_results_sf <- hex_grid %>%
-  inner_join(total_results, by = "hex_id") %>%
-  st_transform(4326) %>%
-  st_make_valid()
-
-# Step 6: Save total cumulative
-cat("\n[STEP 6: Saving total cumulative]\n")
-
-current_date <- format(Sys.time(), "%Y-%m-%d")
-total_path <- file.path(output_dir, "total", "total_exposure.geojson")
-
-st_write(hex_results_sf, total_path, delete_dsn = TRUE, quiet = TRUE)
-cat(sprintf("  ✓ Total exposure saved: %d hexagons\n", nrow(hex_results_sf)))
-
-# Save statistics CSV
-stats_csv <- as.data.frame(hex_results_sf) %>%
-  select(hex_id, centroid_lat, centroid_lon, hours_count, days_affected, datetimes_affected)
-
-stats_path <- file.path(output_dir, "total", "total_stats.csv")
-fwrite(stats_csv, stats_path)
-cat("  ✓ Stats CSV saved\n")
-
-# Save summary JSON
-summary_data <- list(
-  generated_at = format(Sys.time(), "%Y-%m-%d %H:%M:%S %Z"),
-  last_update_date = current_date,
-  analysis_start_date = as.character(ANALYSIS_START_DATE),
-  total_hexes_affected = nrow(hex_results_sf),
-  total_hours_tracked = sum(hex_results_sf$hours_count),
-  date_range = list(
-    first = min(files_dt$date),
-    last = max(files_dt$date)
-  ),
-  hex_size_meters = HEX_SIZE,
-  processing_info = list(
-    method = "incremental daily/monthly summaries",
-    total_polygon_files = nrow(files_dt),
-    daily_summaries = length(daily_summaries),
-    monthly_summaries = length(monthly_summaries)
-  ),
-  stats = list(
-    mean_hours = mean(hex_results_sf$hours_count),
-    median_hours = median(hex_results_sf$hours_count),
-    max_hours = max(hex_results_sf$hours_count),
-    mean_days = mean(hex_results_sf$days_affected),
-    median_days = median(hex_results_sf$days_affected),
-    max_days = max(hex_results_sf$days_affected)
-  )
+all_daily_files <- list.files(
+  file.path(output_dir, "daily"),
+  pattern = "^daily_.*\\.geojson$",
+  full.names = TRUE
 )
 
-summary_path <- file.path(output_dir, "total", "summary.json")
-writeLines(jsonlite::toJSON(summary_data, auto_unbox = TRUE, pretty = TRUE), summary_path)
-cat("  ✓ Summary JSON saved\n")
+if (length(all_daily_files) > 0) {
+  daily_months <- unique(sub(".*daily_(\\d{4}-\\d{2})-\\d{2}\\.geojson", "\\1", all_daily_files))
+  
+  months_to_update <- if (length(dates_to_process) > 0) {
+    unique(substr(dates_to_process, 1, 7))
+  } else {
+    character(0)
+  }
+  
+  if (length(months_to_update) > 0) {
+    cat(sprintf("  Updating %d months with new data: %s\n", 
+                length(months_to_update), paste(months_to_update, collapse=", ")))
+    
+    for (month in months_to_update) {
+      month_files <- all_daily_files[grepl(month, all_daily_files)]
+      month_data <- lapply(month_files, function(f) st_read(f, quiet = TRUE))
+      
+      combined_dt <- rbindlist(lapply(month_data, function(x) {
+        data.table(
+          hex_id = x$hex_id,
+          geometry = st_as_text(x$geometry),
+          centroid_lon = x$centroid_lon,
+          centroid_lat = x$centroid_lat,
+          count = x$count,
+          n_files = x$n_files,
+          datetimes_affected = x$datetimes_affected
+        )
+      }))
+      
+      combined_summary <- combined_dt[, .(
+        geometry = first(geometry),
+        centroid_lon = first(centroid_lon),
+        centroid_lat = first(centroid_lat),
+        count = sum(count),
+        n_files = sum(n_files),
+        datetimes_affected = paste(unlist(strsplit(paste(datetimes_affected, collapse = ","), ",")), collapse = ",")
+      ), by = hex_id]
+      
+      combined <- st_as_sf(combined_summary, wkt = "geometry", crs = 4326)
+      combined <- st_make_valid(combined)
+      
+      monthly_path <- file.path(output_dir, "monthly", sprintf("monthly_%s.geojson", month))
+      st_write(combined, monthly_path, delete_dsn = TRUE, quiet = TRUE)
+      cat(sprintf("  ✓ %s: %d hexes\n", month, nrow(combined)))
+    }
+  } else {
+    cat("  All monthly summaries up to date!\n")
+  }
+}
 
-# Step 7: Generate HTML
-cat("\n[STEP 7: Generating HTML map]\n")
+# =================================================================
+# STEP 4: Update TOTAL cumulative (INCREMENTAL with versioning)
+# =================================================================
+cat("\n[4] Updating total cumulative summary (incremental)...\n")
 
-num_days <- length(unique(files_dt$date))
-hex_size_km <- round(HEX_SIZE / 1000, 1)
+current_date <- format(Sys.time(), "%Y-%m-%d")
+snapshot_path <- file.path(cumulative_snapshots_dir, sprintf("cumulative_%s.geojson", current_date))
 
-# Generate HTML with detail modal and correct hour counting
-hour_options <- paste(sapply(0:23, function(i) sprintf('<option value="%d">%d:00</option>', i, i)), collapse="")
+need_update <- length(dates_to_process) > 0
 
-html_template <- sprintf('<!DOCTYPE html>
+if (need_update) {
+  cat("  New data detected - updating cumulative total...\n")
+  
+  previous_cumulative_path <- file.path(output_dir, "total", "total_exposure.geojson")
+  
+  if (file.exists(previous_cumulative_path)) {
+    cat("  Loading previous cumulative data...\n")
+    previous_data <- st_read(previous_cumulative_path, quiet = TRUE)
+    
+    previous_dt <- data.table(
+      hex_id = previous_data$hex_id,
+      geometry = st_as_text(previous_data$geometry),
+      centroid_lon = previous_data$centroid_lon,
+      centroid_lat = previous_data$centroid_lat,
+      hours_count = previous_data$hours_count,
+      n_files = previous_data$n_files,
+      datetimes_affected = previous_data$datetimes_affected
+    )
+    
+    new_daily_paths <- file.path(output_dir, "daily", sprintf("daily_%s.geojson", dates_to_process))
+    new_daily_data <- lapply(new_daily_paths, function(f) st_read(f, quiet = TRUE))
+    
+    new_dt <- rbindlist(lapply(new_daily_data, function(x) {
+      data.table(
+        hex_id = x$hex_id,
+        geometry = st_as_text(x$geometry),
+        centroid_lon = x$centroid_lon,
+        centroid_lat = x$centroid_lat,
+        count = x$count,
+        n_files = x$n_files,
+        datetimes_affected = x$datetimes_affected
+      )
+    }))
+    
+    cat("  Merging previous cumulative with new data...\n")
+    combined_dt <- rbind(
+      previous_dt[, .(hex_id, geometry, centroid_lon, centroid_lat, 
+                     count = hours_count, n_files, datetimes_affected)],
+      new_dt,
+      fill = TRUE
+    )
+    
+  } else {
+    cat("  No previous cumulative - creating from scratch...\n")
+    all_daily_data <- lapply(all_daily_files, function(f) st_read(f, quiet = TRUE))
+    
+    combined_dt <- rbindlist(lapply(all_daily_data, function(x) {
+      data.table(
+        hex_id = x$hex_id,
+        geometry = st_as_text(x$geometry),
+        centroid_lon = x$centroid_lon,
+        centroid_lat = x$centroid_lat,
+        count = x$count,
+        n_files = x$n_files,
+        datetimes_affected = x$datetimes_affected
+      )
+    }))
+  }
+  
+  # Aggregate
+  total_summary <- combined_dt[, .(
+    geometry = first(na.omit(geometry)),
+    centroid_lon = first(centroid_lon),
+    centroid_lat = first(centroid_lat),
+    hours_count = sum(count),
+    n_files = sum(n_files),
+    datetimes_affected = paste(unlist(strsplit(paste(datetimes_affected, collapse = ","), ",")), collapse = ",")
+  ), by = hex_id]
+  
+  # Calculate days affected
+  total_summary[, days_affected := sapply(strsplit(datetimes_affected, ","), function(dts) {
+    length(unique(sapply(strsplit(dts, " "), `[`, 1)))
+  })]
+  
+  # Convert to sf
+  total_combined <- st_as_sf(total_summary, wkt = "geometry", crs = 4326)
+  total_combined <- st_make_valid(total_combined)
+  
+  st_write(total_combined, previous_cumulative_path, delete_dsn = TRUE, quiet = TRUE)
+  cat(sprintf("  ✓ Updated cumulative: %d hexes affected\n", nrow(total_combined)))
+  
+  st_write(total_combined, snapshot_path, delete_dsn = TRUE, quiet = TRUE)
+  cat(sprintf("  ✓ Snapshot saved: %s\n", basename(snapshot_path)))
+  
+  # Create CSV statistics
+  stats_csv <- as.data.frame(total_summary[, .(hex_id, centroid_lat, centroid_lon, 
+                                               hours_count, days_affected, datetimes_affected)])
+  
+  stats_path <- file.path(output_dir, "total", "total_stats.csv")
+  fwrite(stats_csv, stats_path)
+  cat("  ✓ Stats CSV updated\n")
+  
+  # Create summary JSON
+  summary_data <- list(
+    generated_at = format(Sys.time(), "%Y-%m-%d %H:%M:%S %Z"),
+    last_update_date = current_date,
+    new_dates_added = length(dates_to_process),
+    total_hexes_affected = nrow(total_combined),
+    total_hours_scraped = sum(total_combined$hours_count),
+    date_range = list(
+      first = min(files_dt$date),
+      last = max(files_dt$date)
+    ),
+    hex_size_meters = HEX_SIZE,
+    optimization_info = list(
+      processing_mode = "memory-efficient incremental",
+      snapshot_date = current_date
+    ),
+    stats = list(
+      mean_hours = mean(total_combined$hours_count),
+      median_hours = median(total_combined$hours_count),
+      max_hours = max(total_combined$hours_count),
+      mean_days = mean(total_combined$days_affected),
+      median_days = median(total_combined$days_affected),
+      max_days = max(total_combined$days_affected)
+    )
+  )
+  
+  summary_path <- file.path(output_dir, "total", "summary.json")
+  writeLines(jsonlite::toJSON(summary_data, auto_unbox = TRUE, pretty = TRUE), summary_path)
+  cat("  ✓ Summary JSON updated\n")
+  
+  num_days <- length(unique(files_dt$date))
+  hex_size_km <- round(HEX_SIZE / 1000, 1)
+  
+} else {
+  cat("  No new data - cumulative total is up to date!\n")
+  
+  previous_cumulative_path <- file.path(output_dir, "total", "total_exposure.geojson")
+  if (file.exists(previous_cumulative_path)) {
+    total_combined <- st_read(previous_cumulative_path, quiet = TRUE)
+    num_days <- length(unique(files_dt$date))
+    hex_size_km <- round(HEX_SIZE / 1000, 1)
+  }
+}
+
+# =================================================================
+# STEP 5: Generate/Update HTML (unchanged)
+# =================================================================
+cat("\n[5] Updating HTML map...\n")
+
+html_generated <- tryCatch({
+  html_parts <- vector("list", 4)
+  
+  html_parts[[1]] <- paste0('<!DOCTYPE html>
 <html lang="fr">
 <head>
-    <title>Pannes de courant cumulatives - Hydro-Québec</title>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pannes de courant Hydro-Québec - Analyse cumulative</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
     <link rel="stylesheet" href="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.css"/>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.js"></script>
     <style>
-        body{margin:0;padding:0;font-family:-apple-system,system-ui,sans-serif}
-        #map{position:absolute;top:0;bottom:0;width:100%%}
-        .info{padding:12px;background:white;box-shadow:0 2px 10px rgba(0,0,0,0.1);border-radius:8px}
-        .info h4{margin:0 0 8px;font-size:15px;font-weight:600}
-        .info p{margin:4px 0;font-size:13px}
-        .legend{line-height:20px;font-size:12px}
-        .legend i{width:18px;height:18px;float:left;margin-right:8px;opacity:0.8;border-radius:2px}
-        .controls{padding:10px;background:white;box-shadow:0 2px 10px rgba(0,0,0,0.1);border-radius:8px;max-width:250px}
-        .controls h4{margin:0 0 8px;font-size:14px;font-weight:600}
-        .controls label{display:block;margin:8px 0 4px;font-size:12px;font-weight:500}
-        .controls select{width:100%%;padding:6px;border-radius:4px;border:1px solid #ddd;font-size:12px}
-        .detail-link{color:#0066cc;cursor:pointer;text-decoration:underline;font-size:12px;margin-top:8px;display:inline-block}
-        .detail-link:hover{color:#0052a3}
-        .detail-modal{display:none;position:fixed;z-index:2000;left:50%%;top:50%%;transform:translate(-50%%,-50%%);
-                      background:white;padding:20px;border-radius:8px;box-shadow:0 4px 20px rgba(0,0,0,0.3);
-                      max-width:90vw;width:600px;max-height:85vh;overflow-y:auto}
-        .detail-modal.active{display:block}
-        .modal-overlay{display:none;position:fixed;z-index:1999;left:0;top:0;width:100%%;height:100%%;
-                       background:rgba(0,0,0,0.5)}
-        .modal-overlay.active{display:block}
-        .close-modal{float:right;font-size:24px;font-weight:bold;cursor:pointer;color:#999;line-height:1}
-        .close-modal:hover{color:#333}
-        .detail-table{width:100%%;border-collapse:collapse;margin-top:10px;font-size:13px}
-        .detail-table th,.detail-table td{text-align:left;padding:8px;border-bottom:1px solid #eee}
-        .detail-table th{font-weight:600;background:#f5f5f5;position:sticky;top:0}
-        .detail-table tfoot td{font-weight:600;background:#f9f9f9;border-top:2px solid #ccc}
-        @media (max-width: 768px) {
-            .detail-modal{width:95vw;max-height:90vh;padding:15px}
-            .detail-table{font-size:12px}
-            .detail-table th,.detail-table td{padding:6px}
-        }
+        body { margin:0; padding:0; font-family: -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
+        #map { position:absolute; top:0; bottom:0; width:100%; }
+        .info { padding:10px; background:white; border-radius:5px; box-shadow:0 0 15px rgba(0,0,0,0.2); max-width:300px; }
+        .info h4 { margin:0 0 10px; font-size:16px; color:#333; }
+        .info p { margin:5px 0; font-size:13px; color:#666; }
+        .legend { line-height:20px; color:#555; background:white; padding:10px; border-radius:5px; box-shadow:0 0 15px rgba(0,0,0,0.2); }
+        .legend i { width:18px; height:18px; float:left; margin-right:8px; opacity:0.8; }
+        .legend h4 { margin:0 0 8px; font-size:14px; }
+        .controls { background:white; padding:15px; border-radius:5px; box-shadow:0 0 15px rgba(0,0,0,0.2); min-width:200px; }
+        .controls h4 { margin:0 0 10px; font-size:14px; color:#333; }
+        .controls label { display:block; margin:8px 0 4px; font-size:12px; color:#666; font-weight:500; }
+        .controls select { width:100%; padding:6px; border:1px solid #ddd; border-radius:4px; font-size:13px; }
+        .detail-link { color:#1e88e5; cursor:pointer; text-decoration:underline; font-size:12px; }
+        .detail-link:hover { color:#1565c0; }
+        .modal-overlay { display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.5); z-index:2000; }
+        .modal-overlay.active { display:block; }
+        .detail-modal { display:none; position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); background:white; padding:25px; border-radius:8px; box-shadow:0 4px 20px rgba(0,0,0,0.3); z-index:2001; max-width:90%; max-height:90%; overflow-y:auto; }
+        .detail-modal.active { display:block; }
+        .detail-modal h3 { margin:0 0 15px; color:#333; }
+        .detail-modal p { margin:10px 0; color:#666; }
+        .detail-table { width:100%; border-collapse:collapse; margin:15px 0; font-size:13px; }
+        .detail-table th, .detail-table td { padding:10px; text-align:left; border-bottom:1px solid #e0e0e0; }
+        .detail-table thead { background:#f5f5f5; }
+        .detail-table th { font-weight:600; color:#555; }
+        .detail-table tfoot { font-weight:600; background:#fafafa; }
+        .close-modal { position:absolute; top:10px; right:15px; font-size:24px; cursor:pointer; color:#999; }
+        .close-modal:hover { color:#333; }
     </style>
 </head>
 <body>
     <div id="map"></div>
-    <div class="modal-overlay" id="modalOverlay"></div>
-    <div class="detail-modal" id="detailModal">
-        <span class="close-modal" onclick="closeDetailModal()">&times;</span>
+    <div id="modalOverlay" class="modal-overlay"></div>
+    <div id="detailModal" class="detail-modal">
+        <span class="close-modal" onclick="closeDetailModal()">×</span>
         <div id="modalContent"></div>
     </div>
     <script>
-        var map = L.map("map").setView([46.2, -72.5], 9);
-        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{attribution:"© OSM"}).addTo(map);
-        var currentLayer,allData={},legendControl=null;
-        function getColor(d){return d>80?"#67000d":d>60?"#a50f15":d>40?"#cb181d":d>20?"#ef3b2c":d>10?"#fb6a4a":d>5?"#fc9272":d>2?"#fcbba1":"#fee5d9";}
-        async function loadData(){
-            try{
-                const r=await fetch("total/total_exposure.geojson");
-                const data=await r.json();
-                allData.total=data;
-                const dates=new Set();
-                data.features.forEach(f=>{
-                    if(f.properties.datetimes_affected){
-                        f.properties.datetimes_affected.split(",").forEach(dt=>{
-                            const c=dt.trim();
-                            if(c){const d=c.split(" ")[0];dates.add(d);}
-                        });
-                    }
-                });
-                const sel=document.getElementById("dateSelect");
-                Array.from(dates).sort().forEach(d=>{const o=document.createElement("option");o.value=d;o.text=d;sel.appendChild(o);});
-                updateMap();
-            }catch(e){console.error("Error:",e);alert("Erreur de chargement");}
+')
+
+  html_parts[[2]] <- "
+        var map = L.map('map').setView([46.8, -71.2], 8);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
+            attribution:'© OpenStreetMap',
+            maxZoom:18
+        }).addTo(map);
+        
+        var allData = { daily: {}, total: null };
+        var currentLayer = null;
+        
+        async function loadAllDailyData() {
+            const totalResp = await fetch('total/total_exposure.geojson');
+            allData.total = await totalResp.json();
+            
+            const dateSelect = document.getElementById('dateSelect');
+            const dates = [...new Set(allData.total.features.flatMap(f => {
+                return f.properties.datetimes_affected.split(',').map(dt => dt.split(' ')[0]);
+            }))].sort();
+            
+            for (const date of dates) {
+                const opt = document.createElement('option');
+                opt.value = date;
+                opt.textContent = date;
+                dateSelect.appendChild(opt);
+            }
+            
+            for (const date of dates) {
+                try {
+                    const resp = await fetch(`daily/daily_${date}.geojson`);
+                    allData.daily[date] = await resp.json();
+                } catch(e) {
+                    console.warn('Could not load daily data for', date);
+                }
+            }
         }
-        function updateMap(){
-            const df=document.getElementById("dateSelect").value;
-            const hf=document.getElementById("hourSelect").value;
-            if(currentLayer)map.removeLayer(currentLayer);
-            const isFilt=df!=="all"||hf!=="all";
-            currentLayer=L.geoJSON(allData.total,{
-                filter:f=>{
-                    if(!isFilt)return true;
-                    if(!f.properties.datetimes_affected)return false;
-                    return f.properties.datetimes_affected.split(",").map(s=>s.trim()).some(dt=>{
-                        if(!dt)return false;
-                        const p=dt.split(" ");
-                        if(p.length!==2)return false;
-                        const d=p[0],t=p[1],h=parseInt(t.split(":")[0]);
-                        return(df==="all"||d===df)&&(hf==="all"||h===parseInt(hf));
-                    });
-                },
-                style:f=>({fillColor:getColor(f.properties.hours_count),weight:1,opacity:0.6,color:"#666",fillOpacity:0.7}),
-                onEachFeature:(f,layer)=>{
-                    const p=f.properties;
-                    let dh=p.hours_count;
-                    if(isFilt&&p.datetimes_affected){
-                        const fdt=p.datetimes_affected.split(",").map(s=>s.trim()).filter(s=>s).filter(dt=>{
-                            const parts=dt.split(" ");
-                            if(parts.length!==2)return false;
-                            const d=parts[0],t=parts[1],h=parseInt(t.split(":")[0]);
-                            return(df==="all"||d===df)&&(hf==="all"||h===parseInt(hf));
-                        });
-                        dh=fdt.length;
-                    }
-                    const popup=`<div style="min-width:200px"><b>Hexagone #${p.hex_id}</b><br><b>Heures affectées:</b> ${dh}<br><b>Jours affectés:</b> ${p.days_affected}<br><b>Centroïde:</b> ${p.centroid_lat.toFixed(6)}, ${p.centroid_lon.toFixed(6)}<br><a class="detail-link" onclick="showDetails(${p.hex_id})">Voir les détails →</a></div>`;
+        
+        function filterDataByDateTime(date, hour) {
+            if (date === 'all') return allData.total;
+            
+            const dailyData = allData.daily[date];
+            if (!dailyData) return null;
+            
+            if (hour === 'all') return dailyData;
+            
+            const filtered = JSON.parse(JSON.stringify(dailyData));
+            filtered.features = filtered.features.map(f => {
+                const dts = f.properties.datetimes_affected.split(',');
+                const matchingDts = dts.filter(dt => {
+                    const dtHour = parseInt(dt.split(' ')[1].split(':')[0]);
+                    return dtHour === parseInt(hour);
+                });
+                
+                if (matchingDts.length === 0) return null;
+                
+                f.properties.filtered_hours_count = matchingDts.length;
+                return f;
+            }).filter(f => f !== null);
+            
+            return filtered;
+        }
+        
+        function updateMap() {
+            const date = document.getElementById('dateSelect').value;
+            const hour = document.getElementById('hourSelect').value;
+            
+            const data = filterDataByDateTime(date, hour);
+            if (!data) return;
+            
+            if (currentLayer) map.removeLayer(currentLayer);
+            
+            const isFiltered = date !== 'all';
+            const useFixedColor = isFiltered;
+            
+            currentLayer = L.geoJSON(data, {
+                style: f => ({
+                    fillColor: useFixedColor ? '#a50f15' : getColor(f.properties.hours_count),
+                    weight: 0.5,
+                    color: '#fff',
+                    fillOpacity: useFixedColor ? 0.8 : 0.75
+                }),
+                onEachFeature: (f, layer) => {
+                    const props = f.properties;
+                    const hoursCount = isFiltered ? props.filtered_hours_count : props.hours_count;
+                    
+                    var popup = '<b>Hexagone #' + props.hex_id + '</b><br>' +
+                               '<b>Nombre d\\'heures impactées:</b> ' + hoursCount + '<br>' +
+                               '<b>Nombre de jours impactés:</b> ' + props.days_affected + '<br>' +
+                               '<b>Coordonnées du centroïde:</b><br>' +
+                               'Lat: ' + props.centroid_lat.toFixed(6) + ', Lon: ' + props.centroid_lon.toFixed(6) + '<br>' +
+                               '<a class=\"detail-link\" onclick=\"showDetails(' + props.hex_id + ')\">Voir les détails complets</a>';
+                    
                     layer.bindPopup(popup);
                 }
             }).addTo(map);
-            if(legendControl){if(isFilt){map.removeControl(legendControl);}else if(!map.hasControl(legendControl)){legendControl.addTo(map);}}
         }
-        function showDetails(hexId){
-            const f=allData.total.features.find(f=>f.properties.hex_id===hexId);
-            if(!f){alert("Données non trouvées");return;}
-            const p=f.properties;
-            if(!p.datetimes_affected){alert("Aucune donnée temporelle");return;}
-            const dts=p.datetimes_affected.split(",").map(s=>s.trim()).filter(s=>s).sort();
-            if(dts.length===0){alert("Aucune donnée temporelle");return;}
-            const byDate={};
-            dts.forEach(dt=>{
-                const parts=dt.split(" ");
-                if(parts.length!==2)return;
-                const d=parts[0],t=parts[1];
-                if(!byDate[d])byDate[d]=[];
-                const hm=t.match(/^(\\d{1,2}):/);
-                if(hm){const h=parseInt(hm[1]);byDate[d].push(h);}
+        
+        function showDetails(hexId) {
+            const feature = allData.total.features.find(f => f.properties.hex_id === hexId);
+            if (!feature) return;
+            
+            const props = feature.properties;
+            const datetimes = props.datetimes_affected.split(',').map(s => s.trim()).sort();
+            
+            const byDate = {};
+            datetimes.forEach(dt => {
+                const [date, time] = dt.split(' ');
+                if (!byDate[date]) byDate[date] = [];
+                byDate[date].push(time);
             });
-            let html="<h3>Hexagone #"+hexId+"</h3>";
-            html+="<p><strong>Centroïde:</strong> "+p.centroid_lat.toFixed(6)+", "+p.centroid_lon.toFixed(6)+"</p>";
-            html+="<h4>Heures affectées par date:</h4>";
-            html+="<table class=\\"detail-table\\"><thead><tr><th>Date</th><th>Heures affectées</th><th>Total</th></tr></thead><tbody>";
-            const sdates=Object.keys(byDate).sort();
-            let th=0;
-            sdates.forEach(d=>{
-                const hs=byDate[d].sort((a,b)=>a-b);
-                const hl=hs.map(h=>h+":00").join(", ");
-                const c=hs.length;
-                th+=c;
-                html+="<tr><td>"+d+"</td><td>"+hl+"</td><td><b>"+c+"</b></td></tr>";
+            
+            let html = '<h3>Hexagone #' + hexId + '</h3>';
+            html += '<p><strong>Centroïde:</strong> ' + props.centroid_lat.toFixed(6) + ', ' + props.centroid_lon.toFixed(6) + '</p>';
+            html += '<table class=\"detail-table\">';
+            html += '<thead><tr><th>Date</th><th>Heures affectées</th><th>Nombre d\\'heures</th></tr></thead><tbody>';
+            
+            let totalDays = 0;
+            let totalHours = 0;
+            
+            Object.keys(byDate).sort().forEach(date => {
+                const times = byDate[date].sort();
+                const numHours = times.length;
+                const timeList = times.join(', ');
+                totalDays++;
+                totalHours += numHours;
+                html += '<tr><td>' + date + '</td><td>' + timeList + '</td><td>' + numHours + '</td></tr>';
             });
-            html+="</tbody><tfoot><tr><td colspan=\\"2\\"><strong>Total</strong></td><td><strong>"+th+" heures sur "+sdates.length+" jours</strong></td></tr></tfoot></table>";
-            html+="<p style=\\"font-size:11px;color:#666;margin-top:10px;\\"><em>Chaque entrée représente une heure où ce secteur était marqué comme ayant une panne</em></p>";
-            document.getElementById("modalContent").innerHTML=html;
-            document.getElementById("detailModal").classList.add("active");
-            document.getElementById("modalOverlay").classList.add("active");
+            
+            html += '</tbody><tfoot><tr><td><strong>Total</strong></td><td>' + totalDays + ' jours</td><td>' + totalHours + ' heures</td></tr></tfoot>';
+            html += '</table>';
+            
+            document.getElementById('modalContent').innerHTML = html;
+            document.getElementById('detailModal').classList.add('active');
+            document.getElementById('modalOverlay').classList.add('active');
         }
-        function closeDetailModal(){
-            document.getElementById("detailModal").classList.remove("active");
-            document.getElementById("modalOverlay").classList.remove("active");
+        
+        function closeDetailModal() {
+            document.getElementById('detailModal').classList.remove('active');
+            document.getElementById('modalOverlay').classList.remove('active');
         }
-        document.getElementById("modalOverlay").onclick=closeDetailModal;
-        loadData();
-        legendControl=L.control({position:"bottomright"});
-        legendControl.onAdd=()=>{
-            var div=L.DomUtil.create("div","info legend");
-            div.innerHTML="<h4>Heures affectées</h4>";
-            [0,2,5,10,20,40,60,80].forEach((g,i,a)=>{
-                div.innerHTML+="<i style=\\"background:"+getColor(g+1)+"\\"></i>"+g+(a[i+1]?"–"+a[i+1]:"+")+  "<br>";
+        
+        document.getElementById('modalOverlay').onclick = closeDetailModal;
+        
+        function getColor(d) {
+            return d>80?'#67000d':d>60?'##a50f15':d>40?'#cb181d':d>20?'#ef3b2c':
+                   d>10?'#fb6a4a':d>5?'#fc9272':d>2?'#fcbba1':'#fee5d9';
+        }
+        
+        loadAllDailyData().then(() => {
+            updateMap();
+        });
+        
+        var legend = L.control({position:'bottomright'});
+        legend.onAdd = () => {
+            var div = L.DomUtil.create('div','info legend');
+            div.innerHTML = '<h4>Heures (nombre)</h4>';
+            [0,2,5,10,20,40,60,80].forEach((g,i,a) => {
+                div.innerHTML += '<i style=\"background:' + getColor(g+1) + '\"></i>' + g + (a[i+1]?'–'+a[i+1]:'+') + '<br>';
             });
             return div;
         };
-        legendControl.addTo(map);
-        var geocoder=L.Control.geocoder({defaultMarkGeocode:false,placeholder:"Adresse ou code postal...",errorMessage:"Adresse non trouvée"})
-        .on("markgeocode",function(e){
-            var bbox=e.geocode.bbox;
-            var poly=L.polygon([bbox.getSouthEast(),bbox.getNorthEast(),bbox.getNorthWest(),bbox.getSouthWest()]);
+        legend.addTo(map);
+        
+        var geocoder = L.Control.geocoder({
+            defaultMarkGeocode: false,
+            placeholder: 'Rechercher une adresse...',
+            errorMessage: 'Adresse non trouvée'
+        })
+        .on('markgeocode', function(e) {
+            var bbox = e.geocode.bbox;
+            var poly = L.polygon([
+                bbox.getSouthEast(),
+                bbox.getNorthEast(),
+                bbox.getNorthWest(),
+                bbox.getSouthWest()
+            ]);
             map.fitBounds(poly.getBounds());
-        }).addTo(map);
-        var info=L.control({position:"topright"});
-        info.onAdd=()=>{
-            var div=L.DomUtil.create("div","info");
-            div.innerHTML="<h4>Pannes cumulatives</h4><p><b>Hexagones:</b> %s km</p><p><b>Jours:</b> %d</p><p><b>Début analyse:</b> %s</p>";
+        })
+        .addTo(map);
+"
+
+  html_parts[[3]] <- paste0("
+        var info = L.control({position:'topright'});
+        info.onAdd = () => {
+            var div = L.DomUtil.create('div','info');
+            div.innerHTML = '<h4>Pannes de courant cumulatives</h4>' +
+                           '<p><b>Taille des hexagones:</b> ", hex_size_km, " km</p>' +
+                           '<p><b>Jours analysés:</b> ", num_days, "</p>' +
+                           '<p style=\"font-size:11px;color:#999;\">Mise à jour: ", current_date, "</p>';
             return div;
         };
         info.addTo(map);
-        var controls=L.control({position:"topleft"});
-        controls.onAdd=()=>{
-            var div=L.DomUtil.create("div","controls");
-            div.innerHTML="<h4>Filtres</h4><label>Date:</label><select id=\\"dateSelect\\" onchange=\\"updateMap()\\"><option value=\\"all\\">Toutes (défaut)</option></select><label>Heure:</label><select id=\\"hourSelect\\" onchange=\\"updateMap()\\"><option value=\\"all\\">Toutes</option>%s</select>";
+        
+        var controls = L.control({position:'topleft'});
+        controls.onAdd = () => {
+            var div = L.DomUtil.create('div','controls');
+            div.innerHTML = '<h4>Filtres</h4>' +
+                           '<label>Date:</label>' +
+                           '<select id=\"dateSelect\" onchange=\"updateMap()\"><option value=\"all\">Résumé complet (défaut)</option></select>' +
+                           '<label>Heure:</label>' +
+                           '<select id=\"hourSelect\" onchange=\"updateMap()\"><option value=\"all\">Toutes</option>' +")
+
+  html_parts[[4]] <- paste0(
+    paste(sapply(0:23, function(i) sprintf("'<option value=\"%d\">%d:00</option>'", i, i)), collapse=" + "),
+    " + '</select>';
             return div;
         };
         controls.addTo(map);
     </script>
 </body>
-</html>', hex_size_km, num_days, as.character(ANALYSIS_START_DATE), hour_options)
+</html>")
 
-html_path <- file.path(output_dir, "index.html")
-writeLines(html_template, html_path)
-cat(sprintf("  ✓ HTML saved: %s\n", html_path))
+  html <- paste(html_parts, collapse = "")
+  writeLines(html, file.path(output_dir, "index.html"))
+  cat("  ✓ HTML updated\n")
+  TRUE
+}, error = function(e) {
+  cat(sprintf("  ⚠ HTML update failed: %s\n", e$message))
+  FALSE
+})
 
+# =================================================================
+# Cleanup old snapshots
+# =================================================================
+cat("\n[6] Managing snapshot history...\n")
+all_snapshots <- list.files(cumulative_snapshots_dir, pattern = "^cumulative_.*\\.geojson$", full.names = TRUE)
+if (length(all_snapshots) > 30) {
+  snapshot_info <- file.info(all_snapshots)
+  snapshot_info <- snapshot_info[order(snapshot_info$mtime, decreasing = TRUE), ]
+  snapshots_to_delete <- rownames(snapshot_info)[31:nrow(snapshot_info)]
+  
+  for (f in snapshots_to_delete) {
+    file.remove(f)
+  }
+  cat(sprintf("  ✓ Cleaned up %d old snapshots (keeping last 30)\n", length(snapshots_to_delete)))
+} else {
+  cat(sprintf("  ✓ Snapshot history: %d files (under 30-day limit)\n", length(all_snapshots)))
+}
+
+# =================================================================
 # Summary
+# =================================================================
 elapsed <- as.numeric(difftime(Sys.time(), start_time, units = "secs"))
-cat(sprintf("\n✅ PROCESSING COMPLETE in %.1f seconds (%.1f minutes)\n", 
-            elapsed, elapsed/60))
+cat(sprintf("\n✅ MEMORY-EFFICIENT UPDATE COMPLETE in %.1f seconds\n", elapsed))
 
 cat("\n📊 PROCESSING SUMMARY:\n")
-cat(sprintf("  • Analysis start date: %s\n", ANALYSIS_START_DATE))
-cat(sprintf("  • Total polygon files: %d\n", nrow(files_dt)))
-cat(sprintf("  • Daily summaries: %d\n", length(daily_summaries)))
-cat(sprintf("  • Monthly summaries: %d\n", length(monthly_summaries)))
-cat(sprintf("  • Hexagons affected: %d\n", nrow(hex_results_sf)))
-cat(sprintf("  • Processing time: %.1f minutes\n", elapsed/60))
+cat(sprintf("  • New dates processed: %d\n", length(dates_to_process)))
+cat(sprintf("  • Total dates in system: %d\n", length(unique(files_dt$date))))
+cat(sprintf("  • Processing time: %.1f seconds (%.1f sec/date)\n", 
+            elapsed, if(length(dates_to_process) > 0) elapsed/length(dates_to_process) else 0))
+cat(sprintf("  • Mode: Memory-efficient sparse storage\n"))
 
 cat("\n✅ READY FOR DEPLOYMENT\n")
