@@ -1,5 +1,6 @@
-# HQ Outages - MEMORY-EFFICIENT INCREMENTAL v7
+# HQ Outages - MEMORY-EFFICIENT v8 (FIXED: No double-counting)
 # Only tracks hexagons that actually have outages (not all 466k in memory)
+# CRITICAL FIX: Rebuilds cumulative from ALL daily summaries to prevent duplicate hour counting
 
 suppressPackageStartupMessages({
   library(sf)
@@ -8,11 +9,12 @@ suppressPackageStartupMessages({
   library(data.table)
 })
 
-cat("=== HQ Outages MEMORY-EFFICIENT Incremental System v7 ===\n")
+cat("=== HQ Outages MEMORY-EFFICIENT System v8 (FIXED) ===\n")
 cat("Optimizations:\n")
 cat("  • Only stores hexagons with actual outages\n")
 cat("  • Maintains consistent hex_id grid for alignment\n")
 cat("  • Much faster processing per date\n")
+cat("  • FIXED: Counts unique hours (no double-counting)\n")
 cat(sprintf("\nStarting at: %s\n", format(Sys.time(), "%Y-%m-%d %H:%M:%S")))
 start_time <- Sys.time()
 
@@ -259,14 +261,88 @@ if (length(all_daily_files) > 0) {
   }
   
   if (length(months_to_update) > 0) {
-    cat(sprintf("  Updating %d months with new data: %s\n", 
-                length(months_to_update), paste(months_to_update, collapse=", ")))
+    cat(sprintf("  Updating %d month(s): %s\n", length(months_to_update), paste(months_to_update, collapse=", ")))
     
     for (month in months_to_update) {
-      month_files <- all_daily_files[grepl(month, all_daily_files)]
-      month_data <- lapply(month_files, function(f) st_read(f, quiet = TRUE))
+      month_files <- all_daily_files[grepl(sprintf("daily_%s-", month), all_daily_files)]
       
-      combined_dt <- rbindlist(lapply(month_data, function(x) {
+      if (length(month_files) > 0) {
+        month_data_list <- lapply(month_files, function(f) st_read(f, quiet = TRUE))
+        
+        month_combined <- rbindlist(lapply(month_data_list, function(x) {
+          data.table(
+            hex_id = x$hex_id,
+            geometry = st_as_text(x$geometry),
+            centroid_lon = x$centroid_lon,
+            centroid_lat = x$centroid_lat,
+            count = x$count,
+            datetimes_affected = x$datetimes_affected
+          )
+        }))
+        
+        month_summary <- month_combined[, .(
+          geometry = first(na.omit(geometry)),
+          centroid_lon = first(centroid_lon),
+          centroid_lat = first(centroid_lat),
+          hours_count = sum(count),
+          datetimes_affected = paste(unlist(strsplit(paste(datetimes_affected, collapse = ","), ",")), collapse = ",")
+        ), by = hex_id]
+        
+        month_sf <- st_as_sf(month_summary, wkt = "geometry", crs = 4326)
+        month_sf <- st_make_valid(month_sf)
+        
+        monthly_path <- file.path(output_dir, "monthly", sprintf("monthly_%s.geojson", month))
+        st_write(month_sf, monthly_path, delete_dsn = TRUE, quiet = TRUE)
+        cat(sprintf("    ✓ %s: %d hexes\n", month, nrow(month_sf)))
+      }
+    }
+  } else {
+    cat("  No months need updating\n")
+  }
+} else {
+  cat("  No daily summaries available yet\n")
+}
+
+# =================================================================
+# STEP 4: Update cumulative total (FIXED - NO DOUBLE COUNTING)
+# =================================================================
+cat("\n[4] Updating cumulative total...\n")
+
+current_date <- format(Sys.time(), "%Y-%m-%d")
+snapshot_path <- file.path(cumulative_snapshots_dir, sprintf("cumulative_%s.geojson", current_date))
+need_update <- length(dates_to_process) > 0
+
+if (need_update || !file.exists(file.path(output_dir, "total", "total_exposure.geojson"))) {
+  cat("  Rebuilding cumulative total from ALL daily summaries...\n")
+  cat("  (This prevents double-counting across multiple runs)\n")
+  
+  # CRITICAL FIX: Always rebuild from ALL daily summaries to avoid double-counting
+  # OLD approach: Merged previous cumulative + new data → caused duplicates
+  # NEW approach: Rebuild from scratch using ALL daily summaries each time
+  
+  all_daily_files <- list.files(
+    file.path(output_dir, "daily"),
+    pattern = "^daily_.*\\.geojson$",
+    full.names = TRUE
+  )
+  
+  if (length(all_daily_files) == 0) {
+    cat("  ⚠ No daily summaries found - skipping cumulative update\n")
+  } else {
+    cat(sprintf("  Loading %d daily summary files...\n", length(all_daily_files)))
+    
+    all_daily_data <- lapply(all_daily_files, function(f) {
+      tryCatch(st_read(f, quiet = TRUE), error = function(e) NULL)
+    })
+    
+    # Remove any failed reads
+    all_daily_data <- Filter(Negate(is.null), all_daily_data)
+    
+    if (length(all_daily_data) == 0) {
+      cat("  ⚠ Failed to load any daily summaries\n")
+    } else {
+      # Combine all daily data
+      combined_dt <- rbindlist(lapply(all_daily_data, function(x) {
         data.table(
           hex_id = x$hex_id,
           geometry = st_as_text(x$geometry),
@@ -276,181 +352,121 @@ if (length(all_daily_files) > 0) {
           n_files = x$n_files,
           datetimes_affected = x$datetimes_affected
         )
-      }))
+      }), fill = TRUE)
       
-      combined_summary <- combined_dt[, .(
-        geometry = first(geometry),
+      cat("  Aggregating across all dates (removing duplicates)...\n")
+      
+      # CRITICAL FIX: Count UNIQUE datetimes, not sum of counts
+      total_summary <- combined_dt[, .(
+        geometry = first(na.omit(geometry)),
         centroid_lon = first(centroid_lon),
         centroid_lat = first(centroid_lat),
-        count = sum(count),
-        n_files = sum(n_files),
-        datetimes_affected = paste(unlist(strsplit(paste(datetimes_affected, collapse = ","), ",")), collapse = ",")
+        
+        # Extract all datetimes, split by comma, take unique, then count
+        hours_count = {
+          all_dts <- unlist(strsplit(paste(datetimes_affected, collapse = ","), ","))
+          all_dts <- trimws(all_dts)  # Remove whitespace
+          all_dts <- all_dts[nzchar(all_dts)]  # Remove empty strings
+          length(unique(all_dts))
+        },
+        
+        # Keep unique datetimes only
+        datetimes_affected = {
+          all_dts <- unlist(strsplit(paste(datetimes_affected, collapse = ","), ","))
+          all_dts <- trimws(all_dts)
+          all_dts <- unique(all_dts[nzchar(all_dts)])
+          paste(all_dts, collapse = ",")
+        },
+        
+        n_files = sum(n_files, na.rm = TRUE)
       ), by = hex_id]
       
-      combined <- st_as_sf(combined_summary, wkt = "geometry", crs = 4326)
-      combined <- st_make_valid(combined)
+      # Calculate days affected from unique dates in datetimes
+      total_summary[, days_affected := sapply(strsplit(datetimes_affected, ","), function(dts) {
+        if (length(dts) == 0 || all(!nzchar(dts))) return(0)
+        dates <- sapply(strsplit(trimws(dts), " "), `[`, 1)
+        length(unique(dates[nzchar(dates)]))
+      })]
       
-      monthly_path <- file.path(output_dir, "monthly", sprintf("monthly_%s.geojson", month))
-      st_write(combined, monthly_path, delete_dsn = TRUE, quiet = TRUE)
-      cat(sprintf("  ✓ %s: %d hexes\n", month, nrow(combined)))
+      # Convert to sf
+      total_combined <- st_as_sf(total_summary, wkt = "geometry", crs = 4326)
+      total_combined <- st_make_valid(total_combined)
+      
+      # Save
+      previous_cumulative_path <- file.path(output_dir, "total", "total_exposure.geojson")
+      st_write(total_combined, previous_cumulative_path, delete_dsn = TRUE, quiet = TRUE)
+      cat(sprintf("  ✓ Updated cumulative: %d hexes affected\n", nrow(total_combined)))
+      
+      # Validation check
+      max_hours <- max(total_combined$hours_count, na.rm = TRUE)
+      max_days <- max(total_combined$days_affected, na.rm = TRUE)
+      cat(sprintf("  📊 Max hours in any hex: %d (max possible: %d)\n", max_hours, max_days * 24))
+      
+      if (max_hours > (max_days * 24 + 1)) {  # +1 for rounding tolerance
+        cat("  ⚠ WARNING: Some hexes have more hours than possible!\n")
+        cat("     This indicates duplicate datetimes weren't properly removed\n")
+      } else {
+        cat("  ✓ Validation passed: Hours are within expected range\n")
+      }
+      
+      # Save snapshot
+      st_write(total_combined, snapshot_path, delete_dsn = TRUE, quiet = TRUE)
+      cat(sprintf("  ✓ Snapshot saved: %s\n", basename(snapshot_path)))
+      
+      # Create CSV statistics
+      stats_csv <- as.data.frame(total_summary[, .(hex_id, centroid_lat, centroid_lon, 
+                                                   hours_count, days_affected, datetimes_affected)])
+      
+      stats_path <- file.path(output_dir, "total", "total_stats.csv")
+      fwrite(stats_csv, stats_path)
+      cat("  ✓ Stats CSV updated\n")
+      
+      # Create summary JSON
+      summary_data <- list(
+        generated_at = format(Sys.time(), "%Y-%m-%d %H:%M:%S %Z"),
+        last_update_date = current_date,
+        new_dates_added = length(dates_to_process),
+        total_hexes_affected = nrow(total_combined),
+        total_unique_hours = sum(total_combined$hours_count),
+        max_hours_any_hex = max(total_combined$hours_count, na.rm = TRUE),
+        max_days_any_hex = max(total_combined$days_affected, na.rm = TRUE),
+        date_range = list(
+          first = min(sub("daily_(.*)\\.geojson", "\\1", basename(all_daily_files))),
+          last = max(sub("daily_(.*)\\.geojson", "\\1", basename(all_daily_files)))
+        ),
+        hex_size_meters = HEX_SIZE,
+        optimization_info = list(
+          processing_mode = "full rebuild from daily summaries",
+          rebuild_reason = "prevents double-counting across runs",
+          snapshot_date = current_date
+        ),
+        validation = list(
+          hours_within_range = max_hours <= (max_days * 24 + 1),
+          message = if (max_hours <= (max_days * 24 + 1)) "Counts validated successfully" else "WARNING: Possible duplicate counting detected"
+        )
+      )
+      
+      summary_json_path <- file.path(output_dir, "summary.json")
+      writeLines(jsonlite::toJSON(summary_data, pretty = TRUE, auto_unbox = TRUE), summary_json_path)
+      cat("  ✓ Summary JSON updated\n")
     }
-  } else {
-    cat("  All monthly summaries up to date!\n")
   }
-}
-
-# =================================================================
-# STEP 4: Update TOTAL cumulative (INCREMENTAL with versioning)
-# =================================================================
-cat("\n[4] Updating total cumulative summary (incremental)...\n")
-
-current_date <- format(Sys.time(), "%Y-%m-%d")
-snapshot_path <- file.path(cumulative_snapshots_dir, sprintf("cumulative_%s.geojson", current_date))
-
-need_update <- length(dates_to_process) > 0
-
-if (need_update) {
-  cat("  New data detected - updating cumulative total...\n")
-  
-  previous_cumulative_path <- file.path(output_dir, "total", "total_exposure.geojson")
-  
-  if (file.exists(previous_cumulative_path)) {
-    cat("  Loading previous cumulative data...\n")
-    previous_data <- st_read(previous_cumulative_path, quiet = TRUE)
-    
-    previous_dt <- data.table(
-      hex_id = previous_data$hex_id,
-      geometry = st_as_text(previous_data$geometry),
-      centroid_lon = previous_data$centroid_lon,
-      centroid_lat = previous_data$centroid_lat,
-      hours_count = previous_data$hours_count,
-      n_files = previous_data$n_files,
-      datetimes_affected = previous_data$datetimes_affected
-    )
-    
-    new_daily_paths <- file.path(output_dir, "daily", sprintf("daily_%s.geojson", dates_to_process))
-    new_daily_data <- lapply(new_daily_paths, function(f) st_read(f, quiet = TRUE))
-    
-    new_dt <- rbindlist(lapply(new_daily_data, function(x) {
-      data.table(
-        hex_id = x$hex_id,
-        geometry = st_as_text(x$geometry),
-        centroid_lon = x$centroid_lon,
-        centroid_lat = x$centroid_lat,
-        count = x$count,
-        n_files = x$n_files,
-        datetimes_affected = x$datetimes_affected
-      )
-    }))
-    
-    cat("  Merging previous cumulative with new data...\n")
-    combined_dt <- rbind(
-      previous_dt[, .(hex_id, geometry, centroid_lon, centroid_lat, 
-                     count = hours_count, n_files, datetimes_affected)],
-      new_dt,
-      fill = TRUE
-    )
-    
-  } else {
-    cat("  No previous cumulative - creating from scratch...\n")
-    all_daily_data <- lapply(all_daily_files, function(f) st_read(f, quiet = TRUE))
-    
-    combined_dt <- rbindlist(lapply(all_daily_data, function(x) {
-      data.table(
-        hex_id = x$hex_id,
-        geometry = st_as_text(x$geometry),
-        centroid_lon = x$centroid_lon,
-        centroid_lat = x$centroid_lat,
-        count = x$count,
-        n_files = x$n_files,
-        datetimes_affected = x$datetimes_affected
-      )
-    }))
-  }
-  
-  # Aggregate
-  total_summary <- combined_dt[, .(
-    geometry = first(na.omit(geometry)),
-    centroid_lon = first(centroid_lon),
-    centroid_lat = first(centroid_lat),
-    hours_count = sum(count),
-    n_files = sum(n_files),
-    datetimes_affected = paste(unlist(strsplit(paste(datetimes_affected, collapse = ","), ",")), collapse = ",")
-  ), by = hex_id]
-  
-  # Calculate days affected
-  total_summary[, days_affected := sapply(strsplit(datetimes_affected, ","), function(dts) {
-    length(unique(sapply(strsplit(dts, " "), `[`, 1)))
-  })]
-  
-  # Convert to sf
-  total_combined <- st_as_sf(total_summary, wkt = "geometry", crs = 4326)
-  total_combined <- st_make_valid(total_combined)
-  
-  st_write(total_combined, previous_cumulative_path, delete_dsn = TRUE, quiet = TRUE)
-  cat(sprintf("  ✓ Updated cumulative: %d hexes affected\n", nrow(total_combined)))
-  
-  st_write(total_combined, snapshot_path, delete_dsn = TRUE, quiet = TRUE)
-  cat(sprintf("  ✓ Snapshot saved: %s\n", basename(snapshot_path)))
-  
-  # Create CSV statistics
-  stats_csv <- as.data.frame(total_summary[, .(hex_id, centroid_lat, centroid_lon, 
-                                               hours_count, days_affected, datetimes_affected)])
-  
-  stats_path <- file.path(output_dir, "total", "total_stats.csv")
-  fwrite(stats_csv, stats_path)
-  cat("  ✓ Stats CSV updated\n")
-  
-  # Create summary JSON
-  summary_data <- list(
-    generated_at = format(Sys.time(), "%Y-%m-%d %H:%M:%S %Z"),
-    last_update_date = current_date,
-    new_dates_added = length(dates_to_process),
-    total_hexes_affected = nrow(total_combined),
-    total_hours_scraped = sum(total_combined$hours_count),
-    date_range = list(
-      first = min(files_dt$date),
-      last = max(files_dt$date)
-    ),
-    hex_size_meters = HEX_SIZE,
-    optimization_info = list(
-      processing_mode = "memory-efficient incremental",
-      snapshot_date = current_date
-    ),
-    stats = list(
-      mean_hours = mean(total_combined$hours_count),
-      median_hours = median(total_combined$hours_count),
-      max_hours = max(total_combined$hours_count),
-      mean_days = mean(total_combined$days_affected),
-      median_days = median(total_combined$days_affected),
-      max_days = max(total_combined$days_affected)
-    )
-  )
-  
-  summary_path <- file.path(output_dir, "total", "summary.json")
-  writeLines(jsonlite::toJSON(summary_data, auto_unbox = TRUE, pretty = TRUE), summary_path)
-  cat("  ✓ Summary JSON updated\n")
-  
-  num_days <- length(unique(files_dt$date))
-  hex_size_km <- round(HEX_SIZE / 1000, 1)
-  
 } else {
-  cat("  No new data - cumulative total is up to date!\n")
-  
-  previous_cumulative_path <- file.path(output_dir, "total", "total_exposure.geojson")
-  if (file.exists(previous_cumulative_path)) {
-    total_combined <- st_read(previous_cumulative_path, quiet = TRUE)
-    num_days <- length(unique(files_dt$date))
-    hex_size_km <- round(HEX_SIZE / 1000, 1)
-  }
+  cat("\n[4] No new dates to process - cumulative total unchanged\n")
 }
 
 # =================================================================
-# STEP 5: Generate/Update HTML (unchanged)
+# STEP 5: Update HTML map
 # =================================================================
 cat("\n[5] Updating HTML map...\n")
 
 html_generated <- tryCatch({
+  # Get stats for HTML
+  all_daily_files <- list.files(file.path(output_dir, "daily"), pattern = "^daily_.*\\.geojson$")
+  num_days <- length(all_daily_files)
+  hex_size_km <- round(HEX_SIZE / 1000, 1)
+  current_date <- format(Sys.time(), "%Y-%m-%d")
+  
   html_parts <- vector("list", 4)
   
   html_parts[[1]] <- paste0('<!DOCTYPE html>
@@ -519,7 +535,7 @@ html_generated <- tryCatch({
             
             const dateSelect = document.getElementById('dateSelect');
             const dates = [...new Set(allData.total.features.flatMap(f => {
-                return f.properties.datetimes_affected.split(',').map(dt => dt.split(' ')[0]);
+                return f.properties.datetimes_affected.split(',').map(dt => dt.trim().split(' ')[0]);
             }))].sort();
             
             for (const date of dates) {
@@ -549,7 +565,7 @@ html_generated <- tryCatch({
             
             const filtered = JSON.parse(JSON.stringify(dailyData));
             filtered.features = filtered.features.map(f => {
-                const dts = f.properties.datetimes_affected.split(',');
+                const dts = f.properties.datetimes_affected.split(',').map(s => s.trim());
                 const matchingDts = dts.filter(dt => {
                     const dtHour = parseInt(dt.split(' ')[1].split(':')[0]);
                     return dtHour === parseInt(hour);
@@ -646,7 +662,7 @@ html_generated <- tryCatch({
         document.getElementById('modalOverlay').onclick = closeDetailModal;
         
         function getColor(d) {
-            return d>80?'#67000d':d>60?'##a50f15':d>40?'#cb181d':d>20?'#ef3b2c':
+            return d>80?'#67000d':d>60?'#a50f15':d>40?'#cb181d':d>20?'#ef3b2c':
                    d>10?'#fb6a4a':d>5?'#fc9272':d>2?'#fcbba1':'#fee5d9';
         }
         
@@ -745,13 +761,13 @@ if (length(all_snapshots) > 30) {
 # Summary
 # =================================================================
 elapsed <- as.numeric(difftime(Sys.time(), start_time, units = "secs"))
-cat(sprintf("\n✅ MEMORY-EFFICIENT UPDATE COMPLETE in %.1f seconds\n", elapsed))
+cat(sprintf("\n✅ FIXED VERSION UPDATE COMPLETE in %.1f seconds\n", elapsed))
 
 cat("\n📊 PROCESSING SUMMARY:\n")
 cat(sprintf("  • New dates processed: %d\n", length(dates_to_process)))
 cat(sprintf("  • Total dates in system: %d\n", length(unique(files_dt$date))))
 cat(sprintf("  • Processing time: %.1f seconds (%.1f sec/date)\n", 
             elapsed, if(length(dates_to_process) > 0) elapsed/length(dates_to_process) else 0))
-cat(sprintf("  • Mode: Memory-efficient sparse storage\n"))
+cat(sprintf("  • Mode: Full rebuild (prevents double-counting)\n"))
 
 cat("\n✅ READY FOR DEPLOYMENT\n")
