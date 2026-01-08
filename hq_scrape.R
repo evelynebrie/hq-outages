@@ -1,6 +1,6 @@
-# --- hq_scrape.R (FIXED for folder structure) ---
-# This script fetches both outages and polygons every hour
-# and saves them in the partitioned structure: date=YYYY-MM-DD/hour=HH/
+# --- hq_scrape.R (IMPROVED for large datasets) ---
+# This script fetches both outages and polygons every hour with better error handling
+# and memory efficiency for large datasets
 
 library(httr)
 library(jsonlite)
@@ -14,7 +14,12 @@ library(readr)
 
 TZ <- "America/Toronto"
 
-source("hq_functions.R")  # your big script with get_hq_outages etc.
+source("hq_functions.R")
+
+# --- Configuration ---
+MAX_RETRIES <- 3
+TIMEOUT_SEC <- 60  # Increased from 20 to 60
+CHUNK_SIZE <- 1000  # Process outages in chunks for spatial joins
 
 # --- Get current timestamp ---
 ts <- with_tz(Sys.time(), TZ)
@@ -36,15 +41,28 @@ if (length(existing_files) > 0) {
 cat("Processing data for", format(ts, "%Y-%m-%d %H:%M:%S"), "\n")
 cat("Output directory:", dir_data, "\n")
 
-# --- 1) Get outages (optional - may fail if no data available) ---
+# --- 1) Get outages with better error handling ---
 cat("\n[1/3] Fetching outage data...\n")
 outages_success <- FALSE
+outages <- NULL
+
 tryCatch({
   outages <- get_hq_outages(FALSE)
+  
   if (nrow(outages) > 0) {
+    cat("  → Found", nrow(outages), "outages\n")
+    
+    # Save in chunks if very large
     out_path <- file.path(dir_data, paste0("outages_", format(ts, "%Y%m%dT%H%M%S"), ".parquet"))
-    arrow::write_parquet(outages, out_path)
-    cat("  ✓ Saved", nrow(outages), "outages to:", out_path, "\n")
+    
+    if (nrow(outages) > 10000) {
+      cat("  → Large dataset detected, using compression...\n")
+      arrow::write_parquet(outages, out_path, compression = "snappy")
+    } else {
+      arrow::write_parquet(outages, out_path)
+    }
+    
+    cat("  ✓ Saved outages to:", out_path, "\n")
     outages_success <- TRUE
   } else {
     cat("  ⚠ No outages found in API response\n")
@@ -54,16 +72,19 @@ tryCatch({
   cat("  Continuing without outage data...\n")
 })
 
-# --- 2) Get polygons (REQUIRED) ---
+# --- 2) Get polygons ---
 cat("\n[2/3] Fetching polygon data...\n")
 polygons_success <- FALSE
+polys <- NULL
+
 tryCatch({
   polys <- get_hq_polygons(add_metadata = TRUE)
   
   if (nrow(polys) > 0) {
+    cat("  → Found", nrow(polys), "polygons\n")
     poly_path <- file.path(dir_data, paste0("polygons_", format(ts, "%Y%m%dT%H%M%S"), ".geojson"))
     sf::st_write(polys, poly_path, delete_dsn = TRUE, quiet = TRUE)
-    cat("  ✓ Saved", nrow(polys), "polygons to:", poly_path, "\n")
+    cat("  ✓ Saved polygons to:", poly_path, "\n")
     polygons_success <- TRUE
   } else {
     cat("  ⚠ No polygons found in API response\n")
@@ -74,25 +95,110 @@ tryCatch({
   stop("Cannot continue without polygon data")
 })
 
-# --- 3) Join outages to polygons (OPTIONAL - only if both succeeded) ---
+# --- 3) Join outages to polygons with chunking for large datasets ---
 cat("\n[3/3] Creating joined summary...\n")
+
 if (outages_success && polygons_success) {
   tryCatch({
-    # Need to get outages as SF for the join
+    # Get outages as SF
     outages_sf <- get_hq_outages(TRUE)
+    n_outages <- nrow(outages_sf)
     
-    joined <- hq_outages_join_polygons(polys, outages_sf)
-    joined_summary <- joined$summary
+    cat("  → Processing", n_outages, "outage points\n")
+    
+    # For large datasets, use chunked processing
+    if (n_outages > CHUNK_SIZE) {
+      cat("  → Large dataset detected, using chunked processing...\n")
+      
+      # Process in chunks
+      n_chunks <- ceiling(n_outages / CHUNK_SIZE)
+      joined_list <- vector("list", n_chunks)
+      
+      for (i in seq_len(n_chunks)) {
+        start_idx <- (i - 1) * CHUNK_SIZE + 1
+        end_idx <- min(i * CHUNK_SIZE, n_outages)
+        
+        cat("    Processing chunk", i, "of", n_chunks, 
+            "(rows", start_idx, "to", end_idx, ")\n")
+        
+        chunk_sf <- outages_sf[start_idx:end_idx, ]
+        chunk_joined <- st_join(chunk_sf, polys, join = st_within, left = FALSE)
+        joined_list[[i]] <- chunk_joined
+        
+        # Force garbage collection to free memory
+        if (i %% 5 == 0) gc()
+      }
+      
+      # Combine chunks
+      cat("  → Combining chunks...\n")
+      joined_full <- do.call(rbind, joined_list)
+      rm(joined_list)
+      gc()
+      
+    } else {
+      # Small dataset - process normally
+      joined_full <- st_join(outages_sf, polys, join = st_within, left = FALSE)
+    }
+    
+    # Create summary
+    cat("  → Creating summary statistics...\n")
+    joined_df <- st_drop_geometry(joined_full)
+    
+    # Determine polygon ID column
+    poly_id <- NULL
+    for (cand in c("poly_id", "id", "ID", "name", "NOM", "MUNICIPALITE")) {
+      if (cand %in% names(joined_df)) {
+        poly_id <- cand
+        break
+      }
+    }
+    
+    if (is.null(poly_id)) {
+      cat("  ⚠ No standard polygon ID found, using row numbers\n")
+      joined_df$poly_id <- seq_len(nrow(joined_df))
+      poly_id <- "poly_id"
+    }
+    
+    # Summarize
+    if ("customers" %in% names(joined_df)) {
+      joined_summary <- joined_df %>%
+        group_by(.data[[poly_id]]) %>%
+        summarise(
+          n_outages = n(),
+          customers_sum = sum(customers, na.rm = TRUE),
+          customers_mean = mean(customers, na.rm = TRUE),
+          .groups = "drop"
+        )
+    } else {
+      joined_summary <- joined_df %>%
+        group_by(.data[[poly_id]]) %>%
+        summarise(
+          n_outages = n(),
+          .groups = "drop"
+        )
+    }
     
     if (nrow(joined_summary) > 0) {
       joined_path <- file.path(dir_data, paste0("outages_joined_", format(ts, "%Y%m%dT%H%M%S"), ".csv"))
       readr::write_csv(joined_summary, joined_path)
-      cat("  ✓ Saved joined summary to:", joined_path, "\n")
+      cat("  ✓ Saved joined summary (", nrow(joined_summary), " polygons) to:", joined_path, "\n")
+      
+      # Also save the full joined data if it's not too large
+      if (nrow(joined_full) <= 50000) {
+        joined_full_path <- file.path(dir_data, paste0("outages_joined_full_", format(ts, "%Y%m%dT%H%M%S"), ".geojson"))
+        st_write(joined_full, joined_full_path, delete_dsn = TRUE, quiet = TRUE)
+        cat("  ✓ Saved full joined data to:", joined_full_path, "\n")
+      } else {
+        cat("  ⚠ Skipping full joined data (too large:", nrow(joined_full), "rows)\n")
+      }
     } else {
       cat("  ⚠ Join produced no results (outages might not overlap with polygons)\n")
     }
+    
   }, error = function(e) {
     cat("  ⚠ Failed to create joined summary:", e$message, "\n")
+    cat("  Stack trace:\n")
+    cat(paste0("    ", capture.output(traceback()), collapse = "\n"), "\n")
     cat("  Continuing without joined data...\n")
   })
 } else {
@@ -113,17 +219,16 @@ if (length(final_files) > 0) {
   cat("  -", paste(final_files, collapse = "\n  - "), "\n")
 }
 
+# Memory usage report
+mem_used <- pryr::mem_used()
+cat("Memory used:", format(mem_used, units = "auto"), "\n")
+
 cat("========================================\n")
 
 # Exit with success if we got at least the polygons
 if (polygons_success) {
   quit(save = "no", status = 0)
 } else {
-  cat("\n⚠ WARNING: No polygon data collected - this might indicate:\n")
-  cat("  1. No active outages at this time\n")
-  cat("  2. API connectivity issues\n")
-  cat("  3. Data format changes\n")
-  
-  # Don't fail completely - might just be no outages
+  cat("\n⚠ WARNING: No polygon data collected\n")
   quit(save = "no", status = 0)
 }
