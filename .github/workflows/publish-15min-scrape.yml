@@ -1,4 +1,4 @@
-name: Process 15-Minute HQ Outage Data (App Folder)
+name: Process 15-Minute HQ Outage Data with Persistent Cache
 
 on:
   schedule:
@@ -36,6 +36,28 @@ jobs:
       - name: Install R packages
         run: |
           Rscript -e 'pkgs <- c("sf","dplyr","fs","purrr","jsonlite","data.table"); inst <- setdiff(pkgs, rownames(installed.packages())); if(length(inst)) { cat("Installing", length(inst), "packages\n"); install.packages(inst, repos="https://cloud.r-project.org", Ncpus=2) } else { cat("All packages cached\n") }'
+
+      - name: Download previous cache from public repo
+        env:
+          GITHUB_TOKEN: ${{ secrets.PUBLIC_REPO_TOKEN }}
+        run: |
+          echo "📥 Downloading previous cache from public repo..."
+          
+          # Try to download existing cache file
+          curl -f -L \
+            -H "Authorization: token $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github.v3.raw" \
+            "https://raw.githubusercontent.com/evelynebrie/hq-outages-public/gh-pages/cache/cumulative_hex_data.rds" \
+            -o cache_download.rds 2>/dev/null || true
+          
+          if [ -f cache_download.rds ] && [ -s cache_download.rds ]; then
+            mkdir -p cache
+            mv cache_download.rds cache/cumulative_hex_data.rds
+            echo "✅ Cache downloaded successfully"
+            ls -lh cache/cumulative_hex_data.rds
+          else
+            echo "ℹ️  No existing cache found (this is normal for first run)"
+          fi
 
       - name: Restore data cache
         uses: actions/cache@v3
@@ -235,9 +257,9 @@ jobs:
           echo "  • Skipped/failed: $SKIPPED"
           echo "  • Total available: $(($CACHED + $NEW))"
 
-      - name: Run 15-minute scrape analysis
+      - name: Run 15-minute scrape analysis (with caching)
         run: |
-          echo "🔬 Starting 15-minute scrape analysis..."
+          echo "🔬 Starting 15-minute scrape analysis with cache support..."
           
           if [ ! -f "R/build_cumulative_hex_15min.R" ]; then
             echo "❌ Script not found at R/build_cumulative_hex_15min.R"
@@ -245,7 +267,13 @@ jobs:
           fi
           
           FILE_COUNT=$(find data/daily -name "*.geojson" 2>/dev/null | wc -l)
-          echo "📊 Processing $FILE_COUNT files"
+          echo "📊 Processing $FILE_COUNT total files"
+          
+          if [ -f "cache/cumulative_hex_data.rds" ]; then
+            echo "✅ Cache file found - will process only new files!"
+          else
+            echo "ℹ️  No cache - will process all files (first run)"
+          fi
           
           if [ "$FILE_COUNT" -eq 0 ]; then
             echo "❌ No data to process!"
@@ -257,6 +285,19 @@ jobs:
           ls -lh data/daily/*.geojson 2>/dev/null | head -5
           
           Rscript R/build_cumulative_hex_15min.R
+
+      - name: Copy cache to public directory for deployment
+        run: |
+          echo "📦 Preparing cache for deployment..."
+          mkdir -p public/cache
+          
+          if [ -f "cache/cumulative_hex_data.rds" ]; then
+            cp cache/cumulative_hex_data.rds public/cache/
+            ls -lh public/cache/cumulative_hex_data.rds
+            echo "✅ Cache copied to public/cache/"
+          else
+            echo "⚠️  No cache file found to copy"
+          fi
 
       - name: Generate summary statistics
         run: |
@@ -290,6 +331,7 @@ jobs:
           echo "  • Daily summaries: $DAILY_COUNT"
           echo "  • Monthly summaries: $MONTHLY_COUNT"
           echo "  • Cumulative snapshots: $SNAPSHOT_COUNT"
+          echo "  • Cache file: $([ -f public/cache/cumulative_hex_data.rds ] && echo 'Yes' || echo 'No')"
           
           if [ "$DAILY_COUNT" -eq 0 ]; then
             echo "⚠️  Warning: No daily summaries created"
@@ -313,7 +355,7 @@ jobs:
             echo "Summary report not available"
           fi
 
-      - name: Deploy to PUBLIC repo (gh-pages)
+      - name: Deploy to PUBLIC repo (gh-pages) with cache
         uses: peaceiris/actions-gh-pages@v3
         with:
           personal_token: ${{ secrets.PUBLIC_REPO_TOKEN }}
@@ -335,9 +377,12 @@ jobs:
           
           DAILY_COUNT=$(find public/daily -name "daily_*.geojson" 2>/dev/null | wc -l)
           MONTHLY_COUNT=$(find public/monthly -name "monthly_*.geojson" 2>/dev/null | wc -l)
+          CACHE_STATUS=$([ -f public/cache/cumulative_hex_data.rds ] && echo "✅ Deployed" || echo "❌ Not found")
           
           echo "📊 Deployment summary:"
           echo "  • Daily summaries: $DAILY_COUNT"
           echo "  • Monthly summaries: $MONTHLY_COUNT"
+          echo "  • Cache status: $CACHE_STATUS"
           echo "  • Processing: 15-minute interval data"
+          echo "  • Next run will use deployed cache"
           echo "========================================="
