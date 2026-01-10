@@ -228,52 +228,32 @@ cat(sprintf("  ✓ Processed %d files\n", processed))
 cat(sprintf("  ✓ Tracked %d unique hexagons with outages\n", length(cumulative_hex_data)))
 
 # ==================================================================
-# STEP 4: GENERATE DAILY SUMMARIES
+# STEP 4: GENERATE DAILY SUMMARIES (OPTIMIZED - USE EXISTING DATA)
 # ==================================================================
 cat("\n[4] Generating daily summaries...\n")
 
 unique_dates <- unique(files_dt$date)
 cat(sprintf("  Processing %d unique dates...\n", length(unique_dates)))
 
+# Build daily summaries from cumulative data (much faster!)
 for (date in unique_dates) {
-  date_files <- files_dt[files_dt$date == date, ]
+  cat(sprintf("  • %s...", date))
   
-  # Aggregate hex data for this date
+  # Aggregate hex data for this date from cumulative data
   daily_hex_data <- list()
   
-  for (i in seq_len(nrow(date_files))) {
-    f <- date_files$file[i]
-    datetime_val <- date_files$datetime[i]
+  for (hex_key in names(cumulative_hex_data)) {
+    hex_info <- cumulative_hex_data[[hex_key]]
     
-    tryCatch({
-      polys <- st_read(f, quiet = TRUE) %>%
-        st_transform(32618) %>%
-        st_simplify(dTolerance = SIMPLIFY, preserveTopology = FALSE)
-      
-      if (nrow(polys) > 1) polys <- st_union(polys)
-      
-      hits <- st_intersects(hex_grid_reference, polys, sparse = TRUE)
-      affected_ids <- which(lengths(hits) > 0)
-      
-      for (hex_id in affected_ids) {
-        hex_key <- as.character(hex_id)
-        if (is.null(daily_hex_data[[hex_key]])) {
-          daily_hex_data[[hex_key]] <- list(
-            count = 1,
-            datetimes = datetime_val
-          )
-        } else {
-          daily_hex_data[[hex_key]]$count <- daily_hex_data[[hex_key]]$count + 1
-          daily_hex_data[[hex_key]]$datetimes <- 
-            c(daily_hex_data[[hex_key]]$datetimes, datetime_val)
-        }
-      }
-      
-      rm(polys, hits)
-      
-    }, error = function(e) {
-      cat(sprintf("    ⚠ Error in daily processing: %s\n", e$message))
-    })
+    # Find which datetimes belong to this date
+    date_mask <- hex_info$dates == date
+    
+    if (any(date_mask)) {
+      daily_hex_data[[hex_key]] <- list(
+        count = sum(date_mask),
+        datetimes = hex_info$datetimes[date_mask]
+      )
+    }
   }
   
   # Create daily summary GeoJSON
@@ -295,58 +275,47 @@ for (date in unique_dates) {
     
     output_file <- file.path(output_dir, "daily", sprintf("daily_%s.geojson", date))
     st_write(daily_output, output_file, delete_dsn = TRUE, quiet = TRUE)
+    cat(" ✓\n")
+  } else {
+    cat(" (no data)\n")
   }
 }
 
 cat(sprintf("  ✓ Generated daily summaries for %d dates\n", length(unique_dates)))
 
 # ==================================================================
-# STEP 5: GENERATE MONTHLY SUMMARIES
+# STEP 5: GENERATE MONTHLY SUMMARIES (OPTIMIZED)
 # ==================================================================
 cat("\n[5] Generating monthly summaries...\n")
 
 unique_months <- unique(files_dt$yearmon)
 cat(sprintf("  Processing %d unique months...\n", length(unique_months)))
 
+# Build monthly summaries from cumulative data (much faster!)
 for (month in unique_months) {
-  month_files <- files_dt[files_dt$yearmon == month, ]
+  cat(sprintf("  • %s...", month))
+  
+  # Get dates in this month
+  month_dates <- unique(files_dt$date[files_dt$yearmon == month])
   
   monthly_hex_data <- list()
   
-  for (i in seq_len(nrow(month_files))) {
-    f <- month_files$file[i]
-    datetime_val <- month_files$datetime[i]
+  for (hex_key in names(cumulative_hex_data)) {
+    hex_info <- cumulative_hex_data[[hex_key]]
     
-    tryCatch({
-      polys <- st_read(f, quiet = TRUE) %>%
-        st_transform(32618) %>%
-        st_simplify(dTolerance = SIMPLIFY, preserveTopology = FALSE)
+    # Find which datetimes belong to this month
+    month_mask <- hex_info$dates %in% month_dates
+    
+    if (any(month_mask)) {
+      month_datetimes <- hex_info$datetimes[month_mask]
+      month_dates_for_hex <- hex_info$dates[month_mask]
       
-      if (nrow(polys) > 1) polys <- st_union(polys)
-      
-      hits <- st_intersects(hex_grid_reference, polys, sparse = TRUE)
-      affected_ids <- which(lengths(hits) > 0)
-      
-      for (hex_id in affected_ids) {
-        hex_key <- as.character(hex_id)
-        if (is.null(monthly_hex_data[[hex_key]])) {
-          monthly_hex_data[[hex_key]] <- list(
-            count = 1,
-            dates = unique(month_files$date[1]),
-            datetimes = datetime_val
-          )
-        } else {
-          monthly_hex_data[[hex_key]]$count <- monthly_hex_data[[hex_key]]$count + 1
-          current_dates <- unique(c(monthly_hex_data[[hex_key]]$dates, month_files$date[i]))
-          monthly_hex_data[[hex_key]]$dates <- current_dates
-          monthly_hex_data[[hex_key]]$datetimes <- 
-            c(monthly_hex_data[[hex_key]]$datetimes, datetime_val)
-        }
-      }
-      
-      rm(polys, hits)
-      
-    }, error = function(e) {})
+      monthly_hex_data[[hex_key]] <- list(
+        count = sum(month_mask),
+        dates = unique(month_dates_for_hex),
+        datetimes = month_datetimes
+      )
+    }
   }
   
   # Create monthly summary
@@ -369,6 +338,9 @@ for (month in unique_months) {
     
     output_file <- file.path(output_dir, "monthly", sprintf("monthly_%s.geojson", month))
     st_write(monthly_output, output_file, delete_dsn = TRUE, quiet = TRUE)
+    cat(" ✓\n")
+  } else {
+    cat(" (no data)\n")
   }
 }
 
