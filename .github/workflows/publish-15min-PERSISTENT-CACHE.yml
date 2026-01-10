@@ -257,7 +257,7 @@ jobs:
           echo "  • Skipped/failed: $SKIPPED"
           echo "  • Total available: $(($CACHED + $NEW))"
 
-      - name: Run 15-minute scrape analysis (with caching)
+      - name: Run 15-minute scrape analysis (processing only)
         run: |
           echo "🔬 Starting 15-minute scrape analysis with cache support..."
           
@@ -284,9 +284,25 @@ jobs:
           echo "Sample files:"
           ls -lh data/daily/*.geojson 2>/dev/null | head -5
           
-          Rscript R/build_cumulative_hex_15min.R
+          # Run the R script - this includes HTML generation
+          # If it fails, we still want to save the cache before it
+          Rscript R/build_cumulative_hex_15min.R || {
+            echo "⚠️  R script failed, but continuing to save cache..."
+            exit_code=$?
+            
+            # Copy cache even if script failed
+            if [ -f "cache/cumulative_hex_data.rds" ]; then
+              echo "💾 Saving cache despite error..."
+              mkdir -p public/cache
+              cp cache/cumulative_hex_data.rds public/cache/
+              echo "✅ Cache saved for next run"
+            fi
+            
+            exit $exit_code
+          }
 
       - name: Copy cache to public directory for deployment
+        if: success()
         run: |
           echo "📦 Preparing cache for deployment..."
           mkdir -p public/cache
