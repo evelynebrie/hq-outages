@@ -569,9 +569,13 @@ html_content <- sprintf('<!DOCTYPE html>
             // Group by date
             const byDate = {};
             datetimes.forEach(dt => {
-                const [date, time] = dt.split(' ');
-                if (!byDate[date]) byDate[date] = [];
-                byDate[date].push(time);
+                const parts = dt.split(' ');
+                if (parts.length >= 2) {
+                    const dateKey = parts[0];
+                    const timeVal = parts[1];
+                    if (!byDate[dateKey]) byDate[dateKey] = [];
+                    byDate[dateKey].push(timeVal);
+                }
             });
             
             const uniqueDates = Object.keys(byDate).sort();
