@@ -271,17 +271,20 @@ if (length(files_to_process) == 0) {
 
   cat(sprintf("  ✓ Processed %d new files\n", processed))
   cat(sprintf("  ✓ Tracked %d unique hexagons with outages\n", length(cumulative_hex_data)))
-  
-  # SAVE CACHE
-  cat("\n[CACHE] Saving processed data...\n")
-  cache_data <- list(
-    cumulative_hex_data = cumulative_hex_data,
-    processed_files = c(processed_files, files_to_process)
-  )
-  saveRDS(cache_data, cache_file)
-  cat(sprintf("  ✓ Cache saved with %d hexagons and %d total files\n", 
-              length(cumulative_hex_data), length(cache_data$processed_files)))
 }
+
+# ==================================================================
+# SAVE CACHE IMMEDIATELY (before summaries/HTML that might fail)
+# ==================================================================
+cat("\n[CACHE] Saving processed data (early save for safety)...\n")
+cache_data <- list(
+  cumulative_hex_data = cumulative_hex_data,
+  processed_files = c(processed_files, files_to_process)
+)
+saveRDS(cache_data, cache_file)
+cat(sprintf("  ✓ Cache saved with %d hexagons and %d total files\n", 
+            length(cumulative_hex_data), length(cache_data$processed_files)))
+cat("  ✓ Cache is safe even if later steps fail!\n")
 
 # ==================================================================
 # STEP 4: GENERATE DAILY SUMMARIES (OPTIMIZED - USE EXISTING DATA)
