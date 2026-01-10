@@ -1,4 +1,4 @@
-name: Process 15-Minute HQ Outage Data
+name: Process 15-Minute HQ Outage Data (App Folder)
 
 on:
   schedule:
@@ -75,27 +75,31 @@ jobs:
           echo "✅ Successfully obtained fresh access token"
           echo "access_token=$ACCESS_TOKEN" >> $GITHUB_OUTPUT
 
-      - name: Download new 15-minute scraped files from Dropbox
+      - name: Download files from Dropbox App Folder
         env:
           DROPBOX_TOKEN: ${{ steps.get_token.outputs.access_token }}
         run: |
           set -eo pipefail
           
-          echo "📥 Listing Dropbox files (15-minute scrapes)..."
+          echo "📥 Listing files from Dropbox App Folder..."
+          echo "   Path: /hq-outages (App Folder root)"
+          echo ""
           
           ALL_FILES=""
           HAS_MORE=true
           CURSOR=""
           PAGE=1
           
+          # List all files recursively from app folder
           while [ "$HAS_MORE" = "true" ]; do
             echo "  Fetching page $PAGE..."
             
             if [ -z "$CURSOR" ]; then
+              # App folders use root path "" or the folder name
               RESPONSE=$(curl -s -X POST https://api.dropboxapi.com/2/files/list_folder \
                 -H "Authorization: Bearer $DROPBOX_TOKEN" \
                 -H "Content-Type: application/json" \
-                -d '{"path": "/hq-outages", "recursive": true}')
+                -d '{"path": "", "recursive": true}')
             else
               RESPONSE=$(curl -s -X POST https://api.dropboxapi.com/2/files/list_folder/continue \
                 -H "Authorization: Bearer $DROPBOX_TOKEN" \
@@ -106,7 +110,19 @@ jobs:
             if echo "$RESPONSE" | jq -e '.error' > /dev/null 2>&1; then
               echo "❌ Error from Dropbox API:"
               echo "$RESPONSE" | jq '.error'
-              exit 1
+              
+              # Try alternative path
+              echo ""
+              echo "Trying alternative path: /hq-outages"
+              RESPONSE=$(curl -s -X POST https://api.dropboxapi.com/2/files/list_folder \
+                -H "Authorization: Bearer $DROPBOX_TOKEN" \
+                -H "Content-Type: application/json" \
+                -d '{"path": "/hq-outages", "recursive": true}')
+              
+              if echo "$RESPONSE" | jq -e '.error' > /dev/null 2>&1; then
+                echo "❌ Still failed. Please check Dropbox configuration."
+                exit 1
+              fi
             fi
             
             if ! echo "$RESPONSE" | jq -e '.entries' > /dev/null 2>&1; then
@@ -141,7 +157,7 @@ jobs:
           if [ ! -z "$ALL_FILES" ]; then
             TOTAL_COUNT=$(echo "$ALL_FILES" | wc -l)
           fi
-          echo "📊 Total files: $TOTAL_COUNT"
+          echo "📊 Total files found: $TOTAL_COUNT"
           
           if [ $TOTAL_COUNT -eq 0 ]; then
             echo "⚠️  No files found - continuing with cached data"
@@ -149,17 +165,31 @@ jobs:
             exit 0
           fi
           
-          # Look for new naming patterns: outages_joined_full_* or polygons_*
-          GEOJSON_FILES=$(echo "$ALL_FILES" | grep -E "(outages_joined_full_|polygons_).*\d{8}[Tt]\d{6}.*\.geojson$" || true)
-          FILE_COUNT=$(echo "$GEOJSON_FILES" | wc -l 2>/dev/null || echo "0")
+          # Filter for outages_joined_full_*.geojson files with timestamp
+          echo ""
+          echo "🔍 Filtering for: outages_joined_full_YYYYMMDDTHHMMSS.geojson"
           
-          echo "📍 GeoJSON files matching pattern: $FILE_COUNT"
+          GEOJSON_FILES=$(echo "$ALL_FILES" | grep "outages_joined_full_" | grep -E "[0-9]{8}[Tt][0-9]{6}\.geojson$" || true)
+          FILE_COUNT=$(echo "$GEOJSON_FILES" | grep -v '^$' | wc -l)
+          
+          echo "📍 Matching files: $FILE_COUNT"
           
           if [ "$FILE_COUNT" -eq 0 ]; then
-            echo "⚠️  No matching files - continuing with cached data"
+            echo "⚠️  No matching files found"
+            echo ""
+            echo "Sample of files found (first 10):"
+            echo "$ALL_FILES" | head -10
+            echo ""
+            echo "Looking for pattern: outages_joined_full_YYYYMMDDTHHMMSS.geojson"
             mkdir -p data/daily
             exit 0
           fi
+          
+          # Show sample
+          echo ""
+          echo "Sample files to download (first 5):"
+          echo "$GEOJSON_FILES" | head -5
+          echo ""
           
           mkdir -p data/daily
           
@@ -167,7 +197,7 @@ jobs:
           NEW=0
           SKIPPED=0
           
-          # Download only files that don't exist locally
+          # Download files
           while IFS= read -r file; do
             [ -z "$file" ] && continue
             
@@ -189,10 +219,11 @@ jobs:
               [ $NEW -le 10 ] && echo "  ✓ Downloaded: $filename"
             else
               SKIPPED=$((SKIPPED + 1))
+              [ $SKIPPED -le 5 ] && echo "  ✗ Failed: $filename"
             fi
             
             # Rate limiting: pause briefly every 10 downloads
-            if [ $((NEW % 10)) -eq 0 ]; then
+            if [ $((NEW % 10)) -eq 0 ] && [ $NEW -gt 0 ]; then
               sleep 1
             fi
           done <<< "$GEOJSON_FILES"
@@ -223,9 +254,19 @@ jobs:
           
           # Show sample of files being processed
           echo "Sample files:"
-          ls -lh data/daily/*.geojson | head -5
+          ls -lh data/daily/*.geojson 2>/dev/null | head -5
           
           Rscript R/build_cumulative_hex_15min.R
+
+      - name: Generate summary statistics
+        run: |
+          echo "📊 Generating summary statistics..."
+          
+          if [ -f "R/generate_summaries.R" ]; then
+            Rscript R/generate_summaries.R
+          else
+            echo "⚠️  generate_summaries.R not found, skipping statistics generation"
+          fi
 
       - name: Verify outputs were created
         run: |
@@ -261,27 +302,16 @@ jobs:
           echo ""
           echo "✅ All required files present"
 
-      - name: Generate summary statistics
+      - name: Display summary statistics
         run: |
-          echo "📊 Generating summary statistics..."
+          echo "📊 Summary Statistics:"
+          echo ""
           
-          # Count total hexagons affected
-          if command -v jq &> /dev/null; then
-            TOTAL_HEX=$(jq '.features | length' public/total/total_exposure.geojson 2>/dev/null || echo "unknown")
-            echo "Total hexagons affected: $TOTAL_HEX"
-            
-            # Find max occurrences
-            MAX_OCC=$(jq '[.features[].properties.total_occurrences] | max' public/total/total_exposure.geojson 2>/dev/null || echo "unknown")
-            echo "Maximum occurrences per hex: $MAX_OCC"
+          if [ -f "public/summaries/summary_report.txt" ]; then
+            head -30 public/summaries/summary_report.txt
+          else
+            echo "Summary report not available"
           fi
-          
-          # File sizes
-          echo ""
-          echo "Output file sizes:"
-          ls -lh public/total/total_exposure.geojson 2>/dev/null || echo "Total file not found"
-          echo ""
-          echo "Latest daily summaries:"
-          ls -lht public/daily/*.geojson 2>/dev/null | head -3 || echo "No daily files"
 
       - name: Deploy to PUBLIC repo (gh-pages)
         uses: peaceiris/actions-gh-pages@v3
