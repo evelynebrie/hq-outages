@@ -511,10 +511,10 @@ html_content <- sprintf('<!DOCTYPE html>
         // Load daily summaries
         async function loadDailyData() {
             const dates = %s;
-            for (const date of dates) {
+            for (const dateStr of dates) {
                 try {
-                    const response = await fetch(`daily/daily_${date}.geojson`);
-                    allData.daily[date] = await response.json();
+                    const response = await fetch(`daily/daily_${dateStr}.geojson`);
+                    allData.daily[dateStr] = await response.json();
                 } catch (e) {}
             }
         }
