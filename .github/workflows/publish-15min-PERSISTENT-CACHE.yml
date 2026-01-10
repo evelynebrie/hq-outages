@@ -1,0 +1,388 @@
+name: Process 15-Minute HQ Outage Data with Persistent Cache
+
+on:
+  schedule:
+    # Run every hour to process new 15-minute scraped data
+    - cron: '0 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Setup R
+        uses: r-lib/actions/setup-r@v2
+        with:
+          use-public-rspm: true
+
+      - name: System libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgdal-dev libgeos-dev libproj-dev libudunits2-dev jq curl
+
+      - name: Cache R packages
+        uses: actions/cache@v3
+        with:
+          path: ${{ env.R_LIBS_USER }}
+          key: ${{ runner.os }}-r-packages-15min-v1
+          restore-keys: ${{ runner.os }}-r-
+
+      - name: Install R packages
+        run: |
+          Rscript -e 'pkgs <- c("sf","dplyr","fs","purrr","jsonlite","data.table"); inst <- setdiff(pkgs, rownames(installed.packages())); if(length(inst)) { cat("Installing", length(inst), "packages\n"); install.packages(inst, repos="https://cloud.r-project.org", Ncpus=2) } else { cat("All packages cached\n") }'
+
+      - name: Download previous cache from public repo
+        env:
+          GITHUB_TOKEN: ${{ secrets.PUBLIC_REPO_TOKEN }}
+        run: |
+          echo "📥 Downloading previous cache from public repo..."
+          
+          # Try to download existing cache file
+          curl -f -L \
+            -H "Authorization: token $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github.v3.raw" \
+            "https://raw.githubusercontent.com/evelynebrie/hq-outages-public/gh-pages/cache/cumulative_hex_data.rds" \
+            -o cache_download.rds 2>/dev/null || true
+          
+          if [ -f cache_download.rds ] && [ -s cache_download.rds ]; then
+            mkdir -p cache
+            mv cache_download.rds cache/cumulative_hex_data.rds
+            echo "✅ Cache downloaded successfully"
+            ls -lh cache/cumulative_hex_data.rds
+          else
+            echo "ℹ️  No existing cache found (this is normal for first run)"
+          fi
+
+      - name: Restore data cache
+        uses: actions/cache@v3
+        with:
+          path: data/daily/
+          key: hq-15min-data-${{ github.run_id }}
+          restore-keys: hq-15min-data-
+
+      - name: Restore hex grid cache
+        uses: actions/cache@v3
+        with:
+          path: public/hex_grid_template.rds
+          key: hq-hex-grid-15min-v1
+          restore-keys: hq-hex-grid-
+
+      - name: Get Fresh Dropbox Access Token
+        id: get_token
+        env:
+          DROPBOX_REFRESH_TOKEN: ${{ secrets.DROPBOX_REFRESH_TOKEN }}
+          DROPBOX_APP_KEY: ${{ secrets.DROPBOX_APP_KEY }}
+          DROPBOX_APP_SECRET: ${{ secrets.DROPBOX_APP_SECRET }}
+        run: |
+          echo "🔑 Getting fresh access token from refresh token..."
+          
+          RESPONSE=$(curl -s -X POST https://api.dropbox.com/oauth2/token \
+            -u "${DROPBOX_APP_KEY}:${DROPBOX_APP_SECRET}" \
+            -d "grant_type=refresh_token&refresh_token=${DROPBOX_REFRESH_TOKEN}")
+          
+          ACCESS_TOKEN=$(echo "$RESPONSE" | jq -r '.access_token // empty')
+          
+          if [ -z "$ACCESS_TOKEN" ]; then
+            echo "❌ Failed to get access token. Response:"
+            echo "$RESPONSE" | jq '.'
+            exit 1
+          fi
+          
+          echo "✅ Successfully obtained fresh access token"
+          echo "access_token=$ACCESS_TOKEN" >> $GITHUB_OUTPUT
+
+      - name: Download files from Dropbox App Folder
+        env:
+          DROPBOX_TOKEN: ${{ steps.get_token.outputs.access_token }}
+        run: |
+          set -eo pipefail
+          
+          echo "📥 Listing files from Dropbox App Folder..."
+          echo "   Path: /hq-outages (App Folder root)"
+          echo ""
+          
+          ALL_FILES=""
+          HAS_MORE=true
+          CURSOR=""
+          PAGE=1
+          
+          # List all files recursively from app folder
+          while [ "$HAS_MORE" = "true" ]; do
+            echo "  Fetching page $PAGE..."
+            
+            if [ -z "$CURSOR" ]; then
+              # App folders use root path "" or the folder name
+              RESPONSE=$(curl -s -X POST https://api.dropboxapi.com/2/files/list_folder \
+                -H "Authorization: Bearer $DROPBOX_TOKEN" \
+                -H "Content-Type: application/json" \
+                -d '{"path": "", "recursive": true}')
+            else
+              RESPONSE=$(curl -s -X POST https://api.dropboxapi.com/2/files/list_folder/continue \
+                -H "Authorization: Bearer $DROPBOX_TOKEN" \
+                -H "Content-Type: application/json" \
+                -d "{\"cursor\": \"$CURSOR\"}")
+            fi
+            
+            if echo "$RESPONSE" | jq -e '.error' > /dev/null 2>&1; then
+              echo "❌ Error from Dropbox API:"
+              echo "$RESPONSE" | jq '.error'
+              
+              # Try alternative path
+              echo ""
+              echo "Trying alternative path: /hq-outages"
+              RESPONSE=$(curl -s -X POST https://api.dropboxapi.com/2/files/list_folder \
+                -H "Authorization: Bearer $DROPBOX_TOKEN" \
+                -H "Content-Type: application/json" \
+                -d '{"path": "/hq-outages", "recursive": true}')
+              
+              if echo "$RESPONSE" | jq -e '.error' > /dev/null 2>&1; then
+                echo "❌ Still failed. Please check Dropbox configuration."
+                exit 1
+              fi
+            fi
+            
+            if ! echo "$RESPONSE" | jq -e '.entries' > /dev/null 2>&1; then
+              echo "⚠️  Unexpected response - continuing with empty list"
+              break
+            fi
+            
+            PAGE_COUNT=$(echo "$RESPONSE" | jq '.entries | length')
+            echo "    Found $PAGE_COUNT entries"
+            
+            PAGE_FILES=$(echo "$RESPONSE" | jq -r '.entries[]? | select(.".tag" == "file") | .path_display' || true)
+            
+            if [ ! -z "$PAGE_FILES" ]; then
+              if [ -z "$ALL_FILES" ]; then
+                ALL_FILES="$PAGE_FILES"
+              else
+                ALL_FILES="$ALL_FILES"$'\n'"$PAGE_FILES"
+              fi
+            fi
+            
+            HAS_MORE=$(echo "$RESPONSE" | jq -r '.has_more')
+            
+            if [ "$HAS_MORE" = "true" ]; then
+              CURSOR=$(echo "$RESPONSE" | jq -r '.cursor')
+              PAGE=$((PAGE + 1))
+            fi
+          done
+          
+          echo "✅ Completed pagination: $PAGE page(s)"
+          
+          TOTAL_COUNT=0
+          if [ ! -z "$ALL_FILES" ]; then
+            TOTAL_COUNT=$(echo "$ALL_FILES" | wc -l)
+          fi
+          echo "📊 Total files found: $TOTAL_COUNT"
+          
+          if [ $TOTAL_COUNT -eq 0 ]; then
+            echo "⚠️  No files found - continuing with cached data"
+            mkdir -p data/daily
+            exit 0
+          fi
+          
+          # Filter for outages_joined_full_*.geojson files with timestamp
+          echo ""
+          echo "🔍 Filtering for: outages_joined_full_YYYYMMDDTHHMMSS.geojson"
+          
+          GEOJSON_FILES=$(echo "$ALL_FILES" | grep "outages_joined_full_" | grep -E "[0-9]{8}[Tt][0-9]{6}\.geojson$" || true)
+          FILE_COUNT=$(echo "$GEOJSON_FILES" | grep -v '^$' | wc -l)
+          
+          echo "📍 Matching files: $FILE_COUNT"
+          
+          if [ "$FILE_COUNT" -eq 0 ]; then
+            echo "⚠️  No matching files found"
+            echo ""
+            echo "Sample of files found (first 10):"
+            echo "$ALL_FILES" | head -10
+            echo ""
+            echo "Looking for pattern: outages_joined_full_YYYYMMDDTHHMMSS.geojson"
+            mkdir -p data/daily
+            exit 0
+          fi
+          
+          # Show sample
+          echo ""
+          echo "Sample files to download (first 5):"
+          echo "$GEOJSON_FILES" | head -5
+          echo ""
+          
+          mkdir -p data/daily
+          
+          CACHED=0
+          NEW=0
+          SKIPPED=0
+          
+          # Download files
+          while IFS= read -r file; do
+            [ -z "$file" ] && continue
+            
+            filename=$(basename "$file")
+            local_path="data/daily/$filename"
+            
+            # Skip if already downloaded
+            if [ -f "$local_path" ] && [ -s "$local_path" ]; then
+              CACHED=$((CACHED + 1))
+              continue
+            fi
+            
+            # Download new file
+            if curl -s -f -X POST https://content.dropboxapi.com/2/files/download \
+              -H "Authorization: Bearer $DROPBOX_TOKEN" \
+              -H "Dropbox-API-Arg: {\"path\": \"$file\"}" \
+              -o "$local_path" && [ -s "$local_path" ]; then
+              NEW=$((NEW + 1))
+              [ $NEW -le 10 ] && echo "  ✓ Downloaded: $filename"
+            else
+              SKIPPED=$((SKIPPED + 1))
+              [ $SKIPPED -le 5 ] && echo "  ✗ Failed: $filename"
+            fi
+            
+            # Rate limiting: pause briefly every 10 downloads
+            if [ $((NEW % 10)) -eq 0 ] && [ $NEW -gt 0 ]; then
+              sleep 1
+            fi
+          done <<< "$GEOJSON_FILES"
+          
+          echo ""
+          echo "📊 Download Summary:"
+          echo "  • Cached (already present): $CACHED"
+          echo "  • Newly downloaded: $NEW"
+          echo "  • Skipped/failed: $SKIPPED"
+          echo "  • Total available: $(($CACHED + $NEW))"
+
+      - name: Run 15-minute scrape analysis (with caching)
+        run: |
+          echo "🔬 Starting 15-minute scrape analysis with cache support..."
+          
+          if [ ! -f "R/build_cumulative_hex_15min.R" ]; then
+            echo "❌ Script not found at R/build_cumulative_hex_15min.R"
+            exit 1
+          fi
+          
+          FILE_COUNT=$(find data/daily -name "*.geojson" 2>/dev/null | wc -l)
+          echo "📊 Processing $FILE_COUNT total files"
+          
+          if [ -f "cache/cumulative_hex_data.rds" ]; then
+            echo "✅ Cache file found - will process only new files!"
+          else
+            echo "ℹ️  No cache - will process all files (first run)"
+          fi
+          
+          if [ "$FILE_COUNT" -eq 0 ]; then
+            echo "❌ No data to process!"
+            exit 1
+          fi
+          
+          # Show sample of files being processed
+          echo "Sample files:"
+          ls -lh data/daily/*.geojson 2>/dev/null | head -5
+          
+          Rscript R/build_cumulative_hex_15min.R
+
+      - name: Copy cache to public directory for deployment
+        run: |
+          echo "📦 Preparing cache for deployment..."
+          mkdir -p public/cache
+          
+          if [ -f "cache/cumulative_hex_data.rds" ]; then
+            cp cache/cumulative_hex_data.rds public/cache/
+            ls -lh public/cache/cumulative_hex_data.rds
+            echo "✅ Cache copied to public/cache/"
+          else
+            echo "⚠️  No cache file found to copy"
+          fi
+
+      - name: Generate summary statistics
+        run: |
+          echo "📊 Generating summary statistics..."
+          
+          if [ -f "R/generate_summaries.R" ]; then
+            Rscript R/generate_summaries.R
+          else
+            echo "⚠️  generate_summaries.R not found, skipping statistics generation"
+          fi
+
+      - name: Verify outputs were created
+        run: |
+          echo "📁 Verifying generated files..."
+          
+          if [ ! -f "public/index.html" ]; then
+            echo "❌ index.html not created!"
+            exit 1
+          fi
+          
+          if [ ! -f "public/total/total_exposure.geojson" ]; then
+            echo "❌ total_exposure.geojson not created!"
+            exit 1
+          fi
+          
+          DAILY_COUNT=$(find public/daily -name "daily_*.geojson" 2>/dev/null | wc -l)
+          MONTHLY_COUNT=$(find public/monthly -name "monthly_*.geojson" 2>/dev/null | wc -l)
+          SNAPSHOT_COUNT=$(find public/cumulative_snapshots -name "cumulative_*.geojson" 2>/dev/null | wc -l)
+          
+          echo "✅ Generated files:"
+          echo "  • Daily summaries: $DAILY_COUNT"
+          echo "  • Monthly summaries: $MONTHLY_COUNT"
+          echo "  • Cumulative snapshots: $SNAPSHOT_COUNT"
+          echo "  • Cache file: $([ -f public/cache/cumulative_hex_data.rds ] && echo 'Yes' || echo 'No')"
+          
+          if [ "$DAILY_COUNT" -eq 0 ]; then
+            echo "⚠️  Warning: No daily summaries created"
+          fi
+          
+          echo ""
+          echo "📊 Public directory structure:"
+          du -sh public/*/ 2>/dev/null || echo "No subdirectories"
+          
+          echo ""
+          echo "✅ All required files present"
+
+      - name: Display summary statistics
+        run: |
+          echo "📊 Summary Statistics:"
+          echo ""
+          
+          if [ -f "public/summaries/summary_report.txt" ]; then
+            head -30 public/summaries/summary_report.txt
+          else
+            echo "Summary report not available"
+          fi
+
+      - name: Deploy to PUBLIC repo (gh-pages) with cache
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          personal_token: ${{ secrets.PUBLIC_REPO_TOKEN }}
+          external_repository: evelynebrie/hq-outages-public
+          publish_branch: gh-pages
+          publish_dir: public
+          keep_files: false
+          commit_message: "Update 15-minute scrape data - ${{ github.run_number }}"
+          
+      - name: Summary
+        run: |
+          echo ""
+          echo "========================================="
+          echo "✅ DEPLOYMENT COMPLETE"
+          echo "========================================="
+          echo ""
+          echo "🌐 View at: https://evelynebrie.github.io/hq-outages-public/"
+          echo ""
+          
+          DAILY_COUNT=$(find public/daily -name "daily_*.geojson" 2>/dev/null | wc -l)
+          MONTHLY_COUNT=$(find public/monthly -name "monthly_*.geojson" 2>/dev/null | wc -l)
+          CACHE_STATUS=$([ -f public/cache/cumulative_hex_data.rds ] && echo "✅ Deployed" || echo "❌ Not found")
+          
+          echo "📊 Deployment summary:"
+          echo "  • Daily summaries: $DAILY_COUNT"
+          echo "  • Monthly summaries: $MONTHLY_COUNT"
+          echo "  • Cache status: $CACHE_STATUS"
+          echo "  • Processing: 15-minute interval data"
+          echo "  • Next run will use deployed cache"
+          echo "========================================="
