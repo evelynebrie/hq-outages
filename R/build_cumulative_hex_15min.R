@@ -25,6 +25,8 @@ start_time <- Sys.time()
 data_path <- "data/daily"  # Input: polygon files
 output_dir <- "public"     # Output: processed summaries
 cumulative_snapshots_dir <- file.path(output_dir, "cumulative_snapshots")
+cache_dir <- "cache"       # Cache: processed data to avoid re-reading
+cache_file <- file.path(cache_dir, "cumulative_hex_data.rds")
 
 HEX_SIZE <- 1000     # Hex size in meters
 SIMPLIFY <- 200      # Simplification tolerance
@@ -35,6 +37,7 @@ dir.create(file.path(output_dir, "daily"), recursive = TRUE, showWarnings = FALS
 dir.create(file.path(output_dir, "monthly"), recursive = TRUE, showWarnings = FALSE)
 dir.create(file.path(output_dir, "total"), recursive = TRUE, showWarnings = FALSE)
 dir.create(cumulative_snapshots_dir, recursive = TRUE, showWarnings = FALSE)
+dir.create(cache_dir, recursive = TRUE, showWarnings = FALSE)
 
 # ==================================================================
 # STEP 1: PARSE ALL FILES WITH TIMESTAMPS
@@ -48,15 +51,54 @@ files <- list.files(data_path,
                    full.names = TRUE)
 
 if (length(files) == 0) {
-  cat("  No files found matching pattern. Checking for any geojson files...\n")
-  files <- list.files(data_path, pattern = "\\.geojson$", full.names = TRUE)
+  cat("⚠️  No files found matching pattern. Looking for files like:\n")
+  cat("   - outages_joined_full_YYYYMMDDTHHMMSS.geojson\n")
+  cat("   - polygons_YYYYMMDDTHHMMSS.geojson\n")
+  stop("No input files found")
 }
 
-if (length(files) == 0) stop("❌ No geojson files found in data/daily")
+# ==================================================================
+# LOAD CACHE IF IT EXISTS
+# ==================================================================
+cumulative_hex_data <- list()
+processed_files <- character()
 
-cat(sprintf("  Found %d total files\n", length(files)))
+if (file.exists(cache_file)) {
+  cat("\n[CACHE] Loading previously processed data...\n")
+  cached_data <- readRDS(cache_file)
+  cumulative_hex_data <- cached_data$cumulative_hex_data
+  processed_files <- cached_data$processed_files
+  cat(sprintf("  ✓ Loaded cache with %d hexagons and %d processed files\n", 
+              length(cumulative_hex_data), length(processed_files)))
+}
 
-# Parse timestamps from filenames
+# Filter to only new files
+new_files <- setdiff(files, processed_files)
+
+if (length(new_files) == 0) {
+  cat("\n✅ All files already processed! Using cached data.\n")
+  cat(sprintf("  • Total files: %d\n", length(files)))
+  cat(sprintf("  • Already processed: %d\n", length(processed_files)))
+  cat(sprintf("  • New files: 0\n"))
+  cat("\nSkipping to summaries generation...\n")
+  
+  # Jump to summaries section (we'll still need to regenerate summaries)
+  files_to_process <- character()
+} else {
+  cat(sprintf("\n📊 File Summary:\n"))
+  cat(sprintf("  • Total files found: %d\n", length(files)))
+  cat(sprintf("  • Previously processed: %d\n", length(processed_files)))
+  cat(sprintf("  • New files to process: %d\n", length(new_files)))
+  
+  files_to_process <- new_files
+}
+
+# Parse timestamps for ALL files (needed for summaries)
+files_dt_all <- data.frame(
+  file = files,
+  stringsAsFactors = FALSE
+)
+
 basenames <- basename(files)
 cat("  Sample filenames:\n")
 cat(paste("   ", head(basenames, 3), collapse = "\n"), "\n")
@@ -155,31 +197,34 @@ if (file.exists(hex_grid_path)) {
 cat(sprintf("  Reference grid: %d hexagons\n", nrow(hex_grid_reference)))
 
 # ==================================================================
-# STEP 3: PROCESS ALL FILES AND BUILD CUMULATIVE DATA
+# STEP 3: PROCESS NEW FILES AND UPDATE CUMULATIVE DATA
 # ==================================================================
 cat("\n[3] Processing files and tracking hex occurrences...\n")
 
-# Initialize cumulative tracking
-# Structure: hex_id -> list(count, dates, datetimes)
-cumulative_hex_data <- list()
-
 # Track progress
-total_files <- nrow(files_dt)
-processed <- 0
-last_pct <- 0
-
-for (i in seq_len(total_files)) {
-  f <- files_dt$file[i]
-  date_val <- files_dt$date[i]
-  datetime_val <- files_dt$datetime[i]
+if (length(files_to_process) == 0) {
+  cat("  ✓ No new files to process (using cached data)\n")
+  cat(sprintf("  ✓ Tracked %d unique hexagons with outages\n", length(cumulative_hex_data)))
+} else {
+  # Only process new files
+  files_to_process_dt <- files_dt[files_dt$file %in% files_to_process, ]
   
-  # Progress indicator
-  processed <- processed + 1
-  pct <- round(100 * processed / total_files)
-  if (pct >= last_pct + 10 || processed == total_files) {
-    cat(sprintf("  Progress: %d%% (%d/%d files)\n", pct, processed, total_files))
-    last_pct <- pct
-  }
+  total_to_process <- nrow(files_to_process_dt)
+  processed <- 0
+  last_pct <- 0
+
+  for (i in seq_len(total_to_process)) {
+    f <- files_to_process_dt$file[i]
+    date_val <- files_to_process_dt$date[i]
+    datetime_val <- files_to_process_dt$datetime[i]
+    
+    # Progress indicator
+    processed <- processed + 1
+    pct <- round(100 * processed / total_to_process)
+    if (pct >= last_pct + 10 || processed == total_to_process) {
+      cat(sprintf("  Progress: %d%% (%d/%d files)\n", pct, processed, total_to_process))
+      last_pct <- pct
+    }
   
   tryCatch({
     # Read and process polygons
@@ -222,10 +267,21 @@ for (i in seq_len(total_files)) {
   }, error = function(e) {
     cat(sprintf("    ⚠ Error processing file %s: %s\n", basename(f), e$message))
   })
-}
+  }
 
-cat(sprintf("  ✓ Processed %d files\n", processed))
-cat(sprintf("  ✓ Tracked %d unique hexagons with outages\n", length(cumulative_hex_data)))
+  cat(sprintf("  ✓ Processed %d new files\n", processed))
+  cat(sprintf("  ✓ Tracked %d unique hexagons with outages\n", length(cumulative_hex_data)))
+  
+  # SAVE CACHE
+  cat("\n[CACHE] Saving processed data...\n")
+  cache_data <- list(
+    cumulative_hex_data = cumulative_hex_data,
+    processed_files = c(processed_files, files_to_process)
+  )
+  saveRDS(cache_data, cache_file)
+  cat(sprintf("  ✓ Cache saved with %d hexagons and %d total files\n", 
+              length(cumulative_hex_data), length(cache_data$processed_files)))
+}
 
 # ==================================================================
 # STEP 4: GENERATE DAILY SUMMARIES (OPTIMIZED - USE EXISTING DATA)
@@ -526,12 +582,12 @@ html_content <- sprintf('<!DOCTYPE html>
             html += `<p style="margin-top: 15px;"><strong>Affected days:</strong></p>`;
             html += `<div style="max-height: 400px; overflow-y: auto;">`;
             
-            uniqueDates.forEach(date => {
-                const times = byDate[date];
-                const dateId = 'date_' + hexId + '_' + date.replace(/-/g, '');
+            uniqueDates.forEach(dateKey => {
+                const times = byDate[dateKey];
+                const dateId = 'date_' + hexId + '_' + dateKey.replace(/-/g, '');
                 html += `<div style="margin: 5px 0; border-bottom: 1px solid #eee; padding: 5px 0;">`;
                 html += `<div style="cursor: pointer; font-weight: bold; color: #0078A8;" onclick="toggleTimes('${dateId}')">`;
-                html += `▶ ${date} (${times.length} occurrence${times.length > 1 ? 's' : ''})`;
+                html += `▶ ${dateKey} (${times.length} occurrence${times.length > 1 ? 's' : ''})`;
                 html += `</div>`;
                 html += `<div id="${dateId}" style="display: none; margin-left: 20px; margin-top: 5px; font-size: 0.9em; color: #666;">`;
                 times.forEach(time => {
