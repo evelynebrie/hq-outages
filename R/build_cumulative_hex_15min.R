@@ -298,20 +298,28 @@ most_recent_datetime <- files_dt$datetime[nrow(files_dt)]
 cat(sprintf("  Most recent file: %s\n", basename(most_recent_file)))
 cat(sprintf("  Timestamp: %s\n", most_recent_datetime))
 
+# Store count for HTML generation
+current_outage_count <- 0
+
 # Process the most recent file to get current outages
 tryCatch({
   current_polys <- st_read(most_recent_file, quiet = TRUE) %>%
     st_transform(32618) %>%
     st_simplify(dTolerance = SIMPLIFY, preserveTopology = FALSE)
   
+  cat(sprintf("  Read %d polygons from file\n", nrow(current_polys)))
+  
   # Union all polygons
-  if (nrow(current_polys) > 1) current_polys <- st_union(current_polys)
+  if (nrow(current_polys) > 1) {
+    current_polys <- st_union(current_polys)
+  }
   
   # Find affected hexagons
   current_hits <- st_intersects(hex_grid_reference, current_polys, sparse = TRUE)
   current_affected_ids <- which(lengths(current_hits) > 0)
   
-  cat(sprintf("  ✓ Current outages affect %d hexagons\n", length(current_affected_ids)))
+  current_outage_count <- length(current_affected_ids)
+  cat(sprintf("  ✓ Current outages affect %d hexagons\n", current_outage_count))
   
   # Create current outages GeoJSON
   if (length(current_affected_ids) > 0) {
@@ -344,17 +352,13 @@ tryCatch({
     st_write(current_output, output_file, delete_dsn = TRUE, quiet = TRUE)
     cat(sprintf("  ✓ Current outages saved: %d hexagons\n", nrow(current_output)))
   } else {
-    # No current outages - create empty file
-    empty_sf <- hex_grid_reference[0, ]
-    empty_sf$is_current <- logical()
-    empty_sf$last_reading <- character()
-    empty_sf$total_occurrences <- integer()
-    empty_sf$days_affected <- integer()
-    empty_output <- empty_sf %>% st_transform(4326)
+    # No current outages - create empty GeoJSON with proper structure
+    cat("  Creating empty current.geojson (no active outages)\n")
     
-    output_file <- file.path(output_dir, "current.geojson")
-    st_write(empty_output, output_file, delete_dsn = TRUE, quiet = TRUE)
-    cat("  ✓ No current outages (empty file created)\n")
+    # Create a valid empty GeoJSON file manually
+    empty_geojson <- '{"type":"FeatureCollection","features":[]}'
+    writeLines(empty_geojson, file.path(output_dir, "current.geojson"))
+    cat("  ✓ Empty current.geojson created\n")
   }
   
   rm(current_polys, current_hits)
@@ -362,6 +366,9 @@ tryCatch({
   
 }, error = function(e) {
   cat(sprintf("  ⚠ Error processing current outages: %s\n", e$message))
+  # Create empty file on error
+  empty_geojson <- '{"type":"FeatureCollection","features":[]}'
+  writeLines(empty_geojson, file.path(output_dir, "current.geojson"))
 })
 
 # ==================================================================
@@ -542,7 +549,7 @@ cat('<!DOCTYPE html>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>HQ Outages - Cumulative Analysis</title>
+    <title>HQ Outages - Pannes Hydro-Quebec</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <link rel="stylesheet" href="https://unpkg.com/leaflet-control-geocoder@2.4.0/dist/Control.Geocoder.css" />
     <style>
@@ -568,6 +575,7 @@ cat('<!DOCTYPE html>
         .times-list { display: none; margin-left: 20px; margin-top: 5px; font-size: 0.9em; color: #666; }
         .current-badge { background: #e74c3c; color: white; padding: 2px 8px; border-radius: 3px; font-size: 12px; margin-left: 5px; }
         .current-option { font-weight: bold; color: #e74c3c; }
+        .loading { color: #999; font-style: italic; }
     </style>
 </head>
 <body>
@@ -588,27 +596,47 @@ cat('<!DOCTYPE html>
         
         var allData = { total: null, daily: {}, current: null };
         var currentLayer = null;
-        var lastReadingTime = "";
+        var lastReadingTime = "', file = html_file, sep = "")
+
+cat(most_recent_datetime, file = html_file, sep = "")
+
+cat('";
+        var dataLoaded = { total: false, current: false };
+        
+        // Load current outages FIRST (priority)
+        fetch("current.geojson")
+            .then(function(r) { 
+                if (!r.ok) throw new Error("HTTP " + r.status);
+                return r.json(); 
+            })
+            .then(function(data) {
+                console.log("Current outages loaded:", data.features ? data.features.length : 0, "features");
+                allData.current = data;
+                dataLoaded.current = true;
+                updateCurrentCount();
+                // If current is selected, update map
+                var dateSelect = document.getElementById("dateSelect");
+                if (dateSelect && dateSelect.value === "current") {
+                    updateMap();
+                }
+            })
+            .catch(function(e) { 
+                console.error("Error loading current.geojson:", e);
+                allData.current = { type: "FeatureCollection", features: [] };
+                dataLoaded.current = true;
+                updateCurrentCount();
+            });
         
         // Load total data
         fetch("total/total_exposure.geojson")
             .then(function(r) { return r.json(); })
             .then(function(data) {
+                console.log("Total data loaded:", data.features ? data.features.length : 0, "features");
                 allData.total = data;
+                dataLoaded.total = true;
+                // Initial map update - show current if loaded, otherwise total
                 updateMap();
             });
-        
-        // Load current outages
-        fetch("current.geojson")
-            .then(function(r) { return r.json(); })
-            .then(function(data) {
-                allData.current = data;
-                if (data.features && data.features.length > 0 && data.features[0].properties.last_reading) {
-                    lastReadingTime = data.features[0].properties.last_reading;
-                    updateCurrentCount();
-                }
-            })
-            .catch(function(e) { console.log("No current outages file"); });
         
         var dates = ', file = html_file, sep = "")
 
@@ -628,12 +656,18 @@ cat(';
         
         function updateCurrentCount() {
             var countSpan = document.getElementById("currentCount");
-            if (countSpan && allData.current) {
-                var count = allData.current.features ? allData.current.features.length : 0;
-                countSpan.textContent = count + " hexagones";
+            if (countSpan) {
+                if (allData.current && allData.current.features) {
+                    var count = allData.current.features.length;
+                    countSpan.textContent = count + " hexagone" + (count !== 1 ? "s" : "");
+                    countSpan.className = count > 0 ? "current-badge" : "";
+                } else {
+                    countSpan.textContent = "0 hexagones";
+                    countSpan.className = "";
+                }
             }
             var timeSpan = document.getElementById("lastReading");
-            if (timeSpan && lastReadingTime) {
+            if (timeSpan) {
                 timeSpan.textContent = lastReadingTime;
             }
         }
@@ -651,20 +685,47 @@ cat(';
         
         function updateMap() {
             var dateSelect = document.getElementById("dateSelect");
-            var dateFilter = dateSelect ? dateSelect.value : "all";
-            var data = allData.total;
+            var dateFilter = dateSelect ? dateSelect.value : "current";
+            var data = null;
             var isCurrent = false;
+            
+            console.log("updateMap called with filter:", dateFilter);
             
             if (dateFilter === "current") {
                 data = allData.current;
                 isCurrent = true;
-            } else if (dateFilter !== "all" && allData.daily[dateFilter]) {
+                if (!data || !data.features) {
+                    console.log("Current data not loaded yet, waiting...");
+                    // Show loading state or fall back to total
+                    if (allData.total) {
+                        data = allData.total;
+                        isCurrent = false;
+                    } else {
+                        return; // Nothing to show yet
+                    }
+                }
+            } else if (dateFilter === "all") {
+                data = allData.total;
+            } else if (allData.daily[dateFilter]) {
                 data = allData.daily[dateFilter];
+            } else {
+                data = allData.total;
             }
             
-            if (!data) return;
+            if (!data || !data.features) {
+                console.log("No data available for filter:", dateFilter);
+                return;
+            }
+            
+            console.log("Displaying", data.features.length, "features, isCurrent:", isCurrent);
             
             if (currentLayer) map.removeLayer(currentLayer);
+            
+            if (data.features.length === 0) {
+                // No features to display
+                console.log("No features to display");
+                return;
+            }
             
             currentLayer = L.geoJSON(data, {
                 style: function(f) {
@@ -681,12 +742,12 @@ cat(';
                     var count = props.total_occurrences || props.occurrences_today || 1;
                     var popupContent = "<b>Hexagone #" + props.hex_id + "</b>";
                     if (isCurrent) {
-                        popupContent += "<span class=\\"current-badge\\">EN COURS</span>";
+                        popupContent += " <span class=\\"current-badge\\">EN COURS</span>";
                     }
                     popupContent += "<br><b>Occurrences totales:</b> " + count + "<br>" +
                         "<b>Jours affectes:</b> " + (props.days_affected || 1) + "<br>" +
                         "<b>Centroide:</b> " + props.centroid_lat.toFixed(6) + ", " + props.centroid_lon.toFixed(6) + "<br>" +
-                        "<a class=\\"detail-link\\" onclick=\\"showDetails(" + props.hex_id + ")\\">Voir details</a>";
+                        "<a class=\\"detail-link\\" onclick=\\"showDetails(" + props.hex_id + ")\\">Voir historique</a>";
                     layer.bindPopup(popupContent);
                 }
             }).addTo(map);
@@ -694,17 +755,22 @@ cat(';
         
         function showDetails(hexId) {
             var feature = null;
-            for (var i = 0; i < allData.total.features.length; i++) {
-                if (allData.total.features[i].properties.hex_id === hexId) {
-                    feature = allData.total.features[i];
-                    break;
+            if (allData.total && allData.total.features) {
+                for (var i = 0; i < allData.total.features.length; i++) {
+                    if (allData.total.features[i].properties.hex_id === hexId) {
+                        feature = allData.total.features[i];
+                        break;
+                    }
                 }
             }
-            if (!feature) return;
+            if (!feature) {
+                alert("Historique non disponible pour cet hexagone");
+                return;
+            }
             
             var props = feature.properties;
             var allDatetimes = props.all_datetimes || "";
-            var datetimes = allDatetimes.split(",").map(function(s) { return s.trim(); }).sort();
+            var datetimes = allDatetimes.split(",").map(function(s) { return s.trim(); }).filter(function(s) { return s.length > 0; }).sort();
             
             var byDate = {};
             datetimes.forEach(function(dt) {
@@ -715,7 +781,7 @@ cat(';
                 byDate[date].push(time);
             });
             
-            var uniqueDates = Object.keys(byDate).sort();
+            var uniqueDates = Object.keys(byDate).sort().reverse(); // Most recent first
             
             var html = "<h3>Hexagone #" + hexId + "</h3>";
             
@@ -735,7 +801,7 @@ cat(';
             
             html += "<p><strong>Total occurrences:</strong> " + props.total_occurrences + "</p>";
             html += "<p><strong>Jours affectes:</strong> " + uniqueDates.length + "</p>";
-            html += "<p style=\\"margin-top: 15px;\\"><strong>Details par jour:</strong></p>";
+            html += "<p style=\\"margin-top: 15px;\\"><strong>Historique (recent en premier):</strong></p>";
             html += "<div style=\\"max-height: 400px; overflow-y: auto;\\">";
             
             for (var j = 0; j < uniqueDates.length; j++) {
@@ -778,11 +844,11 @@ cat(';
             var div = L.DomUtil.create("div", "info legend");
             var grades = [0, 2, 5, 10, 20, 40, 60, 80];
             div.innerHTML = "<h4>Occurrences</h4>";
+            div.innerHTML += "<i style=\\"background:#e74c3c\\"></i>En cours<br>";
             for (var i = 0; i < grades.length; i++) {
                 div.innerHTML += "<i style=\\"background:" + getColor(grades[i] + 1) + "\\"></i>" +
                     grades[i] + (grades[i + 1] ? "-" + grades[i + 1] : "+") + "<br>";
             }
-            div.innerHTML += "<br><i style=\\"background:#e74c3c\\"></i>En cours";
             return div;
         };
         legend.addTo(map);
@@ -790,20 +856,21 @@ cat(';
         var info = L.control({position: "topright"});
         info.onAdd = function() {
             var div = L.DomUtil.create("div", "info");
-            div.innerHTML = "<h4>Pannes de courant HQ</h4>" +
-                "<p><b>Taille des hexagones:</b> ', file = html_file, sep = "")
+            div.innerHTML = "<h4>Pannes Hydro-Quebec</h4>" +
+                "<p><b>Pannes en cours:</b> <span id=\\"currentCount\\" class=\\"loading\\">chargement...</span></p>" +
+                "<p><b>Derniere lecture:</b><br><span id=\\"lastReading\\" class=\\"loading\\">chargement...</span></p>" +
+                "<hr style=\\"margin: 8px 0;\\">" +
+                "<p style=\\"font-size:11px;\\"><b>Hexagones:</b> ', file = html_file, sep = "")
 
 cat(hex_size_km, file = html_file, sep = "")
 
 cat(' km</p>" +
-                "<p><b>Jours analyses:</b> ', file = html_file, sep = "")
+                "<p style=\\"font-size:11px;\\"><b>Jours analyses:</b> ', file = html_file, sep = "")
 
 cat(num_days, file = html_file, sep = "")
 
 cat('</p>" +
-                "<p><b>Derniere lecture:</b> <span id=\\"lastReading\\">chargement...</span></p>" +
-                "<p><b>Pannes en cours:</b> <span id=\\"currentCount\\">chargement...</span></p>" +
-                "<p style=\\"font-size:11px;color:#999;\\">Mise a jour: ', file = html_file, sep = "")
+                "<p style=\\"font-size:11px;color:#999;\\">Genere: ', file = html_file, sep = "")
 
 cat(current_date, file = html_file, sep = "")
 
@@ -815,12 +882,16 @@ cat('</p>";
         var controls = L.control({position: "topleft"});
         controls.onAdd = function() {
             var div = L.DomUtil.create("div", "controls");
-            var selectHtml = "<h4>Filtres</h4><label>Affichage:</label><select id=\\"dateSelect\\" onchange=\\"updateMap()\\">";
-            selectHtml += "<option value=\\"current\\" class=\\"current-option\\">🔴 Pannes en cours</option>";
-            selectHtml += "<option value=\\"all\\">Toutes (cumulatif)</option>";
-            dates.forEach(function(d) {
+            var selectHtml = "<h4>Affichage</h4><select id=\\"dateSelect\\" onchange=\\"updateMap()\\">";
+            selectHtml += "<option value=\\"current\\" selected>&#128308; Pannes en cours</option>";
+            selectHtml += "<option value=\\"all\\">Historique complet</option>";
+            selectHtml += "<optgroup label=\\"Par jour\\">";
+            // Show dates in reverse order (most recent first)
+            var sortedDates = dates.slice().sort().reverse();
+            sortedDates.forEach(function(d) {
                 selectHtml += "<option value=\\"" + d + "\\">" + d + "</option>";
             });
+            selectHtml += "</optgroup>";
             selectHtml += "</select>";
             div.innerHTML = selectHtml;
             return div;
@@ -833,6 +904,9 @@ cat('</p>";
         }).on("markgeocode", function(e) {
             map.fitBounds(e.geocode.bbox);
         }).addTo(map);
+        
+        // Update current count once data is loaded
+        setTimeout(updateCurrentCount, 1000);
     </script>
 </body>
 </html>', file = html_file, sep = "")
@@ -872,7 +946,8 @@ cat("✅ PROCESSING COMPLETE\n")
 cat("========================================\n")
 cat(sprintf("Total processing time: %.1f seconds\n", elapsed))
 cat(sprintf("Files processed: %d\n", total_files))
-cat(sprintf("Unique hexagons affected: %d\n", length(cumulative_hex_data)))
+cat(sprintf("Unique hexagons affected (all time): %d\n", length(cumulative_hex_data)))
+cat(sprintf("Current outages: %d hexagons\n", current_outage_count))
 cat(sprintf("Date range: %s to %s\n", min(files_dt$date), max(files_dt$date)))
 cat(sprintf("Daily summaries: %d\n", length(unique_dates)))
 cat(sprintf("Monthly summaries: %d\n", length(unique_months)))
