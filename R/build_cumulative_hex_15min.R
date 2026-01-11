@@ -572,34 +572,36 @@ html_content <- sprintf('<!DOCTYPE html>
             // Group by date
             const byDate = {};
             datetimes.forEach(dt => {
-                const [date, time] = dt.split(' ');
+                const parts = dt.split(" ");
+                const date = parts[0];
+                const time = parts[1] || "";
                 if (!byDate[date]) byDate[date] = [];
                 byDate[date].push(time);
             });
             
             const uniqueDates = Object.keys(byDate).sort();
             
-            let html = `<h3>Hexagone #${hexId}</h3>`;
-            html += `<p><strong>Total occurrences:</strong> ${props.total_occurrences}</p>`;
-            html += `<p><strong>Total number of affected days:</strong> ${uniqueDates.length}</p>`;
-            html += `<p style="margin-top: 15px;"><strong>Affected days:</strong></p>`;
-            html += `<div style="max-height: 400px; overflow-y: auto;">`;
+            let html = "<h3>Hexagone #" + hexId + "</h3>";
+            html += "<p><strong>Total occurrences:</strong> " + props.total_occurrences + "</p>";
+            html += "<p><strong>Total number of affected days:</strong> " + uniqueDates.length + "</p>";
+            html += "<p style=\\"margin-top: 15px;\\"><strong>Affected days:</strong></p>";
+            html += "<div style=\\"max-height: 400px; overflow-y: auto;\\">";
             
-            uniqueDates.forEach(dateKey => {
+            uniqueDates.forEach(function(dateKey) {
                 const times = byDate[dateKey];
-                const dateId = 'date_' + hexId + '_' + dateKey.replace(/-/g, '');
-                html += `<div style="margin: 5px 0; border-bottom: 1px solid #eee; padding: 5px 0;">`;
-                html += `<div style="cursor: pointer; font-weight: bold; color: #0078A8;" onclick="toggleTimes('${dateId}')">`;
-                html += `▶ ${dateKey} (${times.length} occurrence${times.length > 1 ? 's' : ''})`;
-                html += `</div>`;
-                html += `<div id="${dateId}" style="display: none; margin-left: 20px; margin-top: 5px; font-size: 0.9em; color: #666;">`;
-                times.forEach(time => {
-                    html += `<div>${time}</div>`;
+                const dateId = "date_" + hexId + "_" + dateKey.replace(/-/g, "");
+                html += "<div style=\\"margin: 5px 0; border-bottom: 1px solid #eee; padding: 5px 0;\\">";
+                html += "<div style=\\"cursor: pointer; font-weight: bold; color: #0078A8;\\" onclick=\\"toggleTimes(\'" + dateId + "\\')\\">"; 
+                html += "▶ " + dateKey + " (" + times.length + " occurrence" + (times.length > 1 ? "s" : "") + ")";
+                html += "</div>";
+                html += "<div id=\\"" + dateId + "\\" style=\\"display: none; margin-left: 20px; margin-top: 5px; font-size: 0.9em; color: #666;\\">";
+                times.forEach(function(time) {
+                    html += "<div>" + time + "</div>";
                 });
-                html += `</div></div>`;
+                html += "</div></div>";
             });
             
-            html += `</div>`;
+            html += "</div>";
             
             document.getElementById("modalContent").innerHTML = html;
             document.getElementById("detailModal").classList.add("active");
@@ -608,21 +610,10 @@ html_content <- sprintf('<!DOCTYPE html>
         
         function toggleTimes(dateId) {
             const elem = document.getElementById(dateId);
-            const arrow = event.target.querySelector('span') || event.target;
-            if (elem.style.display === 'none') {
-                elem.style.display = 'block';
-                if (arrow.textContent && arrow.textContent.includes('▶')) {
-                    arrow.textContent = arrow.textContent.replace('▶', '▼');
-                } else {
-                    event.target.innerHTML = event.target.innerHTML.replace('▶', '▼');
-                }
+            if (elem.style.display === "none") {
+                elem.style.display = "block";
             } else {
-                elem.style.display = 'none';
-                if (arrow.textContent && arrow.textContent.includes('▼')) {
-                    arrow.textContent = arrow.textContent.replace('▼', '▶');
-                } else {
-                    event.target.innerHTML = event.target.innerHTML.replace('▼', '▶');
-                }
+                elem.style.display = "none";
             }
         }
         
@@ -686,7 +677,7 @@ html_content <- sprintf('<!DOCTYPE html>
   hex_size_km,
   num_days,
   current_date,
-  paste(sprintf('<option value="%s">%s</option>', unique_dates, unique_dates), collapse = "\n")
+  paste(sprintf('<option value="%%s">%%s</option>', unique_dates, unique_dates), collapse = "\n")
 )
 
 writeLines(html_content, file.path(output_dir, "index.html"))
@@ -717,6 +708,9 @@ if (length(all_snapshots) > 30) {
 # FINAL SUMMARY
 # ==================================================================
 elapsed <- as.numeric(difftime(Sys.time(), start_time, units = "secs"))
+
+# Calculate total_files for summary
+total_files <- length(files)
 
 cat("\n========================================\n")
 cat("✅ PROCESSING COMPLETE\n")
