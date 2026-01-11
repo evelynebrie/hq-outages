@@ -516,7 +516,7 @@ html_content <- sprintf('<!DOCTYPE html>
             const dates = %s;
             for (const dateStr of dates) {
                 try {
-                    const response = await fetch(`daily/daily_${dateStr}.geojson`);
+                    const response = await fetch('daily/daily_' + dateStr + '.geojson');
                     allData.daily[dateStr] = await response.json();
                 } catch (e) {}
             }
@@ -551,13 +551,13 @@ html_content <- sprintf('<!DOCTYPE html>
                 onEachFeature: (f, layer) => {
                     const props = f.properties;
                     const count = props.total_occurrences || props.occurrences_today || 0;
-                    layer.bindPopup(`
-                        <b>Hexagone #${props.hex_id}</b><br>
-                        <b>Occurrences:</b> ${count}<br>
-                        <b>Jours affectés:</b> ${props.days_affected || 1}<br>
-                        <b>Centroïde:</b> ${props.centroid_lat.toFixed(6)}, ${props.centroid_lon.toFixed(6)}<br>
-                        <a class="detail-link" onclick="showDetails(${props.hex_id})">Voir détails</a>
-                    `);
+                    layer.bindPopup(
+                        '<b>Hexagone #' + props.hex_id + '</b><br>' +
+                        '<b>Occurrences:</b> ' + count + '<br>' +
+                        '<b>Jours affectés:</b> ' + (props.days_affected || 1) + '<br>' +
+                        '<b>Centroïde:</b> ' + props.centroid_lat.toFixed(6) + ', ' + props.centroid_lon.toFixed(6) + '<br>' +
+                        '<a class="detail-link" onclick="showDetails(' + props.hex_id + ')">Voir détails</a>'
+                    );
                 }
             }).addTo(map);
         }
@@ -583,27 +583,27 @@ html_content <- sprintf('<!DOCTYPE html>
             
             const uniqueDates = Object.keys(byDate).sort();
             
-            let html = `<h3>Hexagone #${hexId}</h3>`;
-            html += `<p><strong>Total occurrences:</strong> ${props.total_occurrences}</p>`;
-            html += `<p><strong>Total number of affected days:</strong> ${uniqueDates.length}</p>`;
-            html += `<p style="margin-top: 15px;"><strong>Affected days:</strong></p>`;
-            html += `<div style="max-height: 400px; overflow-y: auto;">`;
+            let html = '<h3>Hexagone #' + hexId + '</h3>';
+            html += '<p><strong>Total occurrences:</strong> ' + props.total_occurrences + '</p>';
+            html += '<p><strong>Total number of affected days:</strong> ' + uniqueDates.length + '</p>';
+            html += '<p style="margin-top: 15px;"><strong>Affected days:</strong></p>';
+            html += '<div style="max-height: 400px; overflow-y: auto;">';
             
             uniqueDates.forEach(dateKey => {
                 const times = byDate[dateKey];
                 const dateId = 'date_' + hexId + '_' + dateKey.replace(/-/g, '');
-                html += `<div style="margin: 5px 0; border-bottom: 1px solid #eee; padding: 5px 0;">`;
-                html += `<div style="cursor: pointer; font-weight: bold; color: #0078A8;" onclick="toggleTimes('${dateId}')">`;
-                html += `▶ ${dateKey} (${times.length} occurrence${times.length > 1 ? 's' : ''})`;
-                html += `</div>`;
-                html += `<div id="${dateId}" style="display: none; margin-left: 20px; margin-top: 5px; font-size: 0.9em; color: #666;">`;
+                html += '<div style="margin: 5px 0; border-bottom: 1px solid #eee; padding: 5px 0;">';
+                html += '<div style="cursor: pointer; font-weight: bold; color: #0078A8;" onclick="toggleTimes(\'' + dateId + '\')">';
+                html += '▶ ' + dateKey + ' (' + times.length + ' occurrence' + (times.length > 1 ? 's' : '') + ')';
+                html += '</div>';
+                html += '<div id="' + dateId + '" style="display: none; margin-left: 20px; margin-top: 5px; font-size: 0.9em; color: #666;">';
                 times.forEach(time => {
-                    html += `<div>${time}</div>`;
+                    html += '<div>' + time + '</div>';
                 });
-                html += `</div></div>`;
+                html += '</div></div>';
             });
             
-            html += `</div>`;
+            html += '</div>';
             
             document.getElementById("modalContent").innerHTML = html;
             document.getElementById("detailModal").classList.add("active");
@@ -643,7 +643,7 @@ html_content <- sprintf('<!DOCTYPE html>
             const div = L.DomUtil.create("div", "info legend");
             div.innerHTML = "<h4>Occurrences</h4>";
             [0, 2, 5, 10, 20, 40, 60, 80].forEach((g, i, a) => {
-                div.innerHTML += `<i style="background:${getColor(g + 1)}"></i>${g}${a[i + 1] ? "–" + a[i + 1] : "+"}` + "<br>";
+                div.innerHTML += '<i style="background:' + getColor(g + 1) + '"></i>' + g + (a[i + 1] ? '–' + a[i + 1] : '+') + '<br>';
             });
             return div;
         };
