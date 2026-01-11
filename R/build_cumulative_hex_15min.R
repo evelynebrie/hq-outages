@@ -453,234 +453,244 @@ num_days <- length(unique(files_dt$date))
 hex_size_km <- sprintf("%.1f", HEX_SIZE / 1000)
 current_date <- format(Sys.time(), "%Y-%m-%d %H:%M")
 
-# Create HTML with embedded daily data for filtering
-html_content <- sprintf('<!DOCTYPE html>
-<html lang="fr">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>HQ Outages - Cumulative Analysis</title>
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <link rel="stylesheet" href="https://unpkg.com/leaflet-control-geocoder@2.4.0/dist/Control.Geocoder.css" />
-    <style>
-        body { margin: 0; font-family: Arial, sans-serif; }
-        #map { height: 100vh; width: 100%%; }
-        .info { padding: 6px 8px; background: white; border-radius: 5px; box-shadow: 0 0 15px rgba(0,0,0,0.2); }
-        .info h4 { margin: 0 0 5px; color: #333; }
-        .legend { line-height: 18px; color: #555; }
-        .legend i { width: 18px; height: 18px; float: left; margin-right: 8px; opacity: 0.7; }
-        .controls { padding: 10px; background: white; border-radius: 5px; box-shadow: 0 0 15px rgba(0,0,0,0.2); }
-        .controls select { width: 100%%; margin: 5px 0; padding: 5px; }
-        .detail-link { color: #0078A8; cursor: pointer; text-decoration: underline; }
-        #detailModal { position: fixed; top: 50%%; left: 50%%; transform: translate(-50%%, -50%%); 
-                      background: white; padding: 20px; border-radius: 10px; box-shadow: 0 0 30px rgba(0,0,0,0.3);
-                      max-height: 80vh; overflow-y: auto; z-index: 10000; display: none; }
-        #detailModal.active { display: block; }
-        #modalOverlay { position: fixed; top: 0; left: 0; width: 100%%; height: 100%%; 
-                       background: rgba(0,0,0,0.5); z-index: 9999; display: none; }
-        #modalOverlay.active { display: block; }
-        .detail-table { border-collapse: collapse; width: 100%%; margin-top: 10px; }
-        .detail-table th, .detail-table td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-        .detail-table th { background-color: #f2f2f2; }
-    </style>
-</head>
-<body>
-    <div id="map"></div>
-    <div id="modalOverlay"></div>
-    <div id="detailModal">
-        <button onclick="closeDetailModal()" style="float: right;">✕</button>
-        <div id="modalContent"></div>
-    </div>
-    
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <script src="https://unpkg.com/leaflet-control-geocoder@2.4.0/dist/Control.Geocoder.js"></script>
-    <script>
-        const map = L.map("map").setView([46.8, -71.2], 7);
-        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-            attribution: "© OpenStreetMap"
-        }).addTo(map);
-        
-        let allData = { total: null, daily: {} };
-        let currentLayer = null;
-        
-        // Load total data
-        fetch("total/total_exposure.geojson")
-            .then(r => r.json())
-            .then(data => {
-                allData.total = data;
-                updateMap();
-            });
-        
-        // Load daily summaries
-        async function loadDailyData() {
-            const dates = %s;
-            for (const date of dates) {
-                try {
-                    const response = await fetch(`daily/daily_${date}.geojson`);
-                    allData.daily[date] = await response.json();
-                } catch (e) {}
-            }
-        }
-        loadDailyData();
-        
-        function getColor(d) {
-            return d > 80 ? "#67000d" : d > 60 ? "#a50f15" : d > 40 ? "#cb181d" :
-                   d > 20 ? "#ef3b2c" : d > 10 ? "#fb6a4a" : d > 5 ? "#fc9272" :
-                   d > 2 ? "#fcbba1" : "#fee5d9";
-        }
-        
-        function updateMap() {
-            const dateFilter = document.getElementById("dateSelect")?.value || "all";
-            let data = allData.total;
-            
-            if (dateFilter !== "all" && allData.daily[dateFilter]) {
-                data = allData.daily[dateFilter];
-            }
-            
-            if (!data) return;
-            
-            if (currentLayer) map.removeLayer(currentLayer);
-            
-            currentLayer = L.geoJSON(data, {
-                style: f => ({
-                    fillColor: getColor(f.properties.total_occurrences || f.properties.occurrences_today || 0),
-                    weight: 0.5,
-                    color: "#fff",
-                    fillOpacity: 0.75
-                }),
-                onEachFeature: (f, layer) => {
-                    const props = f.properties;
-                    const count = props.total_occurrences || props.occurrences_today || 0;
-                    layer.bindPopup(`
-                        <b>Hexagone #${props.hex_id}</b><br>
-                        <b>Occurrences:</b> ${count}<br>
-                        <b>Jours affectés:</b> ${props.days_affected || 1}<br>
-                        <b>Centroïde:</b> ${props.centroid_lat.toFixed(6)}, ${props.centroid_lon.toFixed(6)}<br>
-                        <a class="detail-link" onclick="showDetails(${props.hex_id})">Voir détails</a>
-                    `);
-                }
-            }).addTo(map);
-        }
-        
-        function showDetails(hexId) {
-            const feature = allData.total.features.find(f => f.properties.hex_id === hexId);
-            if (!feature) return;
-            
-            const props = feature.properties;
-            const datetimes = (props.all_datetimes || "").split(",").map(s => s.trim()).sort();
-            
-            // Group by date
-            const byDate = {};
-            datetimes.forEach(dt => {
-                const parts = dt.split(" ");
-                const date = parts[0];
-                const time = parts[1] || "";
-                if (!byDate[date]) byDate[date] = [];
-                byDate[date].push(time);
-            });
-            
-            const uniqueDates = Object.keys(byDate).sort();
-            
-            let html = "<h3>Hexagone #" + hexId + "</h3>";
-            html += "<p><strong>Total occurrences:</strong> " + props.total_occurrences + "</p>";
-            html += "<p><strong>Total number of affected days:</strong> " + uniqueDates.length + "</p>";
-            html += "<p style=\\"margin-top: 15px;\\"><strong>Affected days:</strong></p>";
-            html += "<div style=\\"max-height: 400px; overflow-y: auto;\\">";
-            
-            uniqueDates.forEach(function(dateKey) {
-                const times = byDate[dateKey];
-                const dateId = "date_" + hexId + "_" + dateKey.replace(/-/g, "");
-                html += "<div style=\\"margin: 5px 0; border-bottom: 1px solid #eee; padding: 5px 0;\\">";
-                html += "<div style=\\"cursor: pointer; font-weight: bold; color: #0078A8;\\" onclick=\\"toggleTimes(\'" + dateId + "\\')\\">"; 
-                html += "▶ " + dateKey + " (" + times.length + " occurrence" + (times.length > 1 ? "s" : "") + ")";
-                html += "</div>";
-                html += "<div id=\\"" + dateId + "\\" style=\\"display: none; margin-left: 20px; margin-top: 5px; font-size: 0.9em; color: #666;\\">";
-                times.forEach(function(time) {
-                    html += "<div>" + time + "</div>";
-                });
-                html += "</div></div>";
-            });
-            
-            html += "</div>";
-            
-            document.getElementById("modalContent").innerHTML = html;
-            document.getElementById("detailModal").classList.add("active");
-            document.getElementById("modalOverlay").classList.add("active");
-        }
-        
-        function toggleTimes(dateId) {
-            const elem = document.getElementById(dateId);
-            if (elem.style.display === "none") {
-                elem.style.display = "block";
-            } else {
-                elem.style.display = "none";
-            }
-        }
-        
-        function closeDetailModal() {
-            document.getElementById("detailModal").classList.remove("active");
-            document.getElementById("modalOverlay").classList.remove("active");
-        }
-        
-        document.getElementById("modalOverlay").onclick = closeDetailModal;
-        
-        // Add controls
-        const legend = L.control({position: "bottomright"});
-        legend.onAdd = () => {
-            const div = L.DomUtil.create("div", "info legend");
-            div.innerHTML = "<h4>Occurrences</h4>";
-            [0, 2, 5, 10, 20, 40, 60, 80].forEach((g, i, a) => {
-                div.innerHTML += `<i style="background:${getColor(g + 1)}"></i>${g}${a[i + 1] ? "–" + a[i + 1] : "+"}` + "<br>";
-            });
-            return div;
-        };
-        legend.addTo(map);
-        
-        const info = L.control({position: "topright"});
-        info.onAdd = () => {
-            const div = L.DomUtil.create("div", "info");
-            div.innerHTML = `
-                <h4>Pannes de courant cumulatives</h4>
-                <p><b>Taille des hexagones:</b> %s km</p>
-                <p><b>Jours analysés:</b> %d</p>
-                <p style="font-size:11px;color:#999;">Mise à jour: %s</p>
-            `;
-            return div;
-        };
-        info.addTo(map);
-        
-        const controls = L.control({position: "topleft"});
-        controls.onAdd = () => {
-            const div = L.DomUtil.create("div", "controls");
-            div.innerHTML = `
-                <h4>Filtres</h4>
-                <label>Date:</label>
-                <select id="dateSelect" onchange="updateMap()">
-                    <option value="all">Toutes (cumulatif)</option>
-                    %s
-                </select>
-            `;
-            return div;
-        };
-        controls.addTo(map);
-        
-        L.Control.geocoder({
-            defaultMarkGeocode: false,
-            placeholder: "Rechercher une adresse..."
-        }).on("markgeocode", function(e) {
-            map.fitBounds(e.geocode.bbox);
-        }).addTo(map);
-    </script>
-</body>
-</html>',
-  toJSON(unique_dates),
-  hex_size_km,
-  num_days,
-  current_date,
-  paste(sprintf('<option value="%%s">%%s</option>', unique_dates, unique_dates), collapse = "\n")
+# Build date options for select dropdown
+date_options <- paste(sprintf('<option value="%s">%s</option>', unique_dates, unique_dates), collapse = "\n                    ")
+
+# Build dates JSON array
+dates_json <- toJSON(unique_dates)
+
+# Use writeLines with a heredoc-style approach to avoid escaping issues
+html_lines <- c(
+'<!DOCTYPE html>',
+'<html lang="fr">',
+'<head>',
+'    <meta charset="UTF-8">',
+'    <meta name="viewport" content="width=device-width, initial-scale=1.0">',
+'    <title>HQ Outages - Cumulative Analysis</title>',
+'    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />',
+'    <link rel="stylesheet" href="https://unpkg.com/leaflet-control-geocoder@2.4.0/dist/Control.Geocoder.css" />',
+'    <style>',
+'        body { margin: 0; font-family: Arial, sans-serif; }',
+'        #map { height: 100vh; width: 100%; }',
+'        .info { padding: 6px 8px; background: white; border-radius: 5px; box-shadow: 0 0 15px rgba(0,0,0,0.2); }',
+'        .info h4 { margin: 0 0 5px; color: #333; }',
+'        .legend { line-height: 18px; color: #555; }',
+'        .legend i { width: 18px; height: 18px; float: left; margin-right: 8px; opacity: 0.7; }',
+'        .controls { padding: 10px; background: white; border-radius: 5px; box-shadow: 0 0 15px rgba(0,0,0,0.2); }',
+'        .controls select { width: 100%; margin: 5px 0; padding: 5px; }',
+'        .detail-link { color: #0078A8; cursor: pointer; text-decoration: underline; }',
+'        #detailModal { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); ',
+'                      background: white; padding: 20px; border-radius: 10px; box-shadow: 0 0 30px rgba(0,0,0,0.3);',
+'                      max-height: 80vh; overflow-y: auto; z-index: 10000; display: none; min-width: 300px; }',
+'        #detailModal.active { display: block; }',
+'        #modalOverlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; ',
+'                       background: rgba(0,0,0,0.5); z-index: 9999; display: none; }',
+'        #modalOverlay.active { display: block; }',
+'        .date-row { margin: 5px 0; border-bottom: 1px solid #eee; padding: 5px 0; }',
+'        .date-header { cursor: pointer; font-weight: bold; color: #0078A8; }',
+'        .times-list { display: none; margin-left: 20px; margin-top: 5px; font-size: 0.9em; color: #666; }',
+'    </style>',
+'</head>',
+'<body>',
+'    <div id="map"></div>',
+'    <div id="modalOverlay" onclick="closeDetailModal()"></div>',
+'    <div id="detailModal">',
+'        <button onclick="closeDetailModal()" style="float: right; border: none; background: none; font-size: 18px; cursor: pointer;">X</button>',
+'        <div id="modalContent"></div>',
+'    </div>',
+'    ',
+'    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>',
+'    <script src="https://unpkg.com/leaflet-control-geocoder@2.4.0/dist/Control.Geocoder.js"></script>',
+'    <script>',
+'        var map = L.map("map").setView([46.8, -71.2], 7);',
+'        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {',
+'            attribution: "OpenStreetMap"',
+'        }).addTo(map);',
+'        ',
+'        var allData = { total: null, daily: {} };',
+'        var currentLayer = null;',
+'        ',
+'        fetch("total/total_exposure.geojson")',
+'            .then(function(r) { return r.json(); })',
+'            .then(function(data) {',
+'                allData.total = data;',
+'                updateMap();',
+'            });',
+'        ',
+paste0('        var dates = ', dates_json, ';'),
+'        ',
+'        function loadDailyData() {',
+'            dates.forEach(function(date) {',
+'                fetch("daily/daily_" + date + ".geojson")',
+'                    .then(function(r) { return r.json(); })',
+'                    .then(function(data) { allData.daily[date] = data; })',
+'                    .catch(function(e) {});',
+'            });',
+'        }',
+'        loadDailyData();',
+'        ',
+'        function getColor(d) {',
+'            if (d > 80) return "#67000d";',
+'            if (d > 60) return "#a50f15";',
+'            if (d > 40) return "#cb181d";',
+'            if (d > 20) return "#ef3b2c";',
+'            if (d > 10) return "#fb6a4a";',
+'            if (d > 5) return "#fc9272";',
+'            if (d > 2) return "#fcbba1";',
+'            return "#fee5d9";',
+'        }',
+'        ',
+'        function updateMap() {',
+'            var dateSelect = document.getElementById("dateSelect");',
+'            var dateFilter = dateSelect ? dateSelect.value : "all";',
+'            var data = allData.total;',
+'            ',
+'            if (dateFilter !== "all" && allData.daily[dateFilter]) {',
+'                data = allData.daily[dateFilter];',
+'            }',
+'            ',
+'            if (!data) return;',
+'            ',
+'            if (currentLayer) map.removeLayer(currentLayer);',
+'            ',
+'            currentLayer = L.geoJSON(data, {',
+'                style: function(f) {',
+'                    var count = f.properties.total_occurrences || f.properties.occurrences_today || 0;',
+'                    return {',
+'                        fillColor: getColor(count),',
+'                        weight: 0.5,',
+'                        color: "#fff",',
+'                        fillOpacity: 0.75',
+'                    };',
+'                },',
+'                onEachFeature: function(f, layer) {',
+'                    var props = f.properties;',
+'                    var count = props.total_occurrences || props.occurrences_today || 0;',
+'                    var popupContent = "<b>Hexagone #" + props.hex_id + "</b><br>" +',
+'                        "<b>Occurrences:</b> " + count + "<br>" +',
+'                        "<b>Jours affectes:</b> " + (props.days_affected || 1) + "<br>" +',
+'                        "<b>Centroide:</b> " + props.centroid_lat.toFixed(6) + ", " + props.centroid_lon.toFixed(6) + "<br>" +',
+'                        "<a class=\'detail-link\' onclick=\'showDetails(" + props.hex_id + ")\'>Voir details</a>";',
+'                    layer.bindPopup(popupContent);',
+'                }',
+'            }).addTo(map);',
+'        }',
+'        ',
+'        function showDetails(hexId) {',
+'            var feature = null;',
+'            for (var i = 0; i < allData.total.features.length; i++) {',
+'                if (allData.total.features[i].properties.hex_id === hexId) {',
+'                    feature = allData.total.features[i];',
+'                    break;',
+'                }',
+'            }',
+'            if (!feature) return;',
+'            ',
+'            var props = feature.properties;',
+'            var allDatetimes = props.all_datetimes || "";',
+'            var datetimes = allDatetimes.split(",").map(function(s) { return s.trim(); }).sort();',
+'            ',
+'            var byDate = {};',
+'            datetimes.forEach(function(dt) {',
+'                var parts = dt.split(" ");',
+'                var date = parts[0];',
+'                var time = parts[1] || "";',
+'                if (!byDate[date]) byDate[date] = [];',
+'                byDate[date].push(time);',
+'            });',
+'            ',
+'            var uniqueDates = Object.keys(byDate).sort();',
+'            ',
+'            var html = "<h3>Hexagone #" + hexId + "</h3>";',
+'            html += "<p><strong>Total occurrences:</strong> " + props.total_occurrences + "</p>";',
+'            html += "<p><strong>Jours affectes:</strong> " + uniqueDates.length + "</p>";',
+'            html += "<p style=\'margin-top: 15px;\'><strong>Details par jour:</strong></p>";',
+'            html += "<div style=\'max-height: 400px; overflow-y: auto;\'>";',
+'            ',
+'            for (var j = 0; j < uniqueDates.length; j++) {',
+'                var dateKey = uniqueDates[j];',
+'                var times = byDate[dateKey];',
+'                html += "<div class=\'date-row\'>";',
+'                html += "<div class=\'date-header\' onclick=\'toggleTimes(this)\'>";',
+'                html += "&#9654; " + dateKey + " (" + times.length + " occurrence" + (times.length > 1 ? "s" : "") + ")";',
+'                html += "</div>";',
+'                html += "<div class=\'times-list\'>";',
+'                for (var k = 0; k < times.length; k++) {',
+'                    html += "<div>" + times[k] + "</div>";',
+'                }',
+'                html += "</div></div>";',
+'            }',
+'            ',
+'            html += "</div>";',
+'            ',
+'            document.getElementById("modalContent").innerHTML = html;',
+'            document.getElementById("detailModal").classList.add("active");',
+'            document.getElementById("modalOverlay").classList.add("active");',
+'        }',
+'        ',
+'        function toggleTimes(header) {',
+'            var timesList = header.nextElementSibling;',
+'            if (timesList.style.display === "block") {',
+'                timesList.style.display = "none";',
+'            } else {',
+'                timesList.style.display = "block";',
+'            }',
+'        }',
+'        ',
+'        function closeDetailModal() {',
+'            document.getElementById("detailModal").classList.remove("active");',
+'            document.getElementById("modalOverlay").classList.remove("active");',
+'        }',
+'        ',
+'        var legend = L.control({position: "bottomright"});',
+'        legend.onAdd = function() {',
+'            var div = L.DomUtil.create("div", "info legend");',
+'            var grades = [0, 2, 5, 10, 20, 40, 60, 80];',
+'            div.innerHTML = "<h4>Occurrences</h4>";',
+'            for (var i = 0; i < grades.length; i++) {',
+'                div.innerHTML += "<i style=\'background:" + getColor(grades[i] + 1) + "\'></i>" +',
+'                    grades[i] + (grades[i + 1] ? "-" + grades[i + 1] : "+") + "<br>";',
+'            }',
+'            return div;',
+'        };',
+'        legend.addTo(map);',
+'        ',
+'        var info = L.control({position: "topright"});',
+'        info.onAdd = function() {',
+'            var div = L.DomUtil.create("div", "info");',
+paste0('            div.innerHTML = "<h4>Pannes de courant cumulatives</h4>" +'),
+paste0('                "<p><b>Taille des hexagones:</b> ', hex_size_km, ' km</p>" +'),
+paste0('                "<p><b>Jours analyses:</b> ', num_days, '</p>" +'),
+paste0('                "<p style=\'font-size:11px;color:#999;\'>Mise a jour: ', current_date, '</p>";'),
+'            return div;',
+'        };',
+'        info.addTo(map);',
+'        ',
+'        var controls = L.control({position: "topleft"});',
+'        controls.onAdd = function() {',
+'            var div = L.DomUtil.create("div", "controls");',
+'            div.innerHTML = "<h4>Filtres</h4>" +',
+'                "<label>Date:</label>" +',
+'                "<select id=\'dateSelect\' onchange=\'updateMap()\'>" +',
+'                "<option value=\'all\'>Toutes (cumulatif)</option>" +',
+paste0('                "', gsub('"', "'", date_options), '" +'),
+'                "</select>";',
+'            return div;',
+'        };',
+'        controls.addTo(map);',
+'        ',
+'        L.Control.geocoder({',
+'            defaultMarkGeocode: false,',
+'            placeholder: "Rechercher une adresse..."',
+'        }).on("markgeocode", function(e) {',
+'            map.fitBounds(e.geocode.bbox);',
+'        }).addTo(map);',
+'    </script>',
+'</body>',
+'</html>'
 )
 
-writeLines(html_content, file.path(output_dir, "index.html"))
+writeLines(html_lines, file.path(output_dir, "index.html"))
 cat("  ✓ HTML visualization created\n")
 
 # ==================================================================
@@ -708,8 +718,6 @@ if (length(all_snapshots) > 30) {
 # FINAL SUMMARY
 # ==================================================================
 elapsed <- as.numeric(difftime(Sys.time(), start_time, units = "secs"))
-
-# Calculate total_files for summary
 total_files <- length(files)
 
 cat("\n========================================\n")
