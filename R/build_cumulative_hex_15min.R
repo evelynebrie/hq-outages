@@ -1,6 +1,9 @@
 # HQ Outages - 15-MINUTE SCRAPE VERSION with Timestamp Tracking
 # Adapted for data scraped every ~15 minutes with exact timestamps in filenames
 # Tracks: Each time a hex appears in an outage file, its score increases by 1
+#
+# IMPORTANT: This script uses POLYGON files (polygons_*.geojson) which contain
+# the actual outage areas, NOT the joined point files (outages_joined_full_*.geojson)
 
 suppressPackageStartupMessages({
   library(sf)
@@ -12,6 +15,7 @@ suppressPackageStartupMessages({
 cat("=== HQ Outages 15-Minute Scrape Analysis System ===\n")
 cat("Features:\n")
 cat("  • Processes files with exact timestamps (YYYYMMDDTHHMMSS)\n")
+cat("  • Uses POLYGON files for accurate area coverage\n")
 cat("  • Tracks cumulative outage frequency per hex\n")
 cat("  • Each hex appearance = +1 to total score\n")
 cat("  • Generates daily and monthly summaries\n")
@@ -45,16 +49,44 @@ dir.create(cache_dir, recursive = TRUE, showWarnings = FALSE)
 # ==================================================================
 cat("\n[1] Scanning and parsing input files...\n")
 
-# Look for files matching new naming pattern
-# Expected: outages_joined_full_YYYYMMDDTHHMMSS.geojson OR polygons_YYYYMMDDTHHMMSS.geojson
-files <- list.files(data_path, 
-                   pattern = "(outages_joined_full_|polygons_).*\\d{8}[Tt]\\d{6}.*\\.geojson$", 
-                   full.names = TRUE)
+# PRIORITY: Look for POLYGON files first (these contain the actual outage areas)
+# Pattern: polygons_YYYYMMDDTHHMMSS.geojson
+polygon_files <- list.files(data_path, 
+                            pattern = "^polygons_.*\\d{8}[Tt]\\d{6}.*\\.geojson$", 
+                            full.names = TRUE,
+                            recursive = TRUE)
 
-if (length(files) == 0) {
-  cat("⚠️  No files found matching pattern. Looking for files like:\n")
-  cat("   - outages_joined_full_YYYYMMDDTHHMMSS.geojson\n")
-  cat("   - polygons_YYYYMMDDTHHMMSS.geojson\n")
+cat(sprintf("  Found %d polygon files\n", length(polygon_files)))
+
+# Also check for joined files as fallback (these contain points, not ideal)
+joined_files <- list.files(data_path, 
+                           pattern = "^outages_joined_full_.*\\d{8}[Tt]\\d{6}.*\\.geojson$", 
+                           full.names = TRUE,
+                           recursive = TRUE)
+
+cat(sprintf("  Found %d joined point files (fallback)\n", length(joined_files)))
+
+# Prefer polygon files - they have the actual outage AREAS
+if (length(polygon_files) > 0) {
+  files <- polygon_files
+  cat("  ✓ Using POLYGON files (recommended - contains outage areas)\n")
+} else if (length(joined_files) > 0) {
+  files <- joined_files
+  cat("  ⚠ Using joined point files as fallback (less accurate)\n")
+  cat("    Note: Point files only show outage locations, not full affected areas\n")
+} else {
+  cat("⚠️  No files found matching patterns. Looking for:\n")
+  cat("   - polygons_YYYYMMDDTHHMMSS.geojson (preferred)\n")
+  cat("   - outages_joined_full_YYYYMMDDTHHMMSS.geojson (fallback)\n")
+  
+  # Debug: show what files ARE in the directory
+  all_files <- list.files(data_path, pattern = "\\.geojson$", full.names = FALSE, recursive = TRUE)
+  if (length(all_files) > 0) {
+    cat("\n  Files found in data directory:\n")
+    cat(paste("   -", head(all_files, 10), collapse = "\n"), "\n")
+    if (length(all_files) > 10) cat(sprintf("   ... and %d more\n", length(all_files) - 10))
+  }
+  
   stop("No input files found")
 }
 
@@ -83,7 +115,6 @@ if (length(new_files) == 0) {
   cat(sprintf("  • New files: 0\n"))
   cat("\nSkipping to summaries generation...\n")
   
-  # Jump to summaries section (we'll still need to regenerate summaries)
   files_to_process <- character()
 } else {
   cat(sprintf("\n📊 File Summary:\n"))
@@ -95,11 +126,6 @@ if (length(new_files) == 0) {
 }
 
 # Parse timestamps for ALL files (needed for summaries)
-files_dt_all <- data.frame(
-  file = files,
-  stringsAsFactors = FALSE
-)
-
 basenames <- basename(files)
 cat("  Sample filenames:\n")
 cat(paste("   ", head(basenames, 3), collapse = "\n"), "\n")
@@ -228,17 +254,48 @@ if (length(files_to_process) == 0) {
     }
   
   tryCatch({
-    # Read and process polygons
-    polys <- st_read(f, quiet = TRUE) %>%
-      st_transform(32618) %>%
-      st_simplify(dTolerance = SIMPLIFY, preserveTopology = FALSE)
+    # Read the file
+    input_data <- st_read(f, quiet = TRUE) %>%
+      st_transform(32618)
     
-    # Union all polygons in this file
-    if (nrow(polys) > 1) polys <- st_union(polys)
+    # Check geometry type
+    geom_types <- unique(st_geometry_type(input_data))
+    cat(sprintf("    File %s: %d features, types: %s\n", 
+                basename(f), nrow(input_data), paste(geom_types, collapse = ", ")))
     
-    # Find affected hexagons
-    hits <- st_intersects(hex_grid_reference, polys, sparse = TRUE)
-    affected_ids <- which(lengths(hits) > 0)
+    # Handle different geometry types
+    if (any(grepl("POLYGON", geom_types))) {
+      # It's polygon data - good! Union and find intersecting hexes
+      polys <- input_data %>%
+        st_simplify(dTolerance = SIMPLIFY, preserveTopology = FALSE)
+      
+      # Union all polygons in this file
+      if (nrow(polys) > 1) {
+        polys <- st_union(polys)
+      }
+      
+      # Find affected hexagons (any hex that INTERSECTS with the outage polygons)
+      hits <- st_intersects(hex_grid_reference, polys, sparse = TRUE)
+      affected_ids <- which(lengths(hits) > 0)
+      
+    } else if (any(grepl("POINT", geom_types))) {
+      # It's point data - less accurate, but we can buffer them
+      cat("    ⚠ Point data detected - buffering points for area estimation\n")
+      
+      # Buffer points by 500m to create approximate outage areas
+      points_buffered <- input_data %>%
+        st_buffer(dist = 500) %>%
+        st_union()
+      
+      hits <- st_intersects(hex_grid_reference, points_buffered, sparse = TRUE)
+      affected_ids <- which(lengths(hits) > 0)
+      
+    } else {
+      cat(sprintf("    ⚠ Unknown geometry type: %s, skipping\n", paste(geom_types, collapse = ", ")))
+      next
+    }
+    
+    cat(sprintf("    → %d hexagons affected\n", length(affected_ids)))
     
     # Update cumulative data for each affected hex
     for (hex_id in affected_ids) {
@@ -262,7 +319,7 @@ if (length(files_to_process) == 0) {
       }
     }
     
-    rm(polys, hits)
+    rm(input_data)
     gc(verbose = FALSE)
     
   }, error = function(e) {
@@ -303,19 +360,37 @@ current_outage_count <- 0
 
 # Process the most recent file to get current outages
 tryCatch({
-  current_polys <- st_read(most_recent_file, quiet = TRUE) %>%
-    st_transform(32618) %>%
-    st_simplify(dTolerance = SIMPLIFY, preserveTopology = FALSE)
+  current_data <- st_read(most_recent_file, quiet = TRUE) %>%
+    st_transform(32618)
   
-  cat(sprintf("  Read %d polygons from file\n", nrow(current_polys)))
+  cat(sprintf("  Read %d features from file\n", nrow(current_data)))
   
-  # Union all polygons
-  if (nrow(current_polys) > 1) {
-    current_polys <- st_union(current_polys)
+  # Check geometry type
+  geom_types <- unique(st_geometry_type(current_data))
+  
+  if (any(grepl("POLYGON", geom_types))) {
+    # Polygon data
+    current_polys <- current_data %>%
+      st_simplify(dTolerance = SIMPLIFY, preserveTopology = FALSE)
+    
+    if (nrow(current_polys) > 1) {
+      current_polys <- st_union(current_polys)
+    }
+    
+    current_hits <- st_intersects(hex_grid_reference, current_polys, sparse = TRUE)
+    
+  } else if (any(grepl("POINT", geom_types))) {
+    # Point data - buffer
+    current_polys <- current_data %>%
+      st_buffer(dist = 500) %>%
+      st_union()
+    
+    current_hits <- st_intersects(hex_grid_reference, current_polys, sparse = TRUE)
+    
+  } else {
+    stop("Unknown geometry type")
   }
   
-  # Find affected hexagons
-  current_hits <- st_intersects(hex_grid_reference, current_polys, sparse = TRUE)
   current_affected_ids <- which(lengths(current_hits) > 0)
   
   current_outage_count <- length(current_affected_ids)
@@ -352,21 +427,18 @@ tryCatch({
     st_write(current_output, output_file, delete_dsn = TRUE, quiet = TRUE)
     cat(sprintf("  ✓ Current outages saved: %d hexagons\n", nrow(current_output)))
   } else {
-    # No current outages - create empty GeoJSON with proper structure
+    # No current outages - create empty GeoJSON
     cat("  Creating empty current.geojson (no active outages)\n")
-    
-    # Create a valid empty GeoJSON file manually
     empty_geojson <- '{"type":"FeatureCollection","features":[]}'
     writeLines(empty_geojson, file.path(output_dir, "current.geojson"))
     cat("  ✓ Empty current.geojson created\n")
   }
   
-  rm(current_polys, current_hits)
+  rm(current_data)
   gc(verbose = FALSE)
   
 }, error = function(e) {
   cat(sprintf("  ⚠ Error processing current outages: %s\n", e$message))
-  # Create empty file on error
   empty_geojson <- '{"type":"FeatureCollection","features":[]}'
   writeLines(empty_geojson, file.path(output_dir, "current.geojson"))
 })
@@ -379,17 +451,14 @@ cat("\n[4] Generating daily summaries...\n")
 unique_dates <- unique(files_dt$date)
 cat(sprintf("  Processing %d unique dates...\n", length(unique_dates)))
 
-# Build daily summaries from cumulative data (much faster!)
+# Build daily summaries from cumulative data
 for (date in unique_dates) {
   cat(sprintf("  • %s...", date))
   
-  # Aggregate hex data for this date from cumulative data
   daily_hex_data <- list()
   
   for (hex_key in names(cumulative_hex_data)) {
     hex_info <- cumulative_hex_data[[hex_key]]
-    
-    # Find which datetimes belong to this date
     date_mask <- hex_info$dates == date
     
     if (any(date_mask)) {
@@ -400,7 +469,6 @@ for (date in unique_dates) {
     }
   }
   
-  # Create daily summary GeoJSON
   if (length(daily_hex_data) > 0) {
     hex_ids <- as.integer(names(daily_hex_data))
     daily_summary <- hex_grid_reference[hex_ids, ]
@@ -413,9 +481,7 @@ for (date in unique_dates) {
       cumulative_hex_data[[as.character(id)]]$count
     })
     
-    # Transform to WGS84 and save
-    daily_output <- daily_summary %>%
-      st_transform(4326)
+    daily_output <- daily_summary %>% st_transform(4326)
     
     output_file <- file.path(output_dir, "daily", sprintf("daily_%s.geojson", date))
     st_write(daily_output, output_file, delete_dsn = TRUE, quiet = TRUE)
@@ -435,19 +501,14 @@ cat("\n[5] Generating monthly summaries...\n")
 unique_months <- unique(files_dt$yearmon)
 cat(sprintf("  Processing %d unique months...\n", length(unique_months)))
 
-# Build monthly summaries from cumulative data (much faster!)
 for (month in unique_months) {
   cat(sprintf("  • %s...", month))
   
-  # Get dates in this month
   month_dates <- unique(files_dt$date[files_dt$yearmon == month])
-  
   monthly_hex_data <- list()
   
   for (hex_key in names(cumulative_hex_data)) {
     hex_info <- cumulative_hex_data[[hex_key]]
-    
-    # Find which datetimes belong to this month
     month_mask <- hex_info$dates %in% month_dates
     
     if (any(month_mask)) {
@@ -462,7 +523,6 @@ for (month in unique_months) {
     }
   }
   
-  # Create monthly summary
   if (length(monthly_hex_data) > 0) {
     hex_ids <- as.integer(names(monthly_hex_data))
     monthly_summary <- hex_grid_reference[hex_ids, ]
@@ -696,12 +756,11 @@ cat(';
                 isCurrent = true;
                 if (!data || !data.features) {
                     console.log("Current data not loaded yet, waiting...");
-                    // Show loading state or fall back to total
                     if (allData.total) {
                         data = allData.total;
                         isCurrent = false;
                     } else {
-                        return; // Nothing to show yet
+                        return;
                     }
                 }
             } else if (dateFilter === "all") {
@@ -722,7 +781,6 @@ cat(';
             if (currentLayer) map.removeLayer(currentLayer);
             
             if (data.features.length === 0) {
-                // No features to display
                 console.log("No features to display");
                 return;
             }
@@ -781,11 +839,10 @@ cat(';
                 byDate[date].push(time);
             });
             
-            var uniqueDates = Object.keys(byDate).sort().reverse(); // Most recent first
+            var uniqueDates = Object.keys(byDate).sort().reverse();
             
             var html = "<h3>Hexagone #" + hexId + "</h3>";
             
-            // Check if this hex is currently affected
             var isCurrentlyAffected = false;
             if (allData.current && allData.current.features) {
                 for (var c = 0; c < allData.current.features.length; c++) {
@@ -886,7 +943,6 @@ cat('</p>";
             selectHtml += "<option value=\\"current\\" selected>&#128308; Pannes en cours</option>";
             selectHtml += "<option value=\\"all\\">Historique complet</option>";
             selectHtml += "<optgroup label=\\"Par jour\\">";
-            // Show dates in reverse order (most recent first)
             var sortedDates = dates.slice().sort().reverse();
             sortedDates.forEach(function(d) {
                 selectHtml += "<option value=\\"" + d + "\\">" + d + "</option>";
@@ -905,7 +961,6 @@ cat('</p>";
             map.fitBounds(e.geocode.bbox);
         }).addTo(map);
         
-        // Update current count once data is loaded
         setTimeout(updateCurrentCount, 1000);
     </script>
 </body>
