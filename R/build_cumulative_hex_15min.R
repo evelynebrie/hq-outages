@@ -16,6 +16,7 @@ cat("  • Tracks cumulative outage frequency per hex\n")
 cat("  • Each hex appearance = +1 to total score\n")
 cat("  • Generates daily and monthly summaries\n")
 cat("  • Creates cumulative snapshots for time series analysis\n")
+cat("  • Shows CURRENT outages from most recent reading\n")
 cat(sprintf("\nStarting at: %s\n", format(Sys.time(), "%Y-%m-%d %H:%M:%S")))
 start_time <- Sys.time()
 
@@ -287,6 +288,83 @@ cat(sprintf("  ✓ Cache saved with %d hexagons and %d total files\n",
 cat("  ✓ Cache is safe even if later steps fail!\n")
 
 # ==================================================================
+# STEP 3.5: GENERATE CURRENT OUTAGES (from most recent file)
+# ==================================================================
+cat("\n[3.5] Generating current outages from most recent file...\n")
+
+# Get the most recent file
+most_recent_file <- files_dt$file[nrow(files_dt)]
+most_recent_datetime <- files_dt$datetime[nrow(files_dt)]
+cat(sprintf("  Most recent file: %s\n", basename(most_recent_file)))
+cat(sprintf("  Timestamp: %s\n", most_recent_datetime))
+
+# Process the most recent file to get current outages
+tryCatch({
+  current_polys <- st_read(most_recent_file, quiet = TRUE) %>%
+    st_transform(32618) %>%
+    st_simplify(dTolerance = SIMPLIFY, preserveTopology = FALSE)
+  
+  # Union all polygons
+  if (nrow(current_polys) > 1) current_polys <- st_union(current_polys)
+  
+  # Find affected hexagons
+  current_hits <- st_intersects(hex_grid_reference, current_polys, sparse = TRUE)
+  current_affected_ids <- which(lengths(current_hits) > 0)
+  
+  cat(sprintf("  ✓ Current outages affect %d hexagons\n", length(current_affected_ids)))
+  
+  # Create current outages GeoJSON
+  if (length(current_affected_ids) > 0) {
+    current_summary <- hex_grid_reference[current_affected_ids, ]
+    current_summary$is_current <- TRUE
+    current_summary$last_reading <- most_recent_datetime
+    
+    # Add cumulative data for each current hex
+    current_summary$total_occurrences <- sapply(current_affected_ids, function(id) {
+      hex_key <- as.character(id)
+      if (!is.null(cumulative_hex_data[[hex_key]])) {
+        cumulative_hex_data[[hex_key]]$count
+      } else {
+        1
+      }
+    })
+    
+    current_summary$days_affected <- sapply(current_affected_ids, function(id) {
+      hex_key <- as.character(id)
+      if (!is.null(cumulative_hex_data[[hex_key]])) {
+        length(unique(cumulative_hex_data[[hex_key]]$dates))
+      } else {
+        1
+      }
+    })
+    
+    current_output <- current_summary %>% st_transform(4326)
+    
+    output_file <- file.path(output_dir, "current.geojson")
+    st_write(current_output, output_file, delete_dsn = TRUE, quiet = TRUE)
+    cat(sprintf("  ✓ Current outages saved: %d hexagons\n", nrow(current_output)))
+  } else {
+    # No current outages - create empty file
+    empty_sf <- hex_grid_reference[0, ]
+    empty_sf$is_current <- logical()
+    empty_sf$last_reading <- character()
+    empty_sf$total_occurrences <- integer()
+    empty_sf$days_affected <- integer()
+    empty_output <- empty_sf %>% st_transform(4326)
+    
+    output_file <- file.path(output_dir, "current.geojson")
+    st_write(empty_output, output_file, delete_dsn = TRUE, quiet = TRUE)
+    cat("  ✓ No current outages (empty file created)\n")
+  }
+  
+  rm(current_polys, current_hits)
+  gc(verbose = FALSE)
+  
+}, error = function(e) {
+  cat(sprintf("  ⚠ Error processing current outages: %s\n", e$message))
+})
+
+# ==================================================================
 # STEP 4: GENERATE DAILY SUMMARIES (OPTIMIZED - USE EXISTING DATA)
 # ==================================================================
 cat("\n[4] Generating daily summaries...\n")
@@ -476,6 +554,7 @@ cat('<!DOCTYPE html>
         .legend i { width: 18px; height: 18px; float: left; margin-right: 8px; opacity: 0.7; }
         .controls { padding: 10px; background: white; border-radius: 5px; box-shadow: 0 0 15px rgba(0,0,0,0.2); }
         .controls select { width: 100%; margin: 5px 0; padding: 5px; }
+        .controls label { font-weight: bold; display: block; margin-top: 8px; }
         .detail-link { color: #0078A8; cursor: pointer; text-decoration: underline; }
         #detailModal { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); 
                       background: white; padding: 20px; border-radius: 10px; box-shadow: 0 0 30px rgba(0,0,0,0.3);
@@ -487,6 +566,8 @@ cat('<!DOCTYPE html>
         .date-row { margin: 5px 0; border-bottom: 1px solid #eee; padding: 5px 0; }
         .date-header { cursor: pointer; font-weight: bold; color: #0078A8; }
         .times-list { display: none; margin-left: 20px; margin-top: 5px; font-size: 0.9em; color: #666; }
+        .current-badge { background: #e74c3c; color: white; padding: 2px 8px; border-radius: 3px; font-size: 12px; margin-left: 5px; }
+        .current-option { font-weight: bold; color: #e74c3c; }
     </style>
 </head>
 <body>
@@ -505,15 +586,29 @@ cat('<!DOCTYPE html>
             attribution: "OpenStreetMap"
         }).addTo(map);
         
-        var allData = { total: null, daily: {} };
+        var allData = { total: null, daily: {}, current: null };
         var currentLayer = null;
+        var lastReadingTime = "";
         
+        // Load total data
         fetch("total/total_exposure.geojson")
             .then(function(r) { return r.json(); })
             .then(function(data) {
                 allData.total = data;
                 updateMap();
             });
+        
+        // Load current outages
+        fetch("current.geojson")
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                allData.current = data;
+                if (data.features && data.features.length > 0 && data.features[0].properties.last_reading) {
+                    lastReadingTime = data.features[0].properties.last_reading;
+                    updateCurrentCount();
+                }
+            })
+            .catch(function(e) { console.log("No current outages file"); });
         
         var dates = ', file = html_file, sep = "")
 
@@ -531,6 +626,18 @@ cat(';
         }
         loadDailyData();
         
+        function updateCurrentCount() {
+            var countSpan = document.getElementById("currentCount");
+            if (countSpan && allData.current) {
+                var count = allData.current.features ? allData.current.features.length : 0;
+                countSpan.textContent = count + " hexagones";
+            }
+            var timeSpan = document.getElementById("lastReading");
+            if (timeSpan && lastReadingTime) {
+                timeSpan.textContent = lastReadingTime;
+            }
+        }
+        
         function getColor(d) {
             if (d > 80) return "#67000d";
             if (d > 60) return "#a50f15";
@@ -546,8 +653,12 @@ cat(';
             var dateSelect = document.getElementById("dateSelect");
             var dateFilter = dateSelect ? dateSelect.value : "all";
             var data = allData.total;
+            var isCurrent = false;
             
-            if (dateFilter !== "all" && allData.daily[dateFilter]) {
+            if (dateFilter === "current") {
+                data = allData.current;
+                isCurrent = true;
+            } else if (dateFilter !== "all" && allData.daily[dateFilter]) {
                 data = allData.daily[dateFilter];
             }
             
@@ -557,19 +668,22 @@ cat(';
             
             currentLayer = L.geoJSON(data, {
                 style: function(f) {
-                    var count = f.properties.total_occurrences || f.properties.occurrences_today || 0;
+                    var count = f.properties.total_occurrences || f.properties.occurrences_today || 1;
                     return {
-                        fillColor: getColor(count),
-                        weight: 0.5,
-                        color: "#fff",
-                        fillOpacity: 0.75
+                        fillColor: isCurrent ? "#e74c3c" : getColor(count),
+                        weight: isCurrent ? 2 : 0.5,
+                        color: isCurrent ? "#c0392b" : "#fff",
+                        fillOpacity: isCurrent ? 0.8 : 0.75
                     };
                 },
                 onEachFeature: function(f, layer) {
                     var props = f.properties;
-                    var count = props.total_occurrences || props.occurrences_today || 0;
-                    var popupContent = "<b>Hexagone #" + props.hex_id + "</b><br>" +
-                        "<b>Occurrences:</b> " + count + "<br>" +
+                    var count = props.total_occurrences || props.occurrences_today || 1;
+                    var popupContent = "<b>Hexagone #" + props.hex_id + "</b>";
+                    if (isCurrent) {
+                        popupContent += "<span class=\\"current-badge\\">EN COURS</span>";
+                    }
+                    popupContent += "<br><b>Occurrences totales:</b> " + count + "<br>" +
                         "<b>Jours affectes:</b> " + (props.days_affected || 1) + "<br>" +
                         "<b>Centroide:</b> " + props.centroid_lat.toFixed(6) + ", " + props.centroid_lon.toFixed(6) + "<br>" +
                         "<a class=\\"detail-link\\" onclick=\\"showDetails(" + props.hex_id + ")\\">Voir details</a>";
@@ -604,6 +718,21 @@ cat(';
             var uniqueDates = Object.keys(byDate).sort();
             
             var html = "<h3>Hexagone #" + hexId + "</h3>";
+            
+            // Check if this hex is currently affected
+            var isCurrentlyAffected = false;
+            if (allData.current && allData.current.features) {
+                for (var c = 0; c < allData.current.features.length; c++) {
+                    if (allData.current.features[c].properties.hex_id === hexId) {
+                        isCurrentlyAffected = true;
+                        break;
+                    }
+                }
+            }
+            if (isCurrentlyAffected) {
+                html += "<p><span class=\\"current-badge\\">PANNE EN COURS</span></p>";
+            }
+            
             html += "<p><strong>Total occurrences:</strong> " + props.total_occurrences + "</p>";
             html += "<p><strong>Jours affectes:</strong> " + uniqueDates.length + "</p>";
             html += "<p style=\\"margin-top: 15px;\\"><strong>Details par jour:</strong></p>";
@@ -653,6 +782,7 @@ cat(';
                 div.innerHTML += "<i style=\\"background:" + getColor(grades[i] + 1) + "\\"></i>" +
                     grades[i] + (grades[i + 1] ? "-" + grades[i + 1] : "+") + "<br>";
             }
+            div.innerHTML += "<br><i style=\\"background:#e74c3c\\"></i>En cours";
             return div;
         };
         legend.addTo(map);
@@ -660,7 +790,7 @@ cat(';
         var info = L.control({position: "topright"});
         info.onAdd = function() {
             var div = L.DomUtil.create("div", "info");
-            div.innerHTML = "<h4>Pannes de courant cumulatives</h4>" +
+            div.innerHTML = "<h4>Pannes de courant HQ</h4>" +
                 "<p><b>Taille des hexagones:</b> ', file = html_file, sep = "")
 
 cat(hex_size_km, file = html_file, sep = "")
@@ -671,6 +801,8 @@ cat(' km</p>" +
 cat(num_days, file = html_file, sep = "")
 
 cat('</p>" +
+                "<p><b>Derniere lecture:</b> <span id=\\"lastReading\\">chargement...</span></p>" +
+                "<p><b>Pannes en cours:</b> <span id=\\"currentCount\\">chargement...</span></p>" +
                 "<p style=\\"font-size:11px;color:#999;\\">Mise a jour: ', file = html_file, sep = "")
 
 cat(current_date, file = html_file, sep = "")
@@ -683,7 +815,9 @@ cat('</p>";
         var controls = L.control({position: "topleft"});
         controls.onAdd = function() {
             var div = L.DomUtil.create("div", "controls");
-            var selectHtml = "<h4>Filtres</h4><label>Date:</label><select id=\\"dateSelect\\" onchange=\\"updateMap()\\"><option value=\\"all\\">Toutes (cumulatif)</option>";
+            var selectHtml = "<h4>Filtres</h4><label>Affichage:</label><select id=\\"dateSelect\\" onchange=\\"updateMap()\\">";
+            selectHtml += "<option value=\\"current\\" class=\\"current-option\\">🔴 Pannes en cours</option>";
+            selectHtml += "<option value=\\"all\\">Toutes (cumulatif)</option>";
             dates.forEach(function(d) {
                 selectHtml += "<option value=\\"" + d + "\\">" + d + "</option>";
             });
@@ -742,8 +876,10 @@ cat(sprintf("Unique hexagons affected: %d\n", length(cumulative_hex_data)))
 cat(sprintf("Date range: %s to %s\n", min(files_dt$date), max(files_dt$date)))
 cat(sprintf("Daily summaries: %d\n", length(unique_dates)))
 cat(sprintf("Monthly summaries: %d\n", length(unique_months)))
+cat(sprintf("Most recent reading: %s\n", most_recent_datetime))
 cat("========================================\n")
 cat("Output structure:\n")
+cat("  • public/current.geojson (CURRENT OUTAGES)\n")
 cat("  • public/total/total_exposure.geojson\n")
 cat("  • public/daily/daily_YYYY-MM-DD.geojson\n")
 cat("  • public/monthly/monthly_YYYY-MM.geojson\n")
