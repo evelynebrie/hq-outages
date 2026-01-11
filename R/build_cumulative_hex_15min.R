@@ -593,7 +593,7 @@ html_content <- sprintf('<!DOCTYPE html>
                 const times = byDate[dateKey];
                 const dateId = 'date_' + hexId + '_' + dateKey.replace(/-/g, '');
                 html += '<div style="margin: 5px 0; border-bottom: 1px solid #eee; padding: 5px 0;">';
-                html += '<div style="cursor: pointer; font-weight: bold; color: #0078A8;" onclick="toggleTimes(\'' + dateId + '\')">';
+                html += '<div style="cursor: pointer; font-weight: bold; color: #0078A8;" onclick="toggleTimes(\\'' + dateId + '\\')">';
                 html += '▶ ' + dateKey + ' (' + times.length + ' occurrence' + (times.length > 1 ? 's' : '') + ')';
                 html += '</div>';
                 html += '<div id="' + dateId + '" style="display: none; margin-left: 20px; margin-top: 5px; font-size: 0.9em; color: #666;">';
