@@ -110,7 +110,8 @@ jobs:
           echo ""
           
           # Calculate date 30 days ago for filtering
-          CUTOFF_DATE=$(date -d '30 days ago' +%Y%m%d 2>/dev/null || date -v-30d +%Y%m%d)
+          # Use a simple approach that works on all Linux systems
+          CUTOFF_DATE=$(date -d '30 days ago' '+%Y%m%d' 2>/dev/null || date -v-30d '+%Y%m%d' 2>/dev/null || echo "20250101")
           echo "   Files older than: $CUTOFF_DATE will be skipped"
           echo ""
           
@@ -184,7 +185,7 @@ jobs:
           
           TOTAL_COUNT=0
           if [ ! -z "$ALL_FILES" ]; then
-            TOTAL_COUNT=$(echo "$ALL_FILES" | wc -l")
+            TOTAL_COUNT=$(echo "$ALL_FILES" | wc -l)
           fi
           echo "📊 Total files found: $TOTAL_COUNT"
           
