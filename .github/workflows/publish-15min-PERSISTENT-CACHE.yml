@@ -98,6 +98,7 @@ jobs:
           echo "access_token=$ACCESS_TOKEN" >> $GITHUB_OUTPUT
 
       - name: Download files from Dropbox App Folder
+        timeout-minutes: 30
         env:
           DROPBOX_TOKEN: ${{ steps.get_token.outputs.access_token }}
         run: |
@@ -105,6 +106,12 @@ jobs:
           
           echo "📥 Listing files from Dropbox App Folder..."
           echo "   Path: /hq-outages (App Folder root)"
+          echo "   Strategy: Download only recent files (last 30 days) to avoid timeout"
+          echo ""
+          
+          # Calculate date 30 days ago for filtering
+          CUTOFF_DATE=$(date -d '30 days ago' +%Y%m%d 2>/dev/null || date -v-30d +%Y%m%d)
+          echo "   Files older than: $CUTOFF_DATE will be skipped"
           echo ""
           
           ALL_FILES=""
@@ -177,7 +184,7 @@ jobs:
           
           TOTAL_COUNT=0
           if [ ! -z "$ALL_FILES" ]; then
-            TOTAL_COUNT=$(echo "$ALL_FILES" | wc -l)
+            TOTAL_COUNT=$(echo "$ALL_FILES" | wc -l")
           fi
           echo "📊 Total files found: $TOTAL_COUNT"
           
@@ -187,47 +194,58 @@ jobs:
             exit 0
           fi
           
-          # ============================================================
-          # IMPORTANT: Download POLYGON files (actual outage areas)
-          # These contain the polygon boundaries, not just point markers
-          # ============================================================
+          # Look for POLYGON files first (preferred - contains outage AREAS)
           echo ""
-          echo "🔍 Looking for POLYGON files (polygons_*.geojson) - these contain outage AREAS"
-          
-          POLYGON_FILES=$(echo "$ALL_FILES" | grep -E "polygons_[0-9]{8}[Tt][0-9]{6}\.geojson$" || true)
+          echo "🔍 Looking for POLYGON files (polygons_*.geojson) – these contain outage AREAS"
+          POLYGON_FILES=$(echo "$ALL_FILES" | grep "polygons_" | grep -E "[0-9]{8}[Tt][0-9]{6}\.geojson$" || true)
           POLYGON_COUNT=$(echo "$POLYGON_FILES" | grep -v '^$' | wc -l)
-          
           echo "📍 Polygon files found: $POLYGON_COUNT"
           
-          # Also check for joined files as fallback
+          # Also check for joined point files (fallback)
           echo ""
           echo "🔍 Also checking for joined point files (fallback)"
-          JOINED_FILES=$(echo "$ALL_FILES" | grep "outages_joined_full_" | grep -E "[0-9]{8}[Tt][0-9]{6}\.geojson$" || true)
-          JOINED_COUNT=$(echo "$JOINED_FILES" | grep -v '^$' | wc -l)
-          echo "📍 Joined point files found: $JOINED_COUNT"
+          POINT_FILES=$(echo "$ALL_FILES" | grep "outages_joined_full_" | grep -E "[0-9]{8}[Tt][0-9]{6}\.geojson$" || true)
+          POINT_COUNT=$(echo "$POINT_FILES" | grep -v '^$' | wc -l)
+          echo "📍 Joined point files found: $POINT_COUNT"
           
-          # Prefer polygon files, fall back to joined files
+          # Use polygon files if available, otherwise use points
           if [ "$POLYGON_COUNT" -gt 0 ]; then
             echo ""
-            echo "✅ Using POLYGON files (recommended - contains actual outage areas)"
+            echo "✅ Using POLYGON files (recommended – contains actual outage areas)"
             GEOJSON_FILES="$POLYGON_FILES"
             FILE_COUNT=$POLYGON_COUNT
-          elif [ "$JOINED_COUNT" -gt 0 ]; then
+          elif [ "$POINT_COUNT" -gt 0 ]; then
             echo ""
-            echo "⚠️  No polygon files found, using joined point files as fallback"
-            echo "   Note: Point files are less accurate - they only show markers, not full areas"
-            GEOJSON_FILES="$JOINED_FILES"
-            FILE_COUNT=$JOINED_COUNT
+            echo "⚠️  Using point files (fallback - no polygons available)"
+            GEOJSON_FILES="$POINT_FILES"
+            FILE_COUNT=$POINT_COUNT
           else
             echo ""
-            echo "❌ No matching files found!"
+            echo "❌ No suitable files found"
             echo ""
-            echo "Sample of all files found (first 20):"
-            echo "$ALL_FILES" | head -20
-            echo ""
-            echo "Expected patterns:"
-            echo "  - polygons_YYYYMMDDTHHMMSS.geojson (preferred)"
-            echo "  - outages_joined_full_YYYYMMDDTHHMMSS.geojson (fallback)"
+            echo "Sample of files found (first 10):"
+            echo "$ALL_FILES" | head -10
+            mkdir -p data/daily
+            exit 0
+          fi
+          
+          # Filter for recent files only (last 30 days)
+          echo ""
+          echo "🗓️  Filtering for files from last 30 days (cutoff: $CUTOFF_DATE)..."
+          RECENT_FILES=$(echo "$GEOJSON_FILES" | while read -r file; do
+            if [ -z "$file" ]; then continue; fi
+            # Extract date from filename (YYYYMMDD)
+            FILE_DATE=$(echo "$file" | grep -oE "[0-9]{8}[Tt][0-9]{6}" | cut -c1-8)
+            if [ -n "$FILE_DATE" ] && [ "$FILE_DATE" -ge "$CUTOFF_DATE" ]; then
+              echo "$file"
+            fi
+          done)
+          
+          RECENT_COUNT=$(echo "$RECENT_FILES" | grep -v '^$' | wc -l)
+          echo "📊 Recent files to download: $RECENT_COUNT (filtered from $FILE_COUNT total)"
+          
+          if [ "$RECENT_COUNT" -eq 0 ]; then
+            echo "⚠️  No recent files found - using cache only"
             mkdir -p data/daily
             exit 0
           fi
@@ -235,7 +253,7 @@ jobs:
           # Show sample
           echo ""
           echo "Sample files to download (first 5):"
-          echo "$GEOJSON_FILES" | head -5
+          echo "$RECENT_FILES" | head -5
           echo ""
           
           mkdir -p data/daily
@@ -243,8 +261,9 @@ jobs:
           CACHED=0
           NEW=0
           SKIPPED=0
+          FAILED=0
           
-          # Download files
+          # Download files with retry logic
           while IFS= read -r file; do
             [ -z "$file" ] && continue
             
@@ -257,48 +276,47 @@ jobs:
               continue
             fi
             
-            # Download new file
-            if curl -s -f -X POST https://content.dropboxapi.com/2/files/download \
-              -H "Authorization: Bearer $DROPBOX_TOKEN" \
-              -H "Dropbox-API-Arg: {\"path\": \"$file\"}" \
-              -o "$local_path" && [ -s "$local_path" ]; then
-              NEW=$((NEW + 1))
-              [ $NEW -le 10 ] && echo "  ✓ Downloaded: $filename"
-            else
-              SKIPPED=$((SKIPPED + 1))
-              [ $SKIPPED -le 5 ] && echo "  ✗ Failed: $filename"
+            # Download with retry (up to 3 attempts)
+            SUCCESS=false
+            for attempt in 1 2 3; do
+              if curl -s -f -X POST https://content.dropboxapi.com/2/files/download \
+                -H "Authorization: Bearer $DROPBOX_TOKEN" \
+                -H "Dropbox-API-Arg: {\"path\": \"$file\"}" \
+                -o "$local_path" 2>/dev/null && [ -s "$local_path" ]; then
+                NEW=$((NEW + 1))
+                SUCCESS=true
+                [ $NEW -le 10 ] && echo "  ✓ Downloaded: $filename"
+                break
+              else
+                if [ $attempt -lt 3 ]; then
+                  sleep 2  # Wait before retry
+                fi
+              fi
+            done
+            
+            if [ "$SUCCESS" = false ]; then
+              FAILED=$((FAILED + 1))
+              [ $FAILED -le 5 ] && echo "  ✗ Failed after 3 attempts: $filename"
+              rm -f "$local_path"  # Clean up partial download
             fi
             
-            # Rate limiting: pause briefly every 10 downloads
-            if [ $((NEW % 10)) -eq 0 ] && [ $NEW -gt 0 ]; then
-              sleep 1
+            # Rate limiting: pause every 20 downloads
+            if [ $((NEW % 20)) -eq 0 ] && [ $NEW -gt 0 ]; then
+              sleep 2
             fi
-          done <<< "$GEOJSON_FILES"
+          done <<< "$RECENT_FILES"
           
           echo ""
           echo "📊 Download Summary:"
           echo "  • Cached (already present): $CACHED"
           echo "  • Newly downloaded: $NEW"
-          echo "  • Skipped/failed: $SKIPPED"
+          echo "  • Failed: $FAILED"
           echo "  • Total available: $(($CACHED + $NEW))"
           
-          # Show what we have
-          echo ""
-          echo "📁 Files in data/daily/:"
-          ls -la data/daily/*.geojson 2>/dev/null | head -10 || echo "  No files yet"
-
-      - name: Clear old cache if rebuilding (ONE-TIME FIX)
-        run: |
-          # Check if we need to rebuild from polygon data
-          # This clears the cache if it was built from point data
-          if [ -f "cache/cumulative_hex_data.rds" ]; then
-            # Check if we have polygon files now
-            POLYGON_COUNT=$(ls data/daily/polygons_*.geojson 2>/dev/null | wc -l)
-            if [ "$POLYGON_COUNT" -gt 0 ]; then
-              echo "🔄 Polygon files detected - clearing old cache to rebuild with correct data"
-              rm -f cache/cumulative_hex_data.rds
-              echo "✅ Cache cleared - will rebuild from polygon data"
-            fi
+          if [ $(($CACHED + $NEW)) -eq 0 ]; then
+            echo ""
+            echo "❌ No files available for processing"
+            exit 1
           fi
 
       - name: Run 15-minute scrape analysis (processing only)
@@ -313,18 +331,10 @@ jobs:
           FILE_COUNT=$(find data/daily -name "*.geojson" 2>/dev/null | wc -l)
           echo "📊 Processing $FILE_COUNT total files"
           
-          # Show file types
-          echo ""
-          echo "📁 File breakdown:"
-          POLYGON_COUNT=$(ls data/daily/polygons_*.geojson 2>/dev/null | wc -l || echo 0)
-          JOINED_COUNT=$(ls data/daily/outages_joined_full_*.geojson 2>/dev/null | wc -l || echo 0)
-          echo "  • Polygon files: $POLYGON_COUNT"
-          echo "  • Joined point files: $JOINED_COUNT"
-          
           if [ -f "cache/cumulative_hex_data.rds" ]; then
             echo "✅ Cache file found - will process only new files!"
           else
-            echo "ℹ️  No cache - will process all files (first run or rebuild)"
+            echo "ℹ️  No cache - will process all files (first run)"
           fi
           
           if [ "$FILE_COUNT" -eq 0 ]; then
@@ -333,7 +343,6 @@ jobs:
           fi
           
           # Show sample of files being processed
-          echo ""
           echo "Sample files:"
           ls -lh data/daily/*.geojson 2>/dev/null | head -5
           
