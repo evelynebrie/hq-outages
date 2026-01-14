@@ -102,7 +102,7 @@ jobs:
         env:
           DROPBOX_TOKEN: ${{ steps.get_token.outputs.access_token }}
         run: |
-          set -eo pipefail
+          set -eo  # Remove pipefail - it causes issues with head/tail commands
           
           echo "📥 Listing files from Dropbox App Folder..."
           echo "   Path: /hq-outages (App Folder root)"
@@ -110,8 +110,8 @@ jobs:
           echo ""
           
           # Calculate date 30 days ago for filtering
-          # Use a simple approach that works on all Linux systems
-          CUTOFF_DATE=$(date -d '30 days ago' '+%Y%m%d' 2>/dev/null || date -v-30d '+%Y%m%d' 2>/dev/null || echo "20250101")
+          # Simple approach: just use a fixed cutoff date (30 days before today)
+          CUTOFF_DATE=$(date -d "30 days ago" +%Y%m%d 2>/dev/null || date -v-30d +%Y%m%d 2>/dev/null || echo "20251215")
           echo "   Files older than: $CUTOFF_DATE will be skipped"
           echo ""
           
