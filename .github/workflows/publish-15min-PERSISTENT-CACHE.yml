@@ -106,13 +106,14 @@ jobs:
           
           echo "📥 Listing files from Dropbox App Folder..."
           echo "   Path: /hq-outages (App Folder root)"
-          echo "   Strategy: Download only recent files (last 30 days) to avoid timeout"
+          echo "   Strategy: Download only 2026 data (from January 1, 2026 onwards)"
           echo ""
           
-          # Calculate date 30 days ago for filtering
-          # Simple approach: just use a fixed cutoff date (30 days before today)
-          CUTOFF_DATE=$(date -d "30 days ago" +%Y%m%d 2>/dev/null || date -v-30d +%Y%m%d 2>/dev/null || echo "20251215")
-          echo "   Files older than: $CUTOFF_DATE will be skipped"
+          # Calculate date for filtering - only track data from 2026 onwards
+          # Fixed cutoff: January 1, 2026
+          CUTOFF_DATE="20260101"
+          echo "   Files older than: $CUTOFF_DATE (January 1, 2026) will be skipped"
+          echo "   Only tracking 2026 data"
           echo ""
           
           ALL_FILES=""
@@ -230,9 +231,9 @@ jobs:
             exit 0
           fi
           
-          # Filter for recent files only (last 30 days)
+          # Filter for 2026 files only
           echo ""
-          echo "🗓️  Filtering for files from last 30 days (cutoff: $CUTOFF_DATE)..."
+          echo "🗓️  Filtering for files from 2026 (cutoff: $CUTOFF_DATE)..."
           RECENT_FILES=$(echo "$GEOJSON_FILES" | while read -r file; do
             if [ -z "$file" ]; then continue; fi
             # Extract date from filename (YYYYMMDD)
@@ -243,10 +244,10 @@ jobs:
           done)
           
           RECENT_COUNT=$(echo "$RECENT_FILES" | grep -v '^$' | wc -l)
-          echo "📊 Recent files to download: $RECENT_COUNT (filtered from $FILE_COUNT total)"
+          echo "📊 2026 files to download: $RECENT_COUNT (filtered from $FILE_COUNT total)"
           
           if [ "$RECENT_COUNT" -eq 0 ]; then
-            echo "⚠️  No recent files found - using cache only"
+            echo "⚠️  No 2026 files found - using cache only"
             mkdir -p data/daily
             exit 0
           fi
