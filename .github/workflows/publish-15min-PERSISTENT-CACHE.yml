@@ -110,8 +110,8 @@ jobs:
           echo ""
           
           # Calculate date for filtering - only track data from 2026 onwards
-          # Fixed cutoff: January 1, 2026
-          CUTOFF_DATE="20260101"
+          # Fixed cutoff: January 10th, 2026
+          CUTOFF_DATE="20260110"
           echo "   Files older than: $CUTOFF_DATE (January 1, 2026) will be skipped"
           echo "   Only tracking 2026 data"
           echo ""
