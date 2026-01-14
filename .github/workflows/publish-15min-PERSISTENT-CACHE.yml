@@ -63,8 +63,9 @@ jobs:
         uses: actions/cache@v3
         with:
           path: data/daily/
-          key: hq-15min-data-${{ github.run_id }}
-          restore-keys: hq-15min-data-
+          key: hq-15min-data-2026-${{ github.run_number }}
+          restore-keys: |
+            hq-15min-data-2026-
 
       - name: Restore hex grid cache
         uses: actions/cache@v3
@@ -110,8 +111,8 @@ jobs:
           echo ""
           
           # Calculate date for filtering - only track data from 2026 onwards
-          # Fixed cutoff: January 10th, 2026
-          CUTOFF_DATE="20260110"
+          # Fixed cutoff: January 1, 2026
+          CUTOFF_DATE="20260101"
           echo "   Files older than: $CUTOFF_DATE (January 1, 2026) will be skipped"
           echo "   Only tracking 2026 data"
           echo ""
@@ -264,6 +265,11 @@ jobs:
           NEW=0
           SKIPPED=0
           FAILED=0
+          
+          # Count existing files before download
+          EXISTING_COUNT=$(find data/daily -name "*.geojson" 2>/dev/null | wc -l)
+          echo "📂 Files already in cache: $EXISTING_COUNT"
+          echo ""
           
           # Download files with retry logic
           while IFS= read -r file; do
