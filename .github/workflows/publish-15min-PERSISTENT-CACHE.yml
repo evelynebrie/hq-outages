@@ -3,7 +3,7 @@ name: Process 15-Minute HQ Outage Data with Persistent Cache
 on:
   schedule:
     # Run every hour to process new 15-minute scraped data
-    - cron: '0 * * * *'
+    - cron: '*/15 * * * *'
   workflow_dispatch:
 
 permissions:
