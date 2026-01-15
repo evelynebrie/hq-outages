@@ -37,7 +37,7 @@ cache_file <- file.path(cache_dir, "cumulative_hex_data.rds")
 
 HEX_SIZE <- 1000     # Hex size in meters
 SIMPLIFY <- 200      # Simplification tolerance
-BUFFER_SMALL_POLYS <- 100  # FIXED: Buffer small polygons by 100m to ensure hex detection
+BUFFER_SMALL_POLYS <- 250  # FIXED: Buffer small polygons by 250m to ensure hex detection (increased from 100m)
 
 # Create output directories
 dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
@@ -272,19 +272,28 @@ if (length(files_to_process) == 0) {
       polys <- input_data %>%
         st_simplify(dTolerance = SIMPLIFY, preserveTopology = FALSE)
       
-      # Union all polygons in this file
-      if (nrow(polys) > 1) {
-        polys <- st_union(polys)
+      # FIXED: Buffer EACH small polygon BEFORE union
+      # This ensures tiny polygons don't get lost
+      hex_area <- HEX_SIZE * HEX_SIZE * 0.866  # Approximate hex area
+      small_count <- 0
+      
+      for (j in 1:nrow(polys)) {
+        poly_area <- as.numeric(st_area(polys[j, ]))
+        # More aggressive: buffer if less than 3x hex area
+        if (poly_area < (hex_area * 3)) {
+          polys[j, ] <- st_buffer(polys[j, ], dist = BUFFER_SMALL_POLYS)
+          small_count <- small_count + 1
+        }
       }
       
-      # FIXED: Buffer small polygons to ensure they intersect hexes
-      poly_area <- as.numeric(st_area(polys))
-      hex_area <- HEX_SIZE * HEX_SIZE * 0.866  # Approximate hex area
+      if (small_count > 0) {
+        cat(sprintf("      (buffered %d small polygon%s)\n", small_count, 
+                    ifelse(small_count > 1, "s", "")))
+      }
       
-      if (poly_area < (hex_area * 1.5)) {
-        # Small polygon detected - buffer it to ensure detection
-        polys <- st_buffer(polys, dist = BUFFER_SMALL_POLYS)
-        cat("      (buffered small polygon)\n")
+      # Union all polygons AFTER buffering
+      if (nrow(polys) > 1) {
+        polys <- st_union(polys)
       }
       
       # Find affected hexagons (any hex that INTERSECTS with the outage polygons)
@@ -386,17 +395,27 @@ tryCatch({
     current_polys <- current_data %>%
       st_simplify(dTolerance = SIMPLIFY, preserveTopology = FALSE)
     
-    if (nrow(current_polys) > 1) {
-      current_polys <- st_union(current_polys)
+    # FIXED: Buffer EACH small polygon BEFORE union
+    hex_area <- HEX_SIZE * HEX_SIZE * 0.866
+    small_count <- 0
+    
+    for (j in 1:nrow(current_polys)) {
+      poly_area <- as.numeric(st_area(current_polys[j, ]))
+      # More aggressive: buffer if less than 3x hex area
+      if (poly_area < (hex_area * 3)) {
+        current_polys[j, ] <- st_buffer(current_polys[j, ], dist = BUFFER_SMALL_POLYS)
+        small_count <- small_count + 1
+      }
     }
     
-    # FIXED: Buffer small polygons
-    poly_area <- as.numeric(st_area(current_polys))
-    hex_area <- HEX_SIZE * HEX_SIZE * 0.866
+    if (small_count > 0) {
+      cat(sprintf("  (buffered %d small current polygon%s)\n", small_count,
+                  ifelse(small_count > 1, "s", "")))
+    }
     
-    if (poly_area < (hex_area * 1.5)) {
-      current_polys <- st_buffer(current_polys, dist = BUFFER_SMALL_POLYS)
-      cat("  (buffered small current outage polygon)\n")
+    # Union AFTER buffering
+    if (nrow(current_polys) > 1) {
+      current_polys <- st_union(current_polys)
     }
     
     current_hits <- st_intersects(hex_grid_reference, current_polys, sparse = TRUE)
@@ -636,69 +655,64 @@ cat('<!DOCTYPE html>
     <link rel="stylesheet" href="https://unpkg.com/leaflet-control-geocoder@2.4.0/dist/Control.Geocoder.css" />
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
     <style>
         * { box-sizing: border-box; }
         body { margin: 0; font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
         #map { height: 100vh; width: 100%; }
         
-        /* Main title banner */
+        /* Main title banner - minimalist */
         .main-title {
             position: absolute;
-            top: 15px;
+            top: 20px;
             left: 50%;
             transform: translateX(-50%);
             z-index: 1000;
-            background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%);
-            color: white;
-            padding: 16px 32px;
-            border-radius: 12px;
-            box-shadow: 0 8px 24px rgba(0,0,0,0.25);
-            font-size: 20px;
-            font-weight: 700;
-            letter-spacing: -0.02em;
-            text-align: center;
-        }
-        
-        /* Enhanced controls box */
-        .controls {
-            padding: 16px;
-            background: white;
-            border-radius: 12px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-            min-width: 240px;
-        }
-        .controls h4 {
-            margin: 0 0 12px 0;
-            color: #1e40af;
+            background: rgba(255, 255, 255, 0.95);
+            color: #1a1a1a;
+            padding: 14px 28px;
+            border-radius: 6px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.12);
             font-size: 16px;
             font-weight: 600;
-            display: flex;
-            align-items: center;
-            gap: 8px;
+            letter-spacing: -0.01em;
+            text-align: center;
+            border: 1px solid #e5e5e5;
         }
-        .controls h4::before {
-            content: "⚙️";
-            font-size: 18px;
+        
+        /* Clean controls box */
+        .controls {
+            padding: 14px;
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 6px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.12);
+            min-width: 220px;
+            border: 1px solid #e5e5e5;
+        }
+        .controls h4 {
+            margin: 0 0 10px 0;
+            color: #1a1a1a;
+            font-size: 14px;
+            font-weight: 600;
         }
         .controls select {
             width: 100%;
-            padding: 10px 12px;
-            border: 2px solid #e5e7eb;
-            border-radius: 8px;
-            font-size: 14px;
+            padding: 8px 10px;
+            border: 1px solid #d4d4d4;
+            border-radius: 4px;
+            font-size: 13px;
             font-family: inherit;
             background: white;
             cursor: pointer;
-            transition: all 0.2s;
+            transition: border-color 0.2s;
+            color: #1a1a1a;
         }
         .controls select:hover {
-            border-color: #3b82f6;
+            border-color: #a3a3a3;
         }
         .controls select:focus {
             outline: none;
-            border-color: #2563eb;
-            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+            border-color: #525252;
         }
         
         /* Enhanced info box */
