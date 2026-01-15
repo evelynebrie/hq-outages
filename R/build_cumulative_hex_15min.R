@@ -631,40 +631,261 @@ cat('<!DOCTYPE html>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>HQ Outages - Pannes Hydro-Quebec</title>
+    <title>Pannes de courant cumulatives au Québec</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <link rel="stylesheet" href="https://unpkg.com/leaflet-control-geocoder@2.4.0/dist/Control.Geocoder.css" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
-        body { margin: 0; font-family: Arial, sans-serif; }
+        * { box-sizing: border-box; }
+        body { margin: 0; font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
         #map { height: 100vh; width: 100%; }
-        .info { padding: 6px 8px; background: white; border-radius: 5px; box-shadow: 0 0 15px rgba(0,0,0,0.2); }
-        .info h4 { margin: 0 0 5px; color: #333; }
-        .legend { line-height: 18px; color: #555; }
-        .legend i { width: 18px; height: 18px; float: left; margin-right: 8px; opacity: 0.7; }
-        .controls { padding: 10px; background: white; border-radius: 5px; box-shadow: 0 0 15px rgba(0,0,0,0.2); }
-        .controls select { width: 100%; margin: 5px 0; padding: 5px; }
-        .controls label { font-weight: bold; display: block; margin-top: 8px; }
-        .detail-link { color: #0078A8; cursor: pointer; text-decoration: underline; }
-        #detailModal { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); 
-                      background: white; padding: 20px; border-radius: 10px; box-shadow: 0 0 30px rgba(0,0,0,0.3);
-                      max-height: 80vh; overflow-y: auto; z-index: 10000; display: none; min-width: 300px; }
+        
+        /* Main title banner */
+        .main-title {
+            position: absolute;
+            top: 15px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 1000;
+            background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%);
+            color: white;
+            padding: 16px 32px;
+            border-radius: 12px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.25);
+            font-size: 20px;
+            font-weight: 700;
+            letter-spacing: -0.02em;
+            text-align: center;
+        }
+        
+        /* Enhanced controls box */
+        .controls {
+            padding: 16px;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            min-width: 240px;
+        }
+        .controls h4 {
+            margin: 0 0 12px 0;
+            color: #1e40af;
+            font-size: 16px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .controls h4::before {
+            content: "⚙️";
+            font-size: 18px;
+        }
+        .controls select {
+            width: 100%;
+            padding: 10px 12px;
+            border: 2px solid #e5e7eb;
+            border-radius: 8px;
+            font-size: 14px;
+            font-family: inherit;
+            background: white;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .controls select:hover {
+            border-color: #3b82f6;
+        }
+        .controls select:focus {
+            outline: none;
+            border-color: #2563eb;
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+        }
+        
+        /* Enhanced info box */
+        .info {
+            padding: 16px;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            min-width: 260px;
+        }
+        .info h4 {
+            margin: 0 0 14px 0;
+            color: #1e40af;
+            font-size: 16px;
+            font-weight: 600;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #e5e7eb;
+        }
+        .info-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 0;
+            border-bottom: 1px solid #f3f4f6;
+        }
+        .info-row:last-child {
+            border-bottom: none;
+        }
+        .info-label {
+            font-weight: 500;
+            color: #6b7280;
+            font-size: 13px;
+        }
+        .info-value {
+            font-weight: 600;
+            color: #111827;
+            font-size: 14px;
+        }
+        
+        /* Legend styling */
+        .legend {
+            line-height: 24px;
+            color: #374151;
+            padding: 16px;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+        .legend h4 {
+            margin: 0 0 12px 0;
+            color: #1e40af;
+            font-size: 16px;
+            font-weight: 600;
+        }
+        .legend i {
+            width: 20px;
+            height: 20px;
+            float: left;
+            margin-right: 10px;
+            opacity: 0.85;
+            border-radius: 3px;
+        }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            margin-bottom: 6px;
+            font-size: 13px;
+        }
+        
+        /* Enhanced badges */
+        .current-badge {
+            background: #000000;
+            color: white;
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 600;
+            letter-spacing: 0.02em;
+        }
+        
+        /* Modal styling */
+        .detail-link {
+            color: #2563eb;
+            cursor: pointer;
+            text-decoration: none;
+            font-weight: 500;
+            transition: color 0.2s;
+        }
+        .detail-link:hover {
+            color: #1e40af;
+            text-decoration: underline;
+        }
+        #detailModal {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: white;
+            padding: 24px;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            max-height: 80vh;
+            overflow-y: auto;
+            z-index: 10000;
+            display: none;
+            min-width: 320px;
+            max-width: 500px;
+        }
         #detailModal.active { display: block; }
-        #modalOverlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
-                       background: rgba(0,0,0,0.5); z-index: 9999; display: none; }
+        #detailModal h3 {
+            margin: 0 0 16px 0;
+            color: #1e40af;
+            font-size: 20px;
+        }
+        #modalOverlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.6);
+            z-index: 9999;
+            display: none;
+            backdrop-filter: blur(2px);
+        }
         #modalOverlay.active { display: block; }
-        .date-row { margin: 5px 0; border-bottom: 1px solid #eee; padding: 5px 0; }
-        .date-header { cursor: pointer; font-weight: bold; color: #0078A8; }
-        .times-list { display: none; margin-left: 20px; margin-top: 5px; font-size: 0.9em; color: #666; }
-        .current-badge { background: #e74c3c; color: white; padding: 2px 8px; border-radius: 3px; font-size: 12px; margin-left: 5px; }
-        .current-option { font-weight: bold; color: #e74c3c; }
-        .loading { color: #999; font-style: italic; }
+        
+        .date-row {
+            margin: 8px 0;
+            border-bottom: 1px solid #f3f4f6;
+            padding: 8px 0;
+        }
+        .date-header {
+            cursor: pointer;
+            font-weight: 600;
+            color: #2563eb;
+            padding: 6px;
+            border-radius: 6px;
+            transition: background 0.2s;
+        }
+        .date-header:hover {
+            background: #eff6ff;
+        }
+        .times-list {
+            display: none;
+            margin-left: 24px;
+            margin-top: 8px;
+            font-size: 13px;
+            color: #6b7280;
+        }
+        .times-list div {
+            padding: 4px 0;
+        }
+        
+        .loading {
+            color: #9ca3af;
+            font-style: italic;
+            font-size: 13px;
+        }
+        
+        /* Close button */
+        .close-btn {
+            float: right;
+            border: none;
+            background: #f3f4f6;
+            width: 32px;
+            height: 32px;
+            border-radius: 8px;
+            font-size: 18px;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .close-btn:hover {
+            background: #e5e7eb;
+            transform: scale(1.05);
+        }
     </style>
 </head>
 <body>
+    <div class="main-title">Pannes de courant cumulatives au Québec</div>
     <div id="map"></div>
     <div id="modalOverlay" onclick="closeDetailModal()"></div>
     <div id="detailModal">
-        <button onclick="closeDetailModal()" style="float: right; border: none; background: none; font-size: 18px; cursor: pointer;">X</button>
+        <button onclick="closeDetailModal()" class="close-btn">✕</button>
         <div id="modalContent"></div>
     </div>
     
@@ -741,16 +962,18 @@ cat(';
             if (countSpan) {
                 if (allData.current && allData.current.features) {
                     var count = allData.current.features.length;
-                    countSpan.textContent = count + " hexagone" + (count !== 1 ? "s" : "");
-                    countSpan.className = count > 0 ? "current-badge" : "";
+                    if (count > 0) {
+                        countSpan.innerHTML = "<span class=\\"current-badge\\">" + count + " hexagone" + (count !== 1 ? "s" : "") + "</span>";
+                    } else {
+                        countSpan.innerHTML = "<span class=\\"info-value\\">0 hexagones</span>";
+                    }
                 } else {
-                    countSpan.textContent = "0 hexagones";
-                    countSpan.className = "";
+                    countSpan.innerHTML = "<span class=\\"info-value\\">0 hexagones</span>";
                 }
             }
             var timeSpan = document.getElementById("lastReading");
             if (timeSpan) {
-                timeSpan.textContent = lastReadingTime;
+                timeSpan.innerHTML = "<span class=\\"info-value\\" style=\\"font-size:12px;\\">" + lastReadingTime + "</span>";
             }
         }
         
@@ -811,10 +1034,10 @@ cat(';
                 style: function(f) {
                     var count = f.properties.total_occurrences || f.properties.occurrences_today || 1;
                     return {
-                        fillColor: isCurrent ? "#e74c3c" : getColor(count),
+                        fillColor: isCurrent ? "#000000" : getColor(count),
                         weight: isCurrent ? 2 : 0.5,
-                        color: isCurrent ? "#c0392b" : "#fff",
-                        fillOpacity: isCurrent ? 0.8 : 0.75
+                        color: isCurrent ? "#000000" : "#fff",
+                        fillOpacity: isCurrent ? 0.85 : 0.75
                     };
                 },
                 onEachFeature: function(f, layer) {
@@ -825,8 +1048,8 @@ cat(';
                         popupContent += " <span class=\\"current-badge\\">EN COURS</span>";
                     }
                     popupContent += "<br><b>Occurrences totales:</b> " + count + "<br>" +
-                        "<b>Jours affectes:</b> " + (props.days_affected || 1) + "<br>" +
-                        "<b>Centroide:</b> " + props.centroid_lat.toFixed(6) + ", " + props.centroid_lon.toFixed(6) + "<br>" +
+                        "<b>Jours affectés:</b> " + (props.days_affected || 1) + "<br>" +
+                        "<b>Centroïde:</b> " + props.centroid_lat.toFixed(6) + ", " + props.centroid_lon.toFixed(6) + "<br>" +
                         "<a class=\\"detail-link\\" onclick=\\"showDetails(" + props.hex_id + ")\\">Voir historique</a>";
                     layer.bindPopup(popupContent);
                 }
@@ -923,10 +1146,10 @@ cat(';
             var div = L.DomUtil.create("div", "info legend");
             var grades = [0, 2, 5, 10, 20, 40, 60, 80];
             div.innerHTML = "<h4>Occurrences</h4>";
-            div.innerHTML += "<i style=\\"background:#e74c3c\\"></i>En cours<br>";
+            div.innerHTML += "<div class=\\"legend-item\\"><i style=\\"background:#000000\\"></i> En cours</div>";
             for (var i = 0; i < grades.length; i++) {
-                div.innerHTML += "<i style=\\"background:" + getColor(grades[i] + 1) + "\\"></i>" +
-                    grades[i] + (grades[i + 1] ? "-" + grades[i + 1] : "+") + "<br>";
+                div.innerHTML += "<div class=\\"legend-item\\"><i style=\\"background:" + getColor(grades[i] + 1) + "\\"></i> " +
+                    grades[i] + (grades[i + 1] ? "–" + grades[i + 1] : "+") + "</div>";
             }
             return div;
         };
@@ -935,25 +1158,24 @@ cat(';
         var info = L.control({position: "topright"});
         info.onAdd = function() {
             var div = L.DomUtil.create("div", "info");
-            div.innerHTML = "<h4>Pannes Hydro-Quebec</h4>" +
-                "<p><b>Pannes en cours:</b> <span id=\\"currentCount\\" class=\\"loading\\">chargement...</span></p>" +
-                "<p><b>Derniere lecture:</b><br><span id=\\"lastReading\\" class=\\"loading\\">chargement...</span></p>" +
-                "<hr style=\\"margin: 8px 0;\\">" +
-                "<p style=\\"font-size:11px;\\"><b>Hexagones:</b> ', file = html_file, sep = "")
+            div.innerHTML = "<h4>Statistiques</h4>" +
+                "<div class=\\"info-row\\"><span class=\\"info-label\\">Pannes en cours:</span> <span id=\\"currentCount\\" class=\\"loading\\">chargement...</span></div>" +
+                "<div class=\\"info-row\\"><span class=\\"info-label\\">Dernière lecture:</span> <span id=\\"lastReading\\" class=\\"loading\\">chargement...</span></div>" +
+                "<div class=\\"info-row\\"><span class=\\"info-label\\">Taille hexagones:</span> <span class=\\"info-value\\">', file = html_file, sep = "")
 
 cat(hex_size_km, file = html_file, sep = "")
 
-cat(' km</p>" +
-                "<p style=\\"font-size:11px;\\"><b>Jours analyses:</b> ', file = html_file, sep = "")
+cat(' km</span></div>" +
+                "<div class=\\"info-row\\"><span class=\\"info-label\\">Jours analysés:</span> <span class=\\"info-value\\">', file = html_file, sep = "")
 
 cat(num_days, file = html_file, sep = "")
 
-cat('</p>" +
-                "<p style=\\"font-size:11px;color:#999;\\">Genere: ', file = html_file, sep = "")
+cat('</span></div>" +
+                "<div style=\\"margin-top: 10px; padding-top: 10px; border-top: 1px solid #e5e7eb;\\"><span style=\\"font-size:11px;color:#9ca3af;\\">Généré: ', file = html_file, sep = "")
 
 cat(current_date, file = html_file, sep = "")
 
-cat('</p>";
+cat('</span></div>";
             return div;
         };
         info.addTo(map);
@@ -962,9 +1184,9 @@ cat('</p>";
         controls.onAdd = function() {
             var div = L.DomUtil.create("div", "controls");
             var selectHtml = "<h4>Affichage</h4><select id=\\"dateSelect\\" onchange=\\"updateMap()\\">";
-            selectHtml += "<option value=\\"current\\" selected>&#128308; Pannes en cours</option>";
-            selectHtml += "<option value=\\"all\\">Historique complet</option>";
-            selectHtml += "<optgroup label=\\"Par jour\\">";
+            selectHtml += "<option value=\\"current\\" selected>🔴 Pannes en cours</option>";
+            selectHtml += "<option value=\\"all\\">📊 Historique complet</option>";
+            selectHtml += "<optgroup label=\\"📅 Par jour\\">";
             var sortedDates = dates.slice().sort().reverse();
             sortedDates.forEach(function(d) {
                 selectHtml += "<option value=\\"" + d + "\\">" + d + "</option>";
