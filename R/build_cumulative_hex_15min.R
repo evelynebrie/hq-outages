@@ -1,4 +1,5 @@
 # HQ Outages - 15-MINUTE SCRAPE VERSION with Timestamp Tracking
+# FIXED VERSION: Better detection of small outage polygons
 # Adapted for data scraped every ~15 minutes with exact timestamps in filenames
 # Tracks: Each time a hex appears in an outage file, its score increases by 1
 #
@@ -16,6 +17,7 @@ cat("=== HQ Outages 15-Minute Scrape Analysis System ===\n")
 cat("Features:\n")
 cat("  • Processes files with exact timestamps (YYYYMMDDTHHMMSS)\n")
 cat("  • Uses POLYGON files for accurate area coverage\n")
+cat("  • FIXED: Buffers small polygons to ensure detection\n")
 cat("  • Tracks cumulative outage frequency per hex\n")
 cat("  • Each hex appearance = +1 to total score\n")
 cat("  • Generates daily and monthly summaries\n")
@@ -35,6 +37,7 @@ cache_file <- file.path(cache_dir, "cumulative_hex_data.rds")
 
 HEX_SIZE <- 1000     # Hex size in meters
 SIMPLIFY <- 200      # Simplification tolerance
+BUFFER_SMALL_POLYS <- 100  # FIXED: Buffer small polygons by 100m to ensure hex detection
 
 # Create output directories
 dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
@@ -274,6 +277,16 @@ if (length(files_to_process) == 0) {
         polys <- st_union(polys)
       }
       
+      # FIXED: Buffer small polygons to ensure they intersect hexes
+      poly_area <- as.numeric(st_area(polys))
+      hex_area <- HEX_SIZE * HEX_SIZE * 0.866  # Approximate hex area
+      
+      if (poly_area < (hex_area * 1.5)) {
+        # Small polygon detected - buffer it to ensure detection
+        polys <- st_buffer(polys, dist = BUFFER_SMALL_POLYS)
+        cat("      (buffered small polygon)\n")
+      }
+      
       # Find affected hexagons (any hex that INTERSECTS with the outage polygons)
       hits <- st_intersects(hex_grid_reference, polys, sparse = TRUE)
       affected_ids <- which(lengths(hits) > 0)
@@ -375,6 +388,15 @@ tryCatch({
     
     if (nrow(current_polys) > 1) {
       current_polys <- st_union(current_polys)
+    }
+    
+    # FIXED: Buffer small polygons
+    poly_area <- as.numeric(st_area(current_polys))
+    hex_area <- HEX_SIZE * HEX_SIZE * 0.866
+    
+    if (poly_area < (hex_area * 1.5)) {
+      current_polys <- st_buffer(current_polys, dist = BUFFER_SMALL_POLYS)
+      cat("  (buffered small current outage polygon)\n")
     }
     
     current_hits <- st_intersects(hex_grid_reference, current_polys, sparse = TRUE)
