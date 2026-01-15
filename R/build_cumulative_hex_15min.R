@@ -655,29 +655,30 @@ cat('<!DOCTYPE html>
     <link rel="stylesheet" href="https://unpkg.com/leaflet-control-geocoder@2.4.0/dist/Control.Geocoder.css" />
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
     <style>
         * { box-sizing: border-box; }
         body { margin: 0; font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
         #map { height: 100vh; width: 100%; }
         
-        /* Main title banner - minimalist */
+        /* Main title banner - tech style */
         .main-title {
             position: absolute;
             top: 20px;
             left: 50%;
             transform: translateX(-50%);
             z-index: 1000;
-            background: rgba(255, 255, 255, 0.95);
-            color: #1a1a1a;
+            background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #334155 100%);
+            color: #ffffff;
             padding: 14px 28px;
             border-radius: 6px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.12);
-            font-size: 16px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            font-family: "JetBrains Mono", monospace;
+            font-size: 15px;
             font-weight: 600;
-            letter-spacing: -0.01em;
+            letter-spacing: 0.02em;
             text-align: center;
-            border: 1px solid #e5e5e5;
+            border: 1px solid rgba(255,255,255,0.1);
         }
         
         /* Clean controls box */
@@ -782,9 +783,9 @@ cat('<!DOCTYPE html>
             font-size: 13px;
         }
         
-        /* Enhanced badges */
+        /* Enhanced badges - flashy red */
         .current-badge {
-            background: #000000;
+            background: #ef4444;
             color: white;
             padding: 4px 10px;
             border-radius: 6px;
@@ -1004,7 +1005,7 @@ cat(';
         
         function updateMap() {
             var dateSelect = document.getElementById("dateSelect");
-            var dateFilter = dateSelect ? dateSelect.value : "current";
+            var dateFilter = dateSelect ? dateSelect.value : "all";
             var data = null;
             var isCurrent = false;
             
@@ -1048,10 +1049,10 @@ cat(';
                 style: function(f) {
                     var count = f.properties.total_occurrences || f.properties.occurrences_today || 1;
                     return {
-                        fillColor: isCurrent ? "#000000" : getColor(count),
-                        weight: isCurrent ? 2 : 0.5,
-                        color: isCurrent ? "#000000" : "#fff",
-                        fillOpacity: isCurrent ? 0.85 : 0.75
+                        fillColor: isCurrent ? "#ef4444" : getColor(count),
+                        weight: isCurrent ? 2.5 : 0.5,
+                        color: isCurrent ? "#dc2626" : "#fff",
+                        fillOpacity: isCurrent ? 0.65 : 0.75
                     };
                 },
                 onEachFeature: function(f, layer) {
@@ -1160,7 +1161,7 @@ cat(';
             var div = L.DomUtil.create("div", "info legend");
             var grades = [0, 2, 5, 10, 20, 40, 60, 80];
             div.innerHTML = "<h4>Occurrences</h4>";
-            div.innerHTML += "<div class=\\"legend-item\\"><i style=\\"background:#000000\\"></i> En cours</div>";
+            div.innerHTML += "<div class=\\"legend-item\\"><i style=\\"background:#ef4444;opacity:0.65\\"></i> En cours</div>";
             for (var i = 0; i < grades.length; i++) {
                 div.innerHTML += "<div class=\\"legend-item\\"><i style=\\"background:" + getColor(grades[i] + 1) + "\\"></i> " +
                     grades[i] + (grades[i + 1] ? "–" + grades[i + 1] : "+") + "</div>";
@@ -1198,9 +1199,9 @@ cat('</span></div>";
         controls.onAdd = function() {
             var div = L.DomUtil.create("div", "controls");
             var selectHtml = "<h4>Affichage</h4><select id=\\"dateSelect\\" onchange=\\"updateMap()\\">";
-            selectHtml += "<option value=\\"current\\" selected>🔴 Pannes en cours</option>";
-            selectHtml += "<option value=\\"all\\">📊 Historique complet</option>";
-            selectHtml += "<optgroup label=\\"📅 Par jour\\">";
+            selectHtml += "<option value=\\"all\\" selected>Historique complet</option>";
+            selectHtml += "<option value=\\"current\\">Pannes en cours</option>";
+            selectHtml += "<optgroup label=\\"Par jour\\">";
             var sortedDates = dates.slice().sort().reverse();
             sortedDates.forEach(function(d) {
                 selectHtml += "<option value=\\"" + d + "\\">" + d + "</option>";
