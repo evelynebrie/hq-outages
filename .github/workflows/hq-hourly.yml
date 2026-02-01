@@ -22,9 +22,9 @@ jobs:
           path: |
             ~/.Rlib
             ~/.cache/R
-          key: r-lib-${{ runner.os }}-4.5-${{ hashFiles('**/*.R','**/*.r','**/*.yml') }}
+          key: r-lib-${{ runner.os }}-4.5-v2-${{ hashFiles('**/*.R','**/*.r','**/*.yml') }}
           restore-keys: |
-            r-lib-${{ runner.os }}-4.5-
+            r-lib-${{ runner.os }}-4.5-v2-
       - name: System libs
         run: |
           sudo apt-get update
