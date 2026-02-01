@@ -1,8 +1,6 @@
 name: HQ outages hourly (consistent timing)
 on:
   schedule:
-    # Runs at 16 minutes past every hour (e.g., 00:16, 01:16, 02:16, etc.)
-    # 16 minutes chosen as it's typically a low-traffic time for GitHub Actions
     - cron: "16 * * * *"
   workflow_dispatch: {}
 jobs:
@@ -36,8 +34,7 @@ jobs:
             libfontconfig1-dev
       - name: Install R packages
         run: |
-          install.packages(c("httr", "jsonlite", "dplyr", "tidyr", "stringr", 
-                             "lubridate", "arrow", "sf", "readr"))
+          install.packages(c("httr", "jsonlite", "dplyr", "tidyr", "stringr", "lubridate", "arrow", "sf", "readr"))
         shell: Rscript {0}
       - name: Get fresh Dropbox access token
         id: dropbox_token
@@ -68,26 +65,3 @@ jobs:
                 --data-binary @"$f"
             done < <(find "$root" -type f -print0)
           done
-```
-
-**Key changes made:**
-1. Removed the `r-lib/actions/setup-r-dependencies@v2` step entirely
-2. Replaced it with a manual package installation step using `Rscript`
-3. This avoids the dependency conflict issues from the pak lockfile
-
-This should work reliably, though it won't benefit from caching as effectively. If you want better caching, you could alternatively create a `DESCRIPTION` file in your repo root with this content and use the standard setup:
-
-**DESCRIPTION file** (create this as a separate file):
-```
-Package: hqoutages
-Version: 0.0.1
-Imports:
-    httr,
-    jsonlite,
-    dplyr,
-    tidyr,
-    stringr,
-    lubridate,
-    arrow,
-    sf,
-    readr
