@@ -1,29 +1,23 @@
 name: HQ outages hourly (consistent timing)
-
 on:
   schedule:
     # Runs at 16 minutes past every hour (e.g., 00:16, 01:16, 02:16, etc.)
     # 16 minutes chosen as it's typically a low-traffic time for GitHub Actions
     - cron: "16 * * * *"
   workflow_dispatch: {}
-
 jobs:
   run:
     runs-on: ubuntu-latest
     env:
       R_LIBS_USER: ~/.Rlib
-
     steps:
       - uses: actions/checkout@v4
-
       - uses: r-lib/actions/setup-r@v2
         with:
           use-public-rspm: true
-
       - name: Prepare cache dirs
         run: |
           mkdir -p ~/.Rlib ~/.cache/R
-
       - name: Cache R packages
         uses: actions/cache@v4
         with:
@@ -33,7 +27,6 @@ jobs:
           key: r-lib-${{ runner.os }}-4.5-${{ hashFiles('**/*.R','**/*.r','**/*.yml') }}
           restore-keys: |
             r-lib-${{ runner.os }}-4.5-
-
       - name: System libs
         run: |
           sudo apt-get update
@@ -41,14 +34,11 @@ jobs:
             libcurl4-openssl-dev libssl-dev libxml2-dev jq curl \
             libgdal-dev libgeos-dev libproj-dev libudunits2-dev \
             libfontconfig1-dev
-
-      - uses: r-lib/actions/setup-r-dependencies@v2
-        with:
-          use-public-rspm: true
-          extra-packages: >
-            any::httr, any::jsonlite, any::dplyr, any::tidyr, any::stringr,
-            any::lubridate, any::arrow, any::sf, any::readr
-
+      - name: Install R packages
+        run: |
+          install.packages(c("httr", "jsonlite", "dplyr", "tidyr", "stringr", 
+                             "lubridate", "arrow", "sf", "readr"))
+        shell: Rscript {0}
       - name: Get fresh Dropbox access token
         id: dropbox_token
         run: |
@@ -57,13 +47,10 @@ jobs:
             -d grant_type=refresh_token \
             -d refresh_token="${{ secrets.DROPBOX_REFRESH_TOKEN }}" \
             -u "${{ secrets.DROPBOX_APP_KEY }}:${{ secrets.DROPBOX_APP_SECRET }}")
-
           ACCESS=$(echo "$TOKENS" | jq -r '.access_token')
           echo "token=$ACCESS" >> "$GITHUB_OUTPUT"
-
       - name: Run scraper (build parquet + polygons + join)
         run: Rscript hq_scrape.R
-
       - name: Upload to Dropbox (data + map)
         env:
           DROPBOX_TOKEN: ${{ steps.dropbox_token.outputs.token }}
@@ -81,3 +68,26 @@ jobs:
                 --data-binary @"$f"
             done < <(find "$root" -type f -print0)
           done
+```
+
+**Key changes made:**
+1. Removed the `r-lib/actions/setup-r-dependencies@v2` step entirely
+2. Replaced it with a manual package installation step using `Rscript`
+3. This avoids the dependency conflict issues from the pak lockfile
+
+This should work reliably, though it won't benefit from caching as effectively. If you want better caching, you could alternatively create a `DESCRIPTION` file in your repo root with this content and use the standard setup:
+
+**DESCRIPTION file** (create this as a separate file):
+```
+Package: hqoutages
+Version: 0.0.1
+Imports:
+    httr,
+    jsonlite,
+    dplyr,
+    tidyr,
+    stringr,
+    lubridate,
+    arrow,
+    sf,
+    readr
