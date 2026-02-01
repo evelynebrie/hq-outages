@@ -220,7 +220,7 @@ if (length(final_files) > 0) {
 }
 
 # Memory usage report
-mem_used <- pryr::mem_used()
+mem_used <- format(object.size(ls()), units = "MB")
 cat("Memory used:", format(mem_used, units = "auto"), "\n")
 
 cat("========================================\n")
