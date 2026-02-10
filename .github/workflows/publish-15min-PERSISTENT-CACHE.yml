@@ -38,19 +38,11 @@ jobs:
           Rscript -e 'pkgs <- c("sf","dplyr","fs","purrr","jsonlite","data.table"); inst <- setdiff(pkgs, rownames(installed.packages())); if(length(inst)) { cat("Installing", length(inst), "packages\n"); install.packages(inst, repos="https://cloud.r-project.org", Ncpus=2) } else { cat("All packages cached\n") }'
 
       - name: Download previous cache from public repo
-        env:
-          GITHUB_TOKEN: ${{ secrets.PUBLIC_REPO_TOKEN }}
         run: |
           echo "📥 Downloading previous cache from public repo..."
           
-          # Try to download existing cache file
-          curl -f -L \
-            -H "Authorization: token $GITHUB_TOKEN" \
-            -H "Accept: application/vnd.github.v3.raw" \
-            "https://raw.githubusercontent.com/evelynebrie/hq-outages-public/gh-pages/cache/cumulative_hex_data.rds" \
-            -o cache_download.rds 2>/dev/null || true
-          
-          if [ -f cache_download.rds ] && [ -s cache_download.rds ]; then
+          # Download from GitHub Pages (no auth needed - public repo)
+          if curl -f -L "https://evelynebrie.github.io/hq-outages-public/cache/cumulative_hex_data.rds" -o cache_download.rds; then
             mkdir -p cache
             mv cache_download.rds cache/cumulative_hex_data.rds
             echo "✅ Cache downloaded successfully"
