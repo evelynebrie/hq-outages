@@ -51,14 +51,6 @@ jobs:
             echo "ℹ️  No existing cache found (this is normal for first run)"
           fi
 
-     # - name: Restore data cache
-    #    uses: actions/cache@v3
-     #   with:
-     #     path: data/daily/
-     #     key: hq-15min-data-2026-${{ github.run_number }}
-     #     restore-keys: |
-     #       hq-15min-data-2026-
-
       - name: Restore hex grid cache
         uses: actions/cache@v3
         with:
