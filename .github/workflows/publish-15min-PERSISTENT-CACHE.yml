@@ -41,14 +41,19 @@ jobs:
         run: |
           echo "📥 Downloading previous cache from public repo..."
           
-          # Download from GitHub Pages (no auth needed - public repo)
-          if curl -f -L "https://evelynebrie.github.io/hq-outages-public/cache/cumulative_hex_data.rds" -o cache_download.rds; then
+          # Clone just the cache directory from gh-pages branch
+          git clone --depth 1 --branch gh-pages --single-branch \
+            https://github.com/evelynebrie/hq-outages-public.git temp_public
+          
+          if [ -f "temp_public/cache/cumulative_hex_data.rds" ]; then
             mkdir -p cache
-            mv cache_download.rds cache/cumulative_hex_data.rds
-            echo "✅ Cache downloaded successfully"
+            cp temp_public/cache/cumulative_hex_data.rds cache/
+            echo "✅ Cache downloaded successfully ($(du -h cache/cumulative_hex_data.rds | cut -f1))"
             ls -lh cache/cumulative_hex_data.rds
+            rm -rf temp_public
           else
             echo "ℹ️  No existing cache found (this is normal for first run)"
+            rm -rf temp_public
           fi
 
       - name: Restore hex grid cache
