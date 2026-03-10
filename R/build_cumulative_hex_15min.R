@@ -111,6 +111,34 @@ if (file.exists(cache_file)) {
   processed_files <- cached_data$processed_files
   cat(sprintf("  ✓ Loaded cache with %d hexagons and %d processed files\n",
               length(cumulative_hex_data), length(processed_files)))
+
+  # Remove files in date filter range from processed_files to force reprocessing
+  if (!is.null(DATE_FILTER_MIN) && !is.null(DATE_FILTER_MAX)) {
+    cat(sprintf("\n🔧 CLEARING cache for date range %s to %s...\n",
+                DATE_FILTER_MIN, DATE_FILTER_MAX))
+
+    cleared_count <- 0
+    kept_files <- character()
+
+    for (f in processed_files) {
+      # Extract date from filename
+      file_date <- sub(".*_(\\d{8})T.*", "\\1", basename(f))
+      file_date <- paste0(substr(file_date, 1, 4), "-",
+                         substr(file_date, 5, 6), "-",
+                         substr(file_date, 7, 8))
+
+      # Keep only files OUTSIDE the date filter range
+      if (file_date < DATE_FILTER_MIN || file_date > DATE_FILTER_MAX) {
+        kept_files <- c(kept_files, f)
+      } else {
+        cleared_count <- cleared_count + 1
+      }
+    }
+
+    cat(sprintf("  ✓ Cleared %d files from cache in date range\n", cleared_count))
+    cat(sprintf("  ✓ Kept %d files outside date range\n", length(kept_files)))
+    processed_files <- kept_files
+  }
 }
 
 # Apply date range filter if specified
