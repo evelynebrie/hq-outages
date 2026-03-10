@@ -112,7 +112,7 @@ jobs:
           echo "access_token=$ACCESS_TOKEN" >> $GITHUB_OUTPUT
 
       - name: Download files from Dropbox App Folder
-        timeout-minutes: 120  # Increased for first run (downloads 7000+ files). Future runs use cache and are fast.
+        timeout-minutes: 180  # Very generous timeout for first run (downloads 7000+ files). Future runs use cache and are fast (~5 min).
         env:
           DROPBOX_TOKEN: ${{ steps.get_token.outputs.access_token }}
         run: |
