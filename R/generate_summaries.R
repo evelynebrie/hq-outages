@@ -159,8 +159,10 @@ for (monthly_file in monthly_files) {
   })
 }
 
-# Sort by month
-monthly_stats_list <- monthly_stats_list[order(names(monthly_stats_list))]
+# Sort by month (only if not empty)
+if (length(monthly_stats_list) > 0) {
+  monthly_stats_list <- monthly_stats_list[order(names(monthly_stats_list))]
+}
 
 # Save monthly statistics
 write_json(list(monthly_summaries = monthly_stats_list),
@@ -189,19 +191,23 @@ write.csv(daily_time_series,
 
 cat("  ✓ Daily time series saved\n")
 
-# Create time series of monthly hex counts
-monthly_time_series <- data.frame(
-  month = names(monthly_stats_list),
-  hexagons_affected = sapply(monthly_stats_list, function(x) x$hexagons_affected),
-  total_occurrences = sapply(monthly_stats_list, function(x) x$total_occurrences_month),
-  stringsAsFactors = FALSE
-)
+# Create time series of monthly hex counts (only if we have monthly data)
+if (length(monthly_stats_list) > 0) {
+  monthly_time_series <- data.frame(
+    month = names(monthly_stats_list),
+    hexagons_affected = sapply(monthly_stats_list, function(x) x$hexagons_affected),
+    total_occurrences = sapply(monthly_stats_list, function(x) x$total_occurrences_month),
+    stringsAsFactors = FALSE
+  )
 
-write.csv(monthly_time_series,
-         file.path(summary_dir, "monthly_time_series.csv"),
-         row.names = FALSE)
+  write.csv(monthly_time_series,
+           file.path(summary_dir, "monthly_time_series.csv"),
+           row.names = FALSE)
 
-cat("  ✓ Monthly time series saved\n")
+  cat("  ✓ Monthly time series saved\n")
+} else {
+  cat("  ⚠ No monthly data to create time series\n")
+}
 
 # ==================================================================
 # Generate Human-Readable Summary Report
