@@ -105,8 +105,41 @@ if (file.exists(cache_file)) {
   cached_data <- readRDS(cache_file)
   cumulative_hex_data <- cached_data$cumulative_hex_data
   processed_files <- cached_data$processed_files
-  cat(sprintf("  ✓ Loaded cache with %d hexagons and %d processed files\n", 
+  cat(sprintf("  ✓ Loaded cache with %d hexagons and %d files in processed list\n",
               length(cumulative_hex_data), length(processed_files)))
+
+  # VALIDATION: Rebuild processed_files from actual timestamps in cumulative data
+  # This prevents cache corruption where files are listed but never actually processed
+  if (length(cumulative_hex_data) > 0) {
+    # Extract all unique datetimes from the cumulative data
+    all_datetimes <- unique(unlist(lapply(cumulative_hex_data, function(x) x$datetimes)))
+
+    if (length(all_datetimes) > 0) {
+      # Convert datetimes to filename format: YYYYMMDDTHHMMSS
+      datetime_stamps <- gsub("[: -]", "", all_datetimes)
+      datetime_stamps <- gsub("(\\d{8})(\\d{6})", "\\1T\\2", datetime_stamps)
+
+      # Match to actual files in data directory
+      actual_processed_files <- character()
+      for (f in files) {
+        for (stamp in datetime_stamps) {
+          if (grepl(stamp, basename(f), fixed = TRUE)) {
+            actual_processed_files <- c(actual_processed_files, f)
+            break
+          }
+        }
+      }
+      actual_processed_files <- unique(actual_processed_files)
+
+      if (length(actual_processed_files) != length(processed_files)) {
+        cat(sprintf("  ⚠️  Cache validation: processed_files list has %d entries\n",
+                    length(processed_files)))
+        cat(sprintf("  ✓ Actual files with data in cache: %d\n", length(actual_processed_files)))
+        cat("  ✓ Rebuilding processed_files list from actual timestamps\n")
+        processed_files <- actual_processed_files
+      }
+    }
+  }
 }
 
 # Filter to only new files
