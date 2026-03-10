@@ -47,7 +47,7 @@ jobs:
             hq-cumulative-cache-v2-
             hq-cumulative-cache-
 
-      - name: Verify cache restoration
+      - name: Verify cache restoration and migrate from old location if needed
         run: |
           echo "📦 Checking cache status..."
           mkdir -p cache
@@ -56,8 +56,19 @@ jobs:
             echo "✅ Cache restored from Actions cache ($(du -h cache/cumulative_hex_data.rds | cut -f1))"
             ls -lh cache/cumulative_hex_data.rds
           else
-            echo "ℹ️  No existing cache found (this is normal for first run)"
-            echo "   Will create new cache from scratch"
+            echo "ℹ️  No cache in Actions cache - checking old location (gh-pages) for migration..."
+
+            # Try to get cache from old location (one-time migration)
+            if curl -f -L -o cache/cumulative_hex_data.rds \
+                "https://raw.githubusercontent.com/evelynebrie/hq-outages-public/gh-pages/cache/cumulative_hex_data.rds" 2>/dev/null; then
+              echo "✅ Migrated cache from gh-pages ($(du -h cache/cumulative_hex_data.rds | cut -f1))"
+              echo "   This cache will now be stored in Actions cache for future runs"
+              ls -lh cache/cumulative_hex_data.rds
+            else
+              echo "⚠️  No existing cache found anywhere (this is normal for very first run)"
+              echo "   Will process all files from scratch (may take longer)"
+              echo "   Future runs will use the cache and be much faster!"
+            fi
           fi
 
       - name: Restore hex grid cache
