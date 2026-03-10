@@ -1,0 +1,84 @@
+name: Test Deploy (No Processing)
+
+on:
+  workflow_dispatch:  # Manual trigger only
+
+permissions:
+  contents: write
+
+jobs:
+  test-deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Create test public directory
+        run: |
+          echo "📦 Creating test deployment..."
+          mkdir -p public
+
+          # Create a simple test page
+          cat > public/index.html <<'EOF'
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <title>HQ Outages - Test Deployment</title>
+            <style>
+              body {
+                font-family: Arial, sans-serif;
+                max-width: 800px;
+                margin: 50px auto;
+                padding: 20px;
+                background: #f5f5f5;
+              }
+              .status {
+                background: white;
+                padding: 30px;
+                border-radius: 8px;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+              }
+              h1 { color: #2563eb; }
+              .success { color: #16a34a; font-size: 48px; }
+              .timestamp { color: #666; font-size: 14px; margin-top: 20px; }
+            </style>
+          </head>
+          <body>
+            <div class="status">
+              <div class="success">✅</div>
+              <h1>Deployment Test Successful!</h1>
+              <p>This is a test deployment to verify that the GitHub token and deployment workflow are working correctly.</p>
+              <p>Once this works, the full data processing workflow will generate the actual visualization here.</p>
+              <div class="timestamp">
+                Test deployment at: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+              </div>
+            </div>
+          </body>
+          </html>
+          EOF
+
+          echo "✅ Created test page at public/index.html"
+
+      - name: Deploy test page to PUBLIC repo (gh-pages)
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          personal_token: ${{ secrets.PUBLIC_REPO_TOKEN }}
+          external_repository: evelynebrie/hq-outages-public
+          publish_branch: gh-pages
+          publish_dir: public
+          keep_files: false
+          commit_message: "Test deployment - ${{ github.run_number }}"
+
+      - name: Summary
+        run: |
+          echo ""
+          echo "========================================="
+          echo "✅ TEST DEPLOYMENT COMPLETE"
+          echo "========================================="
+          echo ""
+          echo "🌐 View at: https://evelynebrie.github.io/hq-outages-public/"
+          echo ""
+          echo "If you see the test page, the deployment is working!"
+          echo "You can now run the full workflow to process data."
+          echo "========================================="
