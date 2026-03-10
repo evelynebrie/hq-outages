@@ -723,24 +723,24 @@ cat('<!DOCTYPE html>
         body { margin: 0; font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
         #map { height: 100vh; width: 100%; }
         
-        /* Main title banner - tech style */
+        /* Main title banner - minimalist style */
         .main-title {
             position: absolute;
             top: 20px;
             left: 50%;
             transform: translateX(-50%);
             z-index: 1000;
-            background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #334155 100%);
-            color: #ffffff;
+            background: #ffffff;
+            color: #000000;
             padding: 14px 28px;
             border-radius: 6px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            box-shadow: 0 2px 8px rgba(0,0,0,0.12);
             font-family: "JetBrains Mono", monospace;
             font-size: 15px;
             font-weight: 600;
             letter-spacing: 0.02em;
             text-align: center;
-            border: 1px solid rgba(255,255,255,0.1);
+            border: 1px solid #e5e5e5;
         }
         
         /* Clean controls box */
@@ -1223,7 +1223,7 @@ cat(';
             var div = L.DomUtil.create("div", "info legend");
             var grades = [0, 2, 5, 10, 20, 40, 60, 80];
             div.innerHTML = "<h4>Occurrences</h4>";
-            div.innerHTML += "<div class=\\"legend-item\\"><i style=\\"background:#ef4444;opacity:0.65\\"></i> En cours</div>";
+            div.innerHTML += "<div class=\\"legend-item\\"><i style=\\"background:#ef4444\\"></i> En cours</div>";
             for (var i = 0; i < grades.length; i++) {
                 div.innerHTML += "<div class=\\"legend-item\\"><i style=\\"background:" + getColor(grades[i] + 1) + "\\"></i> " +
                     grades[i] + (grades[i + 1] ? "–" + grades[i + 1] : "+") + "</div>";
