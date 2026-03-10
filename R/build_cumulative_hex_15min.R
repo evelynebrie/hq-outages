@@ -515,8 +515,11 @@ tryCatch({
 # ==================================================================
 cat("\n[4] Generating daily summaries...\n")
 
-unique_dates <- unique(files_dt$date)
-cat(sprintf("  Processing %d unique dates...\n", length(unique_dates)))
+# FIXED: Get unique dates from PROCESSED cache, not all downloaded files
+# This prevents generating empty daily files for dates that haven't been processed yet
+unique_dates <- unique(unlist(lapply(cumulative_hex_data, function(x) x$dates)))
+unique_dates <- sort(unique_dates)
+cat(sprintf("  Processing %d unique dates from cache...\n", length(unique_dates)))
 
 # Build daily summaries from cumulative data
 for (date in unique_dates) {
