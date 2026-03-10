@@ -38,7 +38,7 @@ cache_file <- file.path(cache_dir, "cumulative_hex_data.rds")
 HEX_SIZE <- 1000     # Hex size in meters
 SIMPLIFY <- 0        # No simplification - preserves original geometry for maximum accuracy
 BUFFER_SMALL_POLYS <- 0  # No buffer - keeps original outage sizes for credibility (10m stays 10m)
-MAX_FILES_PER_RUN <- 200  # Process max 200 files per run, then deploy. Next run continues from where it left off.
+MAX_FILES_PER_RUN <- 100  # Process max 100 files per run, then deploy. Next run continues from where it left off.
 
 # Create output directories
 dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
