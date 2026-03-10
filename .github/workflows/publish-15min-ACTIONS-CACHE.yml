@@ -78,6 +78,15 @@ jobs:
           key: hq-hex-grid-15min-v2
           restore-keys: hq-hex-grid-
 
+      # NEW: Cache downloaded Dropbox files to avoid re-downloading 7000+ files every run
+      - name: Cache Dropbox files
+        uses: actions/cache@v3
+        with:
+          path: data/daily
+          key: dropbox-files-v1-${{ github.run_number }}
+          restore-keys: |
+            dropbox-files-v1-
+
       - name: Get Fresh Dropbox Access Token
         id: get_token
         env:
@@ -103,7 +112,7 @@ jobs:
           echo "access_token=$ACCESS_TOKEN" >> $GITHUB_OUTPUT
 
       - name: Download files from Dropbox App Folder
-        timeout-minutes: 30
+        timeout-minutes: 90  # Increased for first run (downloads 7000+ files). Future runs use cache and are fast.
         env:
           DROPBOX_TOKEN: ${{ steps.get_token.outputs.access_token }}
         run: |
