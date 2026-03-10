@@ -112,7 +112,7 @@ jobs:
           echo "access_token=$ACCESS_TOKEN" >> $GITHUB_OUTPUT
 
       - name: Download files from Dropbox App Folder
-        timeout-minutes: 90  # Increased for first run (downloads 7000+ files). Future runs use cache and are fast.
+        timeout-minutes: 120  # Increased for first run (downloads 7000+ files). Future runs use cache and are fast.
         env:
           DROPBOX_TOKEN: ${{ steps.get_token.outputs.access_token }}
         run: |
@@ -306,7 +306,10 @@ jobs:
                 -o "$local_path" 2>/dev/null && [ -s "$local_path" ]; then
                 NEW=$((NEW + 1))
                 SUCCESS=true
-                [ $NEW -le 10 ] && echo "  ✓ Downloaded: $filename"
+                # Show progress every 100 files + first 10
+                if [ $NEW -le 10 ] || [ $((NEW % 100)) -eq 0 ]; then
+                  echo "  ✓ Downloaded: $filename (progress: $NEW files)"
+                fi
                 break
               else
                 if [ $attempt -lt 3 ]; then
@@ -339,6 +342,14 @@ jobs:
             echo "❌ No files available for processing"
             exit 1
           fi
+
+      # Save Dropbox files cache even if download times out (so progress isn't lost)
+      - name: Save Dropbox files cache (even on timeout/failure)
+        if: always()  # Run even if previous steps failed/timed out
+        uses: actions/cache/save@v3
+        with:
+          path: data/daily
+          key: dropbox-files-v1-${{ github.run_number }}
 
       - name: Run 15-minute scrape analysis (processing only)
         run: |
