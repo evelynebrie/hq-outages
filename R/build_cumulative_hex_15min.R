@@ -36,8 +36,8 @@ cache_dir <- "cache"       # Cache: processed data to avoid re-reading
 cache_file <- file.path(cache_dir, "cumulative_hex_data.rds")
 
 HEX_SIZE <- 1000     # Hex size in meters
-SIMPLIFY <- 200      # Simplification tolerance
-BUFFER_SMALL_POLYS <- 250  # FIXED: Buffer small polygons by 250m to ensure hex detection (increased from 100m)
+SIMPLIFY <- 0        # No simplification - preserves original geometry for maximum accuracy
+BUFFER_SMALL_POLYS <- 0  # No buffer - keeps original outage sizes for credibility (10m stays 10m)
 
 # Create output directories
 dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
