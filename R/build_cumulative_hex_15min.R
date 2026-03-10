@@ -348,8 +348,8 @@ if (length(files_to_process) == 0) {
     cat(sprintf("    ⚠ Error processing file %s: %s\n", basename(f), e$message))
   })
 
-  # INCREMENTAL SAVE: Save cache every 500 files (so progress isn't lost on timeout)
-  if (processed %% 500 == 0) {
+  # INCREMENTAL SAVE: Save cache every 100 files (so progress isn't lost on timeout)
+  if (processed %% 100 == 0) {
     cat(sprintf("\n[INCREMENTAL SAVE] Saving progress after %d files...\n", processed))
     cache_data_incremental <- list(
       cumulative_hex_data = cumulative_hex_data,
