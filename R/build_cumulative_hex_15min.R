@@ -38,6 +38,7 @@ cache_file <- file.path(cache_dir, "cumulative_hex_data.rds")
 HEX_SIZE <- 1000     # Hex size in meters
 SIMPLIFY <- 0        # No simplification - preserves original geometry for maximum accuracy
 BUFFER_SMALL_POLYS <- 0  # No buffer - keeps original outage sizes for credibility (10m stays 10m)
+MAX_FILES_PER_RUN <- 1500  # Process max 1500 files per run, then deploy. Next run continues from where it left off.
 
 # Create output directories
 dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
@@ -238,7 +239,20 @@ if (length(files_to_process) == 0) {
 } else {
   # Only process new files
   files_to_process_dt <- files_dt[files_dt$file %in% files_to_process, ]
-  
+
+  # BATCH PROCESSING: Limit to MAX_FILES_PER_RUN files per run for incremental deployment
+  total_new_files <- nrow(files_to_process_dt)
+  if (total_new_files > MAX_FILES_PER_RUN) {
+    cat(sprintf("\n📦 BATCH PROCESSING: %d new files found, processing first %d this run\n",
+                total_new_files, MAX_FILES_PER_RUN))
+    cat(sprintf("   Remaining %d files will be processed in next run(s)\n",
+                total_new_files - MAX_FILES_PER_RUN))
+    files_to_process_dt <- files_to_process_dt[1:MAX_FILES_PER_RUN, ]
+  } else {
+    cat(sprintf("\n✓ Processing all %d new files (within limit of %d per run)\n",
+                total_new_files, MAX_FILES_PER_RUN))
+  }
+
   total_to_process <- nrow(files_to_process_dt)
   processed <- 0
   last_pct <- 0
