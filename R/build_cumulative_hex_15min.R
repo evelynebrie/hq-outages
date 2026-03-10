@@ -721,8 +721,8 @@ cat(sprintf("  ✓ Snapshot saved: cumulative_%s.geojson\n", snapshot_date))
 # ==================================================================
 cat("\n[7] Generating HTML visualization...\n")
 
-# Calculate statistics
-num_days <- length(unique(files_dt$date))
+# Calculate statistics from ACTUAL processed data, not downloaded files
+num_days <- length(unique_dates)  # Use unique_dates from cumulative cache
 hex_size_km <- sprintf("%.1f", HEX_SIZE / 1000)
 current_date <- format(Sys.time(), "%Y-%m-%d %H:%M")
 
@@ -1248,7 +1248,7 @@ cat(';
             var div = L.DomUtil.create("div", "info legend");
             var grades = [0, 2, 5, 10, 20, 40, 60, 80];
             div.innerHTML = "<h4>Occurrences</h4>";
-            div.innerHTML += "<div class=\\"legend-item\\"><i style=\\"background:#ef4444\\"></i> En cours</div>";
+            div.innerHTML += "<div class=\\"legend-item\\"><i style=\\"background:#ef4444;border:2px solid #dc2626\\"></i> En cours</div>";
             for (var i = 0; i < grades.length; i++) {
                 div.innerHTML += "<div class=\\"legend-item\\"><i style=\\"background:" + getColor(grades[i] + 1) + "\\"></i> " +
                     grades[i] + (grades[i + 1] ? "–" + grades[i + 1] : "+") + "</div>";
