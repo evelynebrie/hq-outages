@@ -12,6 +12,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 360  # 6 hours - maximum for public repos. Needed for first run processing thousands of files.
 
     steps:
       - uses: actions/checkout@v3
@@ -383,6 +384,14 @@ jobs:
 
       # NOTE: We do NOT copy the cache to public/ anymore!
       # It stays in the cache/ directory and will be saved by Actions cache
+
+      # Save cumulative cache even if processing fails/times out
+      - name: Save cumulative hex data cache (even on timeout/failure)
+        if: always()  # Run even if R script failed/timed out
+        uses: actions/cache/save@v3
+        with:
+          path: cache/cumulative_hex_data.rds
+          key: hq-cumulative-cache-v2-${{ github.run_number }}
 
       - name: Generate summary statistics
         run: |
