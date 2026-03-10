@@ -343,10 +343,22 @@ if (length(files_to_process) == 0) {
     
     rm(input_data)
     gc(verbose = FALSE)
-    
+
   }, error = function(e) {
     cat(sprintf("    ⚠ Error processing file %s: %s\n", basename(f), e$message))
   })
+
+  # INCREMENTAL SAVE: Save cache every 500 files (so progress isn't lost on timeout)
+  if (processed %% 500 == 0) {
+    cat(sprintf("\n[INCREMENTAL SAVE] Saving progress after %d files...\n", processed))
+    cache_data_incremental <- list(
+      cumulative_hex_data = cumulative_hex_data,
+      processed_files = c(processed_files, files_to_process_dt$file[1:processed])
+    )
+    saveRDS(cache_data_incremental, cache_file)
+    cat(sprintf("  ✓ Cache saved with %d hexagons and %d total files\n",
+                length(cumulative_hex_data), length(cache_data_incremental$processed_files)))
+  }
   }
 
   cat(sprintf("  ✓ Processed %d new files\n", processed))
