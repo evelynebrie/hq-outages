@@ -40,6 +40,10 @@ SIMPLIFY <- 0        # No simplification - preserves original geometry for maxim
 BUFFER_SMALL_POLYS <- 0  # No buffer - keeps original outage sizes for credibility (10m stays 10m)
 MAX_FILES_PER_RUN <- 100  # Process max 100 files per run, then deploy. Next run continues from where it left off.
 
+# DATE RANGE FILTER: Process only files within this date range (to fill gaps)
+DATE_FILTER_MIN <- "2026-02-15"  # Start date (inclusive)
+DATE_FILTER_MAX <- "2026-03-09"  # End date (inclusive)
+
 # Create output directories
 dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
 dir.create(file.path(output_dir, "daily"), recursive = TRUE, showWarnings = FALSE)
@@ -105,8 +109,34 @@ if (file.exists(cache_file)) {
   cached_data <- readRDS(cache_file)
   cumulative_hex_data <- cached_data$cumulative_hex_data
   processed_files <- cached_data$processed_files
-  cat(sprintf("  ✓ Loaded cache with %d hexagons and %d processed files\n", 
+  cat(sprintf("  ✓ Loaded cache with %d hexagons and %d processed files\n",
               length(cumulative_hex_data), length(processed_files)))
+}
+
+# Apply date range filter if specified
+if (!is.null(DATE_FILTER_MIN) && !is.null(DATE_FILTER_MAX)) {
+  cat(sprintf("\n🗓️  DATE FILTER: Processing only files from %s to %s\n",
+              DATE_FILTER_MIN, DATE_FILTER_MAX))
+
+  # Extract dates from all files
+  files_before_filter <- length(files)
+  date_filtered_files <- character()
+
+  for (f in files) {
+    # Extract date from filename (YYYYMMDD)
+    file_date <- sub(".*_(\\d{8})T.*", "\\1", basename(f))
+    file_date <- paste0(substr(file_date, 1, 4), "-",
+                       substr(file_date, 5, 6), "-",
+                       substr(file_date, 7, 8))
+
+    if (file_date >= DATE_FILTER_MIN && file_date <= DATE_FILTER_MAX) {
+      date_filtered_files <- c(date_filtered_files, f)
+    }
+  }
+
+  cat(sprintf("  • Files before filter: %d\n", files_before_filter))
+  cat(sprintf("  • Files in date range: %d\n", length(date_filtered_files)))
+  files <- date_filtered_files
 }
 
 # Filter to only new files
