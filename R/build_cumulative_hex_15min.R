@@ -1015,7 +1015,7 @@ cat('<!DOCTYPE html>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://unpkg.com/leaflet-control-geocoder@2.4.0/dist/Control.Geocoder.js"></script>
     <script>
-        var map = L.map("map").setView([46.8, -71.2], 7);
+        var map = L.map("map").setView([45.75, -73.35], 9);
         L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
             attribution: "OpenStreetMap"
         }).addTo(map);
