@@ -758,7 +758,7 @@ cat('<!DOCTYPE html>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Pannes de courant cumulatives au Québec</title>
+    <title>Cartographie des pannes au Québec</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <link rel="stylesheet" href="https://unpkg.com/leaflet-control-geocoder@2.4.0/dist/Control.Geocoder.css" />
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -1004,7 +1004,7 @@ cat('<!DOCTYPE html>
     </style>
 </head>
 <body>
-    <div class="main-title">Pannes de courant cumulatives au Québec</div>
+    <div class="main-title">Cartographie des pannes au Québec</div>
     <div id="map"></div>
     <div id="modalOverlay" onclick="closeDetailModal()"></div>
     <div id="detailModal">
