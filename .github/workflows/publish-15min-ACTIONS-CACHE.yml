@@ -40,7 +40,7 @@ jobs:
 
       # NEW: Use Actions cache instead of cloning gh-pages repo
       - name: Restore cumulative hex data cache (Actions Cache)
-        uses: actions/cache@v3
+        uses: actions/cache/restore@v3
         with:
           path: cache/cumulative_hex_data.rds
           key: hq-cumulative-cache-v2-${{ github.run_number }}
