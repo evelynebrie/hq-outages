@@ -739,7 +739,7 @@ cat("\n[7] Generating HTML visualization...\n")
 # Calculate statistics from ACTUAL processed data, not downloaded files
 num_days <- length(unique_dates)  # Use unique_dates from cumulative cache
 hex_size_km <- sprintf("%.1f", HEX_SIZE / 1000)
-current_date <- format(Sys.time(), "%Y-%m-%d %H:%M")
+current_date <- format(Sys.time(), "%Y-%m-%d %H:%M", tz = "America/Toronto")  # Montreal timezone
 
 # Build dates JSON array
 dates_json <- toJSON(unique_dates)
@@ -828,7 +828,7 @@ cat('<!DOCTYPE html>
         }
         .info h4 {
             margin: 0 0 14px 0;
-            color: #1e40af;
+            color: #000000;
             font-size: 16px;
             font-weight: 600;
             padding-bottom: 10px;
@@ -866,7 +866,7 @@ cat('<!DOCTYPE html>
         }
         .legend h4 {
             margin: 0 0 12px 0;
-            color: #1e40af;
+            color: #000000;
             font-size: 16px;
             font-weight: 600;
         }
