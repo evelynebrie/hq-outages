@@ -256,6 +256,29 @@ cat(sprintf("  Total unique months: %d\n", length(unique(files_dt$yearmon))))
 cat(sprintf("  Files per day: min=%d, max=%d, mean=%.1f\n",
             min(table(dates)), max(table(dates)), mean(table(dates))))
 
+# Deduplicate files within 10-minute window (handles duplicate scraping from AWS + GitHub)
+if (nrow(files_dt) > 1) {
+  files_to_keep <- logical(nrow(files_dt))
+  files_to_keep[1] <- TRUE
+
+  for (i in 2:nrow(files_dt)) {
+    time_diff <- as.numeric(difftime(
+      files_dt$timestamp_sort[i],
+      files_dt$timestamp_sort[i-1],
+      units = "mins"
+    ))
+
+    files_to_keep[i] <- (time_diff >= 10)
+  }
+
+  removed_count <- sum(!files_to_keep)
+  if (removed_count > 0) {
+    files_dt <- files_dt[files_to_keep, ]
+    files <- files_dt$file
+    cat(sprintf("  ⚠ Filtered out %d duplicate files (within 10 min of previous file)\n", removed_count))
+  }
+}
+
 # ==================================================================
 # STEP 2: CREATE OR LOAD HEX GRID TEMPLATE
 # ==================================================================
