@@ -1377,7 +1377,7 @@ cat(';
                 div.innerHTML += "<div class=\\"legend-item\\"><i style=\\"background:" + getColor(grades[i] + 1) + "\\"></i> " +
                     grades[i] + (grades[i + 1] ? "–" + grades[i + 1] : "+") + "</div>";
             }
-            div.innerHTML += "<div style=\\"font-size:10px;color:#666;margin-top:12px;padding-top:8px;border-top:1px solid #e5e7eb;line-height:1.4;\\">Le nombre d'occurrences indique combien de fois une panne a été détectée lors des lectures aux 15 minutes</div>";
+            div.innerHTML += "<div style=\\"font-size:10px;color:#666;margin-top:12px;padding-top:8px;border-top:1px solid #e5e7eb;line-height:1.4;\\">Le nombre d'occurrences indique combien de fois une panne a été détectée dans cet hexagone lors des lectures aux 15 minutes</div>";
             return div;
         };
         legend.addTo(map);
