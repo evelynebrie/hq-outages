@@ -40,9 +40,9 @@ SIMPLIFY <- 0        # No simplification - preserves original geometry for maxim
 BUFFER_SMALL_POLYS <- 0  # No buffer - keeps original outage sizes for credibility (10m stays 10m)
 MAX_FILES_PER_RUN <- 500  # Process max 500 files per run, then deploy. Next run continues from where it left off.
 
-# DATE RANGE FILTER: Process only files within this date range (to fill gaps)
+# DATE RANGE FILTER: Process only files from this date onwards (to fill gaps)
 DATE_FILTER_MIN <- "2026-02-15"  # Start date (inclusive)
-DATE_FILTER_MAX <- "2026-03-09"  # End date (inclusive)
+DATE_FILTER_MAX <- NULL  # No end date - process all files from MIN onwards
 
 # Create output directories
 dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
@@ -114,9 +114,10 @@ if (file.exists(cache_file)) {
 
   # Remove files in date filter range that have NO DATA in cumulative_hex_data
   # This clears corrupted/unprocessed files but keeps successfully processed ones
-  if (!is.null(DATE_FILTER_MIN) && !is.null(DATE_FILTER_MAX) && length(cumulative_hex_data) > 0) {
+  if (!is.null(DATE_FILTER_MIN) && length(cumulative_hex_data) > 0) {
+    max_desc <- if (is.null(DATE_FILTER_MAX)) "onwards" else DATE_FILTER_MAX
     cat(sprintf("\n🔧 VALIDATING cache for date range %s to %s...\n",
-                DATE_FILTER_MIN, DATE_FILTER_MAX))
+                DATE_FILTER_MIN, max_desc))
 
     # Get all dates that actually have data in the cache
     dates_with_data <- unique(unlist(lapply(cumulative_hex_data, function(x) x$dates)))
@@ -134,7 +135,9 @@ if (file.exists(cache_file)) {
       # Keep files if:
       # 1. Outside the date filter range, OR
       # 2. Inside the range AND has actual data in cache
-      if (file_date < DATE_FILTER_MIN || file_date > DATE_FILTER_MAX) {
+      outside_range <- file_date < DATE_FILTER_MIN || (!is.null(DATE_FILTER_MAX) && file_date > DATE_FILTER_MAX)
+
+      if (outside_range) {
         # Outside range - always keep
         kept_files <- c(kept_files, f)
       } else if (file_date %in% dates_with_data) {
@@ -157,9 +160,10 @@ if (file.exists(cache_file)) {
 }
 
 # Apply date range filter if specified
-if (!is.null(DATE_FILTER_MIN) && !is.null(DATE_FILTER_MAX)) {
-  cat(sprintf("\n🗓️  DATE FILTER: Processing only files from %s to %s\n",
-              DATE_FILTER_MIN, DATE_FILTER_MAX))
+if (!is.null(DATE_FILTER_MIN)) {
+  max_desc <- if (is.null(DATE_FILTER_MAX)) "onwards" else paste("to", DATE_FILTER_MAX)
+  cat(sprintf("\n🗓️  DATE FILTER: Processing files from %s %s\n",
+              DATE_FILTER_MIN, max_desc))
 
   # Extract dates from all files
   files_before_filter <- length(files)
@@ -172,7 +176,9 @@ if (!is.null(DATE_FILTER_MIN) && !is.null(DATE_FILTER_MAX)) {
                        substr(file_date, 5, 6), "-",
                        substr(file_date, 7, 8))
 
-    if (file_date >= DATE_FILTER_MIN && file_date <= DATE_FILTER_MAX) {
+    in_range <- file_date >= DATE_FILTER_MIN && (is.null(DATE_FILTER_MAX) || file_date <= DATE_FILTER_MAX)
+
+    if (in_range) {
       date_filtered_files <- c(date_filtered_files, f)
     }
   }
