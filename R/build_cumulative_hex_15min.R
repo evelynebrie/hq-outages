@@ -1079,7 +1079,49 @@ cat(';
             });
         }
         loadDailyData();
-        
+
+        // Auto-refresh: Reload data every 5 minutes to get latest updates
+        function refreshData() {
+            console.log("Auto-refreshing data...");
+
+            // Reload current outages
+            fetch("current.geojson?" + Date.now())
+                .then(function(r) {
+                    if (!r.ok) throw new Error("HTTP " + r.status);
+                    return r.json();
+                })
+                .then(function(data) {
+                    allData.current = data;
+                    updateCurrentCount();
+                    var dateSelect = document.getElementById("dateSelect");
+                    if (dateSelect && dateSelect.value === "current") {
+                        updateMap();
+                    }
+
+                    // Show brief update notification
+                    showUpdateNotification();
+                })
+                .catch(function(e) {
+                    console.error("Error refreshing current.geojson:", e);
+                });
+        }
+
+        function showUpdateNotification() {
+            var notification = document.createElement("div");
+            notification.style.cssText = "position: fixed; top: 20px; right: 20px; background: #10b981; color: white; padding: 12px 20px; border-radius: 6px; font-size: 14px; z-index: 10000; box-shadow: 0 4px 6px rgba(0,0,0,0.1);";
+            notification.textContent = "✓ Données mises à jour";
+            document.body.appendChild(notification);
+
+            setTimeout(function() {
+                notification.style.opacity = "0";
+                notification.style.transition = "opacity 0.5s";
+                setTimeout(function() { document.body.removeChild(notification); }, 500);
+            }, 2000);
+        }
+
+        // Refresh every 5 minutes (300000 ms)
+        setInterval(refreshData, 300000);
+
         function updateCurrentCount() {
             var countSpan = document.getElementById("currentCount");
             if (countSpan) {
