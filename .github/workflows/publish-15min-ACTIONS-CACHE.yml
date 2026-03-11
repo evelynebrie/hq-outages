@@ -84,8 +84,9 @@ jobs:
         uses: actions/cache@v3
         with:
           path: data/daily
-          key: dropbox-files-v1-${{ github.run_number }}
+          key: dropbox-files-v2-${{ github.run_id }}
           restore-keys: |
+            dropbox-files-v2-
             dropbox-files-v1-
 
       - name: Get Fresh Dropbox Access Token
@@ -350,7 +351,7 @@ jobs:
         uses: actions/cache/save@v3
         with:
           path: data/daily
-          key: dropbox-files-v1-${{ github.run_number }}
+          key: dropbox-files-v2-${{ github.run_id }}
 
       - name: Run 15-minute scrape analysis (processing only)
         run: |
