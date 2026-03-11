@@ -471,8 +471,10 @@ jobs:
           publish_branch: gh-pages
           publish_dir: public
           keep_files: false
+          exclude_assets: 'cumulative_snapshots'
           commit_message: "Update 15-minute scrape data (Actions Cache) - ${{ github.run_number }}"
           # Note: This deploys HTML + GeoJSON files only
+          # Excludes cumulative_snapshots/ to save repo space (not used by web app)
           # The .rds cache files are NOT in public/ anymore
 
       - name: Summary
