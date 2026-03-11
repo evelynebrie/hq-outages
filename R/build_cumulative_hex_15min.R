@@ -38,7 +38,7 @@ cache_file <- file.path(cache_dir, "cumulative_hex_data.rds")
 HEX_SIZE <- 1000     # Hex size in meters
 SIMPLIFY <- 0        # No simplification - preserves original geometry for maximum accuracy
 BUFFER_SMALL_POLYS <- 0  # No buffer - keeps original outage sizes for credibility (10m stays 10m)
-MAX_FILES_PER_RUN <- 100  # Process max 100 files per run, then deploy. Next run continues from where it left off.
+MAX_FILES_PER_RUN <- 500  # Process max 500 files per run, then deploy. Next run continues from where it left off.
 
 # DATE RANGE FILTER: Process only files within this date range (to fill gaps)
 DATE_FILTER_MIN <- "2026-02-15"  # Start date (inclusive)
