@@ -112,10 +112,14 @@ if (file.exists(cache_file)) {
   cat(sprintf("  ✓ Loaded cache with %d hexagons and %d processed files\n",
               length(cumulative_hex_data), length(processed_files)))
 
-  # Remove files in date filter range from processed_files to force reprocessing
-  if (!is.null(DATE_FILTER_MIN) && !is.null(DATE_FILTER_MAX)) {
-    cat(sprintf("\n🔧 CLEARING cache for date range %s to %s...\n",
+  # Remove files in date filter range that have NO DATA in cumulative_hex_data
+  # This clears corrupted/unprocessed files but keeps successfully processed ones
+  if (!is.null(DATE_FILTER_MIN) && !is.null(DATE_FILTER_MAX) && length(cumulative_hex_data) > 0) {
+    cat(sprintf("\n🔧 VALIDATING cache for date range %s to %s...\n",
                 DATE_FILTER_MIN, DATE_FILTER_MAX))
+
+    # Get all dates that actually have data in the cache
+    dates_with_data <- unique(unlist(lapply(cumulative_hex_data, function(x) x$dates)))
 
     cleared_count <- 0
     kept_files <- character()
@@ -127,17 +131,28 @@ if (file.exists(cache_file)) {
                          substr(file_date, 5, 6), "-",
                          substr(file_date, 7, 8))
 
-      # Keep only files OUTSIDE the date filter range
+      # Keep files if:
+      # 1. Outside the date filter range, OR
+      # 2. Inside the range AND has actual data in cache
       if (file_date < DATE_FILTER_MIN || file_date > DATE_FILTER_MAX) {
+        # Outside range - always keep
+        kept_files <- c(kept_files, f)
+      } else if (file_date %in% dates_with_data) {
+        # Inside range but has data - keep it
         kept_files <- c(kept_files, f)
       } else {
+        # Inside range with no data - clear it for reprocessing
         cleared_count <- cleared_count + 1
       }
     }
 
-    cat(sprintf("  ✓ Cleared %d files from cache in date range\n", cleared_count))
-    cat(sprintf("  ✓ Kept %d files outside date range\n", length(kept_files)))
-    processed_files <- kept_files
+    if (cleared_count > 0) {
+      cat(sprintf("  ✓ Cleared %d files without data in cache\n", cleared_count))
+      cat(sprintf("  ✓ Kept %d files (outside range or with data)\n", length(kept_files)))
+      processed_files <- kept_files
+    } else {
+      cat("  ✓ All files in range have data - no clearing needed\n")
+    }
   }
 }
 
