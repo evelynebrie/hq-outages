@@ -1015,11 +1015,28 @@ cat('<!DOCTYPE html>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://unpkg.com/leaflet-control-geocoder@2.4.0/dist/Control.Geocoder.js"></script>
     <script>
-        var map = L.map("map").setView([45.75, -73.35], 9);
+        var map = L.map("map").setView([45.75, -73.35], 10);
         L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
             attribution: "OpenStreetMap"
         }).addTo(map);
-        
+
+        // Add address search bar
+        L.Control.geocoder({
+            defaultMarkGeocode: false,
+            placeholder: "Rechercher une adresse...",
+            errorMessage: "Adresse non trouvée",
+            position: "topleft"
+        }).on("markgeocode", function(e) {
+            var bbox = e.geocode.bbox;
+            var poly = L.polygon([
+                bbox.getSouthEast(),
+                bbox.getNorthEast(),
+                bbox.getNorthWest(),
+                bbox.getSouthWest()
+            ]);
+            map.fitBounds(poly.getBounds());
+        }).addTo(map);
+
         var allData = { total: null, daily: {}, current: null };
         var currentLayer = null;
         var lastReadingTime = "', file = html_file, sep = "")
