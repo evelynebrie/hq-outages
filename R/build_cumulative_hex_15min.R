@@ -819,6 +819,27 @@ cat('<!DOCTYPE html>
         .controls select:hover {
             border-color: #a3a3a3;
         }
+        .toggle-data-btn {
+            width: 100%;
+            padding: 8px 10px;
+            margin-top: 10px;
+            background: #f3f4f6;
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
+            font-size: 13px;
+            font-family: inherit;
+            color: #1a1a1a;
+            cursor: pointer;
+            transition: background-color 0.2s, border-color 0.2s;
+            font-weight: 500;
+        }
+        .toggle-data-btn:hover {
+            background: #e5e7eb;
+            border-color: #9ca3af;
+        }
+        .toggle-data-btn:active {
+            background: #d1d5db;
+        }
         .controls select:focus {
             outline: none;
             border-color: #525252;
@@ -1045,7 +1066,30 @@ cat(most_recent_datetime, file = html_file, sep = "")
 
 cat('";
         var dataLoaded = { total: false, current: false };
-        
+        var hexDataVisible = true;
+        var previousView = "all";
+
+        function toggleHexData() {
+            var btn = document.getElementById("toggleDataBtn");
+            var dateSelect = document.getElementById("dateSelect");
+
+            if (hexDataVisible) {
+                // Hide data
+                if (currentLayer) {
+                    map.removeLayer(currentLayer);
+                }
+                previousView = dateSelect.value;
+                btn.textContent = "Afficher les données";
+                hexDataVisible = false;
+            } else {
+                // Show data
+                dateSelect.value = previousView;
+                updateMap();
+                btn.textContent = "Masquer les données";
+                hexDataVisible = true;
+            }
+        }
+
         // Load current outages FIRST (priority)
         fetch("current.geojson")
             .then(function(r) { 
@@ -1375,6 +1419,7 @@ cat('</span></div>";
             });
             selectHtml += "</optgroup>";
             selectHtml += "</select>";
+            selectHtml += "<button id=\\"toggleDataBtn\\" onclick=\\"toggleHexData()\\" class=\\"toggle-data-btn\\">Masquer les données</button>";
             div.innerHTML = selectHtml;
             return div;
         };
