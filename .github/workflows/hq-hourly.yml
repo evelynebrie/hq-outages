@@ -1,7 +1,7 @@
-name: HQ outages hourly (consistent timing)
+name: HQ outages every 15 minutes
 on:
   schedule:
-    - cron: "16 * * * *"
+    - cron: "*/15 * * * *"
   workflow_dispatch: {}
 jobs:
   run:
