@@ -2,8 +2,8 @@ name: Process 15-Minute HQ Outage Data with Actions Cache (NEW)
 
 on:
   schedule:
-    # Run every 30 minutes to process new 15-minute scraped data
-    - cron: '*/30 * * * *'
+    # Failsafe: runs every 45 minutes to restart if self-trigger fails
+    - cron: '*/45 * * * *'
   workflow_dispatch:
 
 permissions:
