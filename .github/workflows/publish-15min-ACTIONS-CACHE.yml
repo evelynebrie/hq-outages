@@ -503,3 +503,11 @@ jobs:
           echo "  • 10 GB cache limit (plenty for full year)"
           echo "  • Old workflow still available as backup"
           echo "========================================="
+
+      - name: Trigger next run
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "🔄 Triggering next workflow run..."
+          gh workflow run publish-15min-ACTIONS-CACHE.yml
+          echo "✅ Next run triggered successfully"
