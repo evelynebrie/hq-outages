@@ -2,8 +2,8 @@ name: Process 15-Minute HQ Outage Data with Actions Cache (NEW)
 
 on:
   schedule:
-    # Run every hour to process new 15-minute scraped data
-    - cron: '*/15 * * * *'
+    # Run every 30 minutes to process new 15-minute scraped data
+    - cron: '*/30 * * * *'
   workflow_dispatch:
 
 permissions:
