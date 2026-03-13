@@ -10,6 +10,10 @@ permissions:
   contents: write
   actions: write
 
+concurrency:
+  group: hq-outages-processing
+  cancel-in-progress: false  # Queue new runs instead of canceling in-progress ones
+
 jobs:
   build:
     runs-on: ubuntu-latest
