@@ -1,0 +1,82 @@
+name: Quick Deploy (Use Existing Data)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  quick-deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Setup R
+        uses: r-lib/actions/setup-r@v2
+        with:
+          use-public-rspm: true
+
+      - name: Install R packages (minimal)
+        run: |
+          Rscript -e 'install.packages(c("sf","dplyr","jsonlite","data.table"), repos="https://cloud.r-project.org")'
+
+      - name: Download existing data from gh-pages
+        run: |
+          echo "Downloading existing GeoJSON files from gh-pages..."
+          mkdir -p public/total public/daily public/monthly public/cumulative_snapshots
+
+          # Download regional files
+          for region in west central_west central central_east east far_east; do
+            echo "  Downloading total_exposure_${region}.geojson..."
+            curl -f -L -o "public/total/total_exposure_${region}.geojson" \
+              "https://raw.githubusercontent.com/evelynebrie/hq-outages-public/gh-pages/total/total_exposure_${region}.geojson" \
+              || echo "  Warning: Could not download ${region} file"
+          done
+
+          echo "  Downloading index.html..."
+          curl -f -L -o "public/index.html" \
+            "https://raw.githubusercontent.com/evelynebrie/hq-outages-public/gh-pages/index.html" \
+            || echo "  Warning: Could not download index.html"
+
+          echo "Done downloading existing files"
+
+      - name: Generate summary statistics only
+        run: |
+          echo "Generating summary statistics from existing data..."
+          Rscript R/generate_summaries.R || echo "Summary generation failed (non-critical)"
+
+      - name: Copy Mapbox visualization
+        run: |
+          if [ -f "index-mapbox.html" ]; then
+            cp index-mapbox.html public/index-mapbox.html
+            echo "Copied Mapbox HTML"
+          fi
+
+          if [ -f "index-landing.html" ]; then
+            cp index-landing.html public/index-landing.html
+            echo "Copied landing page"
+          fi
+
+      - name: Deploy to PUBLIC repo (gh-pages)
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          personal_token: ${{ secrets.PUBLIC_REPO_TOKEN }}
+          external_repository: evelynebrie/hq-outages-public
+          publish_branch: gh-pages
+          publish_dir: public
+          keep_files: true
+          commit_message: "Quick deploy with updated summaries - ${{ github.run_number }}"
+
+      - name: Summary
+        run: |
+          echo "========================================="
+          echo "Quick Deploy Complete"
+          echo "========================================="
+          echo ""
+          echo "View at: https://evelynebrie.github.io/hq-outages-public/"
+          echo ""
+          echo "Note: This used existing data files and only regenerated summaries"
+          echo "========================================="

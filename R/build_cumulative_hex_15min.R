@@ -758,9 +758,16 @@ regions <- list(
   list(name = "far_east", lon_min = -63.0, lon_max = -61.46)
 )
 
-for (region in regions) {
-  regional_data <- total_output %>%
-    filter(centroid_lon >= region$lon_min & centroid_lon < region$lon_max)
+for (i in seq_along(regions)) {
+  region <- regions[[i]]
+  is_last_region <- (i == length(regions))
+
+  # Use <= for last region to include eastern boundary
+  regional_data <- if (is_last_region) {
+    total_output %>% filter(centroid_lon >= region$lon_min & centroid_lon <= region$lon_max)
+  } else {
+    total_output %>% filter(centroid_lon >= region$lon_min & centroid_lon < region$lon_max)
+  }
 
   if (nrow(regional_data) > 0) {
     region_file <- file.path(output_dir, "total", sprintf("total_exposure_%s.geojson", region$name))
@@ -777,9 +784,16 @@ cat(sprintf("  ✓ Mean occurrences per hex: %.1f\n", mean(total_summary$total_o
 cat("\n[INFO] Saving regional snapshots...\n")
 snapshot_date <- format(Sys.Date(), "%Y%m%d")
 
-for (region in regions) {
-  regional_data <- total_output %>%
-    filter(centroid_lon >= region$lon_min & centroid_lon < region$lon_max)
+for (i in seq_along(regions)) {
+  region <- regions[[i]]
+  is_last_region <- (i == length(regions))
+
+  # Use <= for last region to include eastern boundary
+  regional_data <- if (is_last_region) {
+    total_output %>% filter(centroid_lon >= region$lon_min & centroid_lon <= region$lon_max)
+  } else {
+    total_output %>% filter(centroid_lon >= region$lon_min & centroid_lon < region$lon_max)
+  }
 
   if (nrow(regional_data) > 0) {
     snapshot_file <- file.path(cumulative_snapshots_dir,
