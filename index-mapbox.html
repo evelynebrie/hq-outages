@@ -155,8 +155,21 @@
         }
 
         async function loadAllDailyData() {
-            const totalResp = await fetch('total/total_exposure.geojson');
-            allData.total = await totalResp.json();
+            // Load all regional files
+            const regions = ['west', 'central_west', 'central', 'central_east', 'east', 'far_east'];
+            const regionalPromises = regions.map(region =>
+                fetch(`total/total_exposure_${region}.geojson`).then(r => r.json())
+            );
+
+            const regionalData = await Promise.all(regionalPromises);
+
+            // Merge all regions into one GeoJSON
+            allData.total = {
+                type: 'FeatureCollection',
+                features: regionalData.flatMap(data => data.features)
+            };
+
+            console.log(`Loaded ${allData.total.features.length} hexagons from ${regions.length} regions`);
 
             const dateSelect = document.getElementById('dateSelect');
             const dates = [...new Set(allData.total.features.flatMap(f => {

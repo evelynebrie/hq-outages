@@ -746,11 +746,30 @@ total_summary$all_datetimes <- sapply(cumulative_hex_data, function(x) {
 
 total_output <- total_summary %>% st_transform(4326)
 
-output_file <- file.path(output_dir, "total", "total_exposure.geojson")
-st_write(total_output, output_file, delete_dsn = TRUE, quiet = TRUE,
-         layer_options = "COORDINATE_PRECISION=5")
+# Split into regional files to stay under GitHub's 100 MB limit
+cat("\n📍 Splitting into regional files...\n")
 
-cat(sprintf("  ✓ Total hexagons affected: %d\n", nrow(total_output)))
+regions <- list(
+  list(name = "west", lon_min = -79.54, lon_max = -75.0),
+  list(name = "central_west", lon_min = -75.0, lon_max = -72.0),
+  list(name = "central", lon_min = -72.0, lon_max = -69.0),
+  list(name = "central_east", lon_min = -69.0, lon_max = -66.0),
+  list(name = "east", lon_min = -66.0, lon_max = -63.0),
+  list(name = "far_east", lon_min = -63.0, lon_max = -61.46)
+)
+
+for (region in regions) {
+  regional_data <- total_output %>%
+    filter(centroid_lon >= region$lon_min & centroid_lon < region$lon_max)
+
+  if (nrow(regional_data) > 0) {
+    region_file <- file.path(output_dir, "total", sprintf("total_exposure_%s.geojson", region$name))
+    st_write(regional_data, region_file, delete_dsn = TRUE, quiet = TRUE)
+    cat(sprintf("  ✓ %s: %d hexagons\n", region$name, nrow(regional_data)))
+  }
+}
+
+cat(sprintf("\n  ✓ Total hexagons affected: %d\n", nrow(total_output)))
 cat(sprintf("  ✓ Max occurrences per hex: %d\n", max(total_summary$total_occurrences)))
 cat(sprintf("  ✓ Mean occurrences per hex: %.1f\n", mean(total_summary$total_occurrences)))
 
@@ -1138,15 +1157,28 @@ cat('";
                 updateCurrentCount();
             });
         
-        // Load total data
-        fetch("total/total_exposure.geojson")
-            .then(function(r) { return r.json(); })
-            .then(function(data) {
-                console.log("Total data loaded:", data.features ? data.features.length : 0, "features");
-                allData.total = data;
+        // Load regional data files and merge them
+        var regions = ["west", "central_west", "central", "central_east", "east", "far_east"];
+        var regionalPromises = regions.map(function(region) {
+            return fetch("total/total_exposure_" + region + ".geojson").then(function(r) { return r.json(); });
+        });
+
+        Promise.all(regionalPromises)
+            .then(function(regionalData) {
+                // Merge all regions
+                var allFeatures = [];
+                regionalData.forEach(function(data) {
+                    if (data.features) {
+                        allFeatures = allFeatures.concat(data.features);
+                    }
+                });
+                allData.total = { type: "FeatureCollection", features: allFeatures };
+                console.log("Total data loaded from", regions.length, "regions:", allFeatures.length, "features");
                 dataLoaded.total = true;
-                // Initial map update - show current if loaded, otherwise total
                 updateMap();
+            })
+            .catch(function(e) {
+                console.error("Error loading regional data:", e);
             });
         
         var dates = ', file = html_file, sep = "")
