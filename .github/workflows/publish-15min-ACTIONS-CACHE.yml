@@ -438,11 +438,22 @@ jobs:
             echo "✅ index.html created successfully"
           fi
 
-          # Check for critical data file
-          if [ ! -f "public/total/total_exposure.geojson" ]; then
-            echo "❌ CRITICAL: total_exposure.geojson not created!"
+          # Check for critical data files (6 regional files)
+          REGIONAL_FILES=("west" "central_west" "central" "central_east" "east" "far_east")
+          MISSING_REGIONS=()
+
+          for region in "${REGIONAL_FILES[@]}"; do
+            if [ ! -f "public/total/total_exposure_${region}.geojson" ]; then
+              MISSING_REGIONS+=("$region")
+            fi
+          done
+
+          if [ ${#MISSING_REGIONS[@]} -gt 0 ]; then
+            echo "❌ CRITICAL: Missing regional files: ${MISSING_REGIONS[*]}"
             exit 1
           fi
+
+          echo "✅ All 6 regional files created successfully"
 
           DAILY_COUNT=$(find public/daily -name "daily_*.geojson" 2>/dev/null | wc -l)
           MONTHLY_COUNT=$(find public/monthly -name "monthly_*.geojson" 2>/dev/null | wc -l)
