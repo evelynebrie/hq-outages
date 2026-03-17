@@ -45,32 +45,35 @@ jobs:
           key: hq-hex-grid-15min-v2
           restore-keys: hq-hex-grid-
 
-      - name: Verify cache
+      # Restore public directory with all generated outputs
+      - name: Restore public directory cache
+        uses: actions/cache/restore@v3
+        with:
+          path: public
+          key: hq-public-outputs-v1-${{ github.run_number }}
+          restore-keys: |
+            hq-public-outputs-v1-
+
+      - name: Verify caches
         run: |
+          echo "Checking restored caches..."
           if [ -f "cache/cumulative_hex_data.rds" ]; then
-            echo "Cache restored successfully"
-            ls -lh cache/cumulative_hex_data.rds
+            echo "✓ Data cache restored: $(du -h cache/cumulative_hex_data.rds | cut -f1)"
           else
-            echo "WARNING: No cache found - script will process all files"
+            echo "WARNING: No data cache found"
           fi
 
-      - name: Run R script (uses cache, regenerates HTML)
-        env:
-          QUICK_DEPLOY: "true"
+          if [ -d "public" ]; then
+            echo "✓ Public directory restored"
+            echo "  Files: $(find public -type f | wc -l)"
+            echo "  Size: $(du -sh public | cut -f1)"
+          else
+            echo "WARNING: No public directory cache"
+          fi
+
+      - name: Generate summary statistics only
         run: |
-          echo "Running R script in QUICK DEPLOY mode..."
-          echo "This will skip file processing and regenerate HTML/summaries from cache"
-
-          mkdir -p data/daily cache public
-
-          # Script will use cache in quick deploy mode
-          Rscript R/build_cumulative_hex_15min.R
-
-      - name: Generate summary statistics
-        env:
-          QUICK_DEPLOY: "true"
-        run: |
-          echo "Generating summary statistics..."
+          echo "Generating summary statistics from existing outputs..."
           Rscript R/generate_summaries.R
 
       - name: Copy Mapbox and landing page

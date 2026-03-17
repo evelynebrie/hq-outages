@@ -84,6 +84,15 @@ jobs:
           key: hq-hex-grid-15min-v2
           restore-keys: hq-hex-grid-
 
+      # Restore public directory (previously generated outputs)
+      - name: Restore public directory cache
+        uses: actions/cache/restore@v3
+        with:
+          path: public
+          key: hq-public-outputs-v1-${{ github.run_number }}
+          restore-keys: |
+            hq-public-outputs-v1-
+
       # NEW: Cache downloaded Dropbox files to avoid re-downloading 7000+ files every run
       - name: Restore Dropbox files cache
         uses: actions/cache/restore@v3
@@ -398,6 +407,14 @@ jobs:
         with:
           path: cache/cumulative_hex_data.rds
           key: hq-cumulative-cache-v2-${{ github.run_number }}
+
+      # Save generated outputs (daily, monthly, regional files, HTML)
+      - name: Save public directory cache (even on timeout/failure)
+        if: always()  # Run even if R script failed/timed out
+        uses: actions/cache/save@v3
+        with:
+          path: public
+          key: hq-public-outputs-v1-${{ github.run_number }}
 
       - name: Generate summary statistics
         run: |
