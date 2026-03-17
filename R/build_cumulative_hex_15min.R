@@ -747,18 +747,19 @@ total_summary$all_datetimes <- sapply(cumulative_hex_data, function(x) {
 total_output <- total_summary %>% st_transform(4326)
 
 output_file <- file.path(output_dir, "total", "total_exposure.geojson")
-st_write(total_output, output_file, delete_dsn = TRUE, quiet = TRUE)
+st_write(total_output, output_file, delete_dsn = TRUE, quiet = TRUE,
+         layer_options = "COORDINATE_PRECISION=5")
 
 cat(sprintf("  ✓ Total hexagons affected: %d\n", nrow(total_output)))
 cat(sprintf("  ✓ Max occurrences per hex: %d\n", max(total_summary$total_occurrences)))
 cat(sprintf("  ✓ Mean occurrences per hex: %.1f\n", mean(total_summary$total_occurrences)))
 
-# Save cumulative snapshot
-snapshot_date <- format(Sys.Date(), "%Y%m%d")
-snapshot_file <- file.path(cumulative_snapshots_dir, 
-                          sprintf("cumulative_%s.geojson", snapshot_date))
-st_write(total_output, snapshot_file, delete_dsn = TRUE, quiet = TRUE)
-cat(sprintf("  ✓ Snapshot saved: cumulative_%s.geojson\n", snapshot_date))
+# Save cumulative snapshot (DISABLED - files too large)
+# snapshot_date <- format(Sys.Date(), "%Y%m%d")
+# snapshot_file <- file.path(cumulative_snapshots_dir,
+#                           sprintf("cumulative_%s.geojson", snapshot_date))
+# st_write(total_output, snapshot_file, delete_dsn = TRUE, quiet = TRUE)
+# cat(sprintf("  ✓ Snapshot saved: cumulative_%s.geojson\n", snapshot_date))
 
 # ==================================================================
 # STEP 7: GENERATE HTML VISUALIZATION
