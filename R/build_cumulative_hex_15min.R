@@ -162,7 +162,7 @@ if (file.exists(cache_file)) {
 # Apply date range filter if specified
 if (!is.null(DATE_FILTER_MIN)) {
   max_desc <- if (is.null(DATE_FILTER_MAX)) "onwards" else paste("to", DATE_FILTER_MAX)
-  cat(sprintf("\n🗓️  DATE FILTER: Processing files from %s %s\n",
+  cat(sprintf("\n[INFO]  DATE FILTER: Processing files from %s %s\n",
               DATE_FILTER_MIN, max_desc))
 
   # Extract dates from all files
@@ -192,7 +192,7 @@ if (!is.null(DATE_FILTER_MIN)) {
 new_files <- setdiff(files, processed_files)
 
 if (length(new_files) == 0) {
-  cat("\n✅ All files already processed! Using cached data.\n")
+  cat("\n[OK] All files already processed! Using cached data.\n")
   cat(sprintf("  • Total files: %d\n", length(files)))
   cat(sprintf("  • Already processed: %d\n", length(processed_files)))
   cat(sprintf("  • New files: 0\n"))
@@ -200,7 +200,7 @@ if (length(new_files) == 0) {
   
   files_to_process <- character()
 } else {
-  cat(sprintf("\n📊 File Summary:\n"))
+  cat(sprintf("\n[INFO] File Summary:\n"))
   cat(sprintf("  • Total files found: %d\n", length(files)))
   cat(sprintf("  • Previously processed: %d\n", length(processed_files)))
   cat(sprintf("  • New files to process: %d\n", length(new_files)))
@@ -218,7 +218,7 @@ timestamps <- regmatches(basenames,
                         regexpr("\\d{8}[Tt]\\d{6}", basenames, ignore.case = TRUE))
 
 if (length(timestamps) == 0) {
-  stop("❌ Could not parse timestamps from filenames. Expected format: *_YYYYMMDDTHHMMSS.geojson")
+  stop("[ERROR] Could not parse timestamps from filenames. Expected format: *_YYYYMMDDTHHMMSS.geojson")
 }
 
 # Parse into components
@@ -345,7 +345,7 @@ if (length(files_to_process) == 0) {
   # BATCH PROCESSING: Limit to MAX_FILES_PER_RUN files per run for incremental deployment
   total_new_files <- nrow(files_to_process_dt)
   if (total_new_files > MAX_FILES_PER_RUN) {
-    cat(sprintf("\n📦 BATCH PROCESSING: %d new files found, processing first %d this run\n",
+    cat(sprintf("\n[INFO] BATCH PROCESSING: %d new files found, processing first %d this run\n",
                 total_new_files, MAX_FILES_PER_RUN))
     cat(sprintf("   Remaining %d files will be processed in next run(s)\n",
                 total_new_files - MAX_FILES_PER_RUN))
@@ -747,7 +747,7 @@ total_summary$all_datetimes <- sapply(cumulative_hex_data, function(x) {
 total_output <- total_summary %>% st_transform(4326)
 
 # Split into regional files to stay under GitHub's 100 MB limit
-cat("\n📍 Splitting into regional files...\n")
+cat("\n[INFO] Splitting into regional files...\n")
 
 regions <- list(
   list(name = "west", lon_min = -79.54, lon_max = -75.0),
@@ -773,18 +773,21 @@ cat(sprintf("\n  ✓ Total hexagons affected: %d\n", nrow(total_output)))
 cat(sprintf("  ✓ Max occurrences per hex: %d\n", max(total_summary$total_occurrences)))
 cat(sprintf("  ✓ Mean occurrences per hex: %.1f\n", mean(total_summary$total_occurrences)))
 
-# Clean up old cumulative snapshots directory (no longer needed with regional split)
-if (dir.exists(cumulative_snapshots_dir)) {
-  unlink(cumulative_snapshots_dir, recursive = TRUE)
-  cat("\n  ✓ Removed old cumulative_snapshots directory\n")
-}
+# Save regional snapshots (same regions as total files)
+cat("\n[INFO] Saving regional snapshots...\n")
+snapshot_date <- format(Sys.Date(), "%Y%m%d")
 
-# Save cumulative snapshot (DISABLED - files too large, using regional split instead)
-# snapshot_date <- format(Sys.Date(), "%Y%m%d")
-# snapshot_file <- file.path(cumulative_snapshots_dir,
-#                           sprintf("cumulative_%s.geojson", snapshot_date))
-# st_write(total_output, snapshot_file, delete_dsn = TRUE, quiet = TRUE)
-# cat(sprintf("  ✓ Snapshot saved: cumulative_%s.geojson\n", snapshot_date))
+for (region in regions) {
+  regional_data <- total_output %>%
+    filter(centroid_lon >= region$lon_min & centroid_lon < region$lon_max)
+
+  if (nrow(regional_data) > 0) {
+    snapshot_file <- file.path(cumulative_snapshots_dir,
+                              sprintf("cumulative_%s_%s.geojson", snapshot_date, region$name))
+    st_write(regional_data, snapshot_file, delete_dsn = TRUE, quiet = TRUE)
+    cat(sprintf("  ✓ %s: %d hexagons\n", region$name, nrow(regional_data)))
+  }
+}
 
 # ==================================================================
 # STEP 7: GENERATE HTML VISUALIZATION
@@ -1531,7 +1534,7 @@ elapsed <- as.numeric(difftime(Sys.time(), start_time, units = "secs"))
 total_files <- length(files)
 
 cat("\n========================================\n")
-cat("✅ PROCESSING COMPLETE\n")
+cat("[OK] PROCESSING COMPLETE\n")
 cat("========================================\n")
 cat(sprintf("Total processing time: %.1f seconds\n", elapsed))
 cat(sprintf("Files processed: %d\n", total_files))
