@@ -1,15 +1,16 @@
-name: Quick Deploy (Use Existing Data)
+name: Quick Deploy (Regenerate HTML from Cache)
 
 on:
   workflow_dispatch:
 
 permissions:
   contents: write
+  actions: write
 
 jobs:
   quick-deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 30
 
     steps:
       - uses: actions/checkout@v3
@@ -19,36 +20,56 @@ jobs:
         with:
           use-public-rspm: true
 
-      - name: Install R packages (minimal)
+      - name: System libraries
         run: |
-          Rscript -e 'install.packages(c("sf","dplyr","jsonlite","data.table"), repos="https://cloud.r-project.org")'
+          sudo apt-get update
+          sudo apt-get install -y libgdal-dev libgeos-dev libproj-dev libudunits2-dev
 
-      - name: Download existing data from gh-pages
+      - name: Install R packages
         run: |
-          echo "Downloading existing GeoJSON files from gh-pages..."
-          mkdir -p public/total public/daily public/monthly public/cumulative_snapshots
+          Rscript -e 'install.packages(c("sf","dplyr","fs","purrr","jsonlite","data.table"), repos="https://cloud.r-project.org")'
 
-          # Download regional files
-          for region in west central_west central central_east east far_east; do
-            echo "  Downloading total_exposure_${region}.geojson..."
-            curl -f -L -o "public/total/total_exposure_${region}.geojson" \
-              "https://raw.githubusercontent.com/evelynebrie/hq-outages-public/gh-pages/total/total_exposure_${region}.geojson" \
-              || echo "  Warning: Could not download ${region} file"
-          done
+      - name: Restore cumulative hex data cache
+        uses: actions/cache/restore@v3
+        with:
+          path: cache/cumulative_hex_data.rds
+          key: hq-cumulative-cache-v2-${{ github.run_number }}
+          restore-keys: |
+            hq-cumulative-cache-v2-
+            hq-cumulative-cache-
 
-          echo "  Downloading index.html..."
-          curl -f -L -o "public/index.html" \
-            "https://raw.githubusercontent.com/evelynebrie/hq-outages-public/gh-pages/index.html" \
-            || echo "  Warning: Could not download index.html"
+      - name: Restore hex grid cache
+        uses: actions/cache@v3
+        with:
+          path: public/hex_grid_template.rds
+          key: hq-hex-grid-15min-v2
+          restore-keys: hq-hex-grid-
 
-          echo "Done downloading existing files"
-
-      - name: Generate summary statistics only
+      - name: Verify cache
         run: |
-          echo "Generating summary statistics from existing data..."
-          Rscript R/generate_summaries.R || echo "Summary generation failed (non-critical)"
+          if [ -f "cache/cumulative_hex_data.rds" ]; then
+            echo "Cache restored successfully"
+            ls -lh cache/cumulative_hex_data.rds
+          else
+            echo "WARNING: No cache found - script will process all files"
+          fi
 
-      - name: Copy Mapbox visualization
+      - name: Run R script (uses cache, regenerates HTML)
+        run: |
+          echo "Running R script with cache..."
+          echo "This will skip processing cached files and regenerate HTML with regional loading"
+
+          mkdir -p data/daily cache public
+
+          # Script will use cache and only generate outputs
+          Rscript R/build_cumulative_hex_15min.R
+
+      - name: Generate summary statistics
+        run: |
+          echo "Generating summary statistics..."
+          Rscript R/generate_summaries.R
+
+      - name: Copy Mapbox and landing page
         run: |
           if [ -f "index-mapbox.html" ]; then
             cp index-mapbox.html public/index-mapbox.html
@@ -67,8 +88,8 @@ jobs:
           external_repository: evelynebrie/hq-outages-public
           publish_branch: gh-pages
           publish_dir: public
-          keep_files: true
-          commit_message: "Quick deploy with updated summaries - ${{ github.run_number }}"
+          keep_files: false
+          commit_message: "Quick deploy with regenerated HTML - ${{ github.run_number }}"
 
       - name: Summary
         run: |
@@ -78,5 +99,5 @@ jobs:
           echo ""
           echo "View at: https://evelynebrie.github.io/hq-outages-public/"
           echo ""
-          echo "Note: This used existing data files and only regenerated summaries"
+          echo "Used cache - regenerated HTML with regional file loading"
           echo "========================================="
