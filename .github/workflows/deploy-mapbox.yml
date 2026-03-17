@@ -1,0 +1,82 @@
+name: Deploy Mapbox Visualization (Separate)
+
+on:
+  # Run after the main workflow completes
+  workflow_run:
+    workflows: ["Process 15-Minute HQ Outage Data with Actions Cache (NEW)"]
+    types:
+      - completed
+
+  # Also allow manual trigger
+  workflow_dispatch:
+
+  # Or run on a schedule (every hour)
+  schedule:
+    - cron: '15 * * * *'  # 15 minutes past each hour
+
+permissions:
+  contents: write
+
+jobs:
+  deploy-mapbox:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Verify Mapbox HTML exists
+        run: |
+          echo "📋 Checking for Mapbox HTML file..."
+
+          if [ ! -f "index-mapbox.html" ]; then
+            echo "❌ index-mapbox.html not found in repository!"
+            echo "   Please ensure the file exists before running this workflow."
+            exit 1
+          fi
+
+          echo "✅ Found index-mapbox.html"
+          ls -lh index-mapbox.html
+
+      - name: Prepare deployment directory
+        run: |
+          echo "📦 Preparing Mapbox deployment..."
+
+          mkdir -p mapbox-deploy
+          cp index-mapbox.html mapbox-deploy/
+
+          # Optional: Copy the landing page if you want to use it
+          if [ -f "index-landing.html" ]; then
+            cp index-landing.html mapbox-deploy/
+            echo "✅ Also copied landing page"
+          fi
+
+          echo "✅ Mapbox HTML ready for deployment"
+
+      - name: Deploy Mapbox HTML to PUBLIC repo (gh-pages)
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          personal_token: ${{ secrets.PUBLIC_REPO_TOKEN }}
+          external_repository: evelynebrie/hq-outages-public
+          publish_branch: gh-pages
+          publish_dir: mapbox-deploy
+          keep_files: true  # IMPORTANT: Don't delete existing Leaflet files
+          commit_message: "Deploy Mapbox visualization - ${{ github.run_number }}"
+          destination_dir: .  # Deploy to root of gh-pages
+
+      - name: Summary
+        run: |
+          echo ""
+          echo "========================================="
+          echo "✅ MAPBOX DEPLOYMENT COMPLETE"
+          echo "========================================="
+          echo ""
+          echo "🌐 Mapbox view at:"
+          echo "   https://evelynebrie.github.io/hq-outages-public/index-mapbox.html"
+          echo ""
+          echo "📝 Notes:"
+          echo "  • Deployed independently of Leaflet workflow"
+          echo "  • Uses same GeoJSON data from main workflow"
+          echo "  • Existing Leaflet files preserved (keep_files: true)"
+          echo "  • Remember to add your Mapbox access token!"
+          echo "========================================="

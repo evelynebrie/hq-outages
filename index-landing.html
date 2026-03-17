@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pannes de courant Hydro-Québec - Choisir la visualisation</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        .container {
+            max-width: 900px;
+            width: 100%;
+        }
+        .header {
+            text-align: center;
+            color: white;
+            margin-bottom: 40px;
+        }
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            text-shadow: 0 2px 10px rgba(0,0,0,0.2);
+        }
+        .header p {
+            font-size: 1.2em;
+            opacity: 0.9;
+        }
+        .cards {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 30px;
+            margin-top: 30px;
+        }
+        .card {
+            background: white;
+            border-radius: 15px;
+            padding: 40px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+            text-align: center;
+            text-decoration: none;
+            color: inherit;
+            display: block;
+        }
+        .card:hover {
+            transform: translateY(-10px);
+            box-shadow: 0 15px 50px rgba(0,0,0,0.3);
+        }
+        .card-icon {
+            font-size: 4em;
+            margin-bottom: 20px;
+        }
+        .card h2 {
+            font-size: 1.8em;
+            margin-bottom: 15px;
+            color: #333;
+        }
+        .card p {
+            color: #666;
+            line-height: 1.6;
+            margin-bottom: 20px;
+        }
+        .card .features {
+            list-style: none;
+            margin: 20px 0;
+            padding: 0;
+            text-align: left;
+        }
+        .card .features li {
+            padding: 8px 0;
+            color: #555;
+            font-size: 0.95em;
+        }
+        .card .features li::before {
+            content: "✓ ";
+            color: #667eea;
+            font-weight: bold;
+            margin-right: 8px;
+        }
+        .badge {
+            display: inline-block;
+            background: #667eea;
+            color: white;
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-size: 0.85em;
+            margin-top: 15px;
+        }
+        .leaflet-badge {
+            background: #198754;
+        }
+        .mapbox-badge {
+            background: #4264fb;
+        }
+        .info-box {
+            background: rgba(255,255,255,0.95);
+            border-radius: 10px;
+            padding: 20px;
+            margin-top: 30px;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.1);
+        }
+        .info-box h3 {
+            color: #333;
+            margin-bottom: 10px;
+        }
+        .info-box p {
+            color: #666;
+            line-height: 1.6;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📊 Pannes de courant Hydro-Québec</h1>
+            <p>Analyse cumulative - Choisissez votre visualisation</p>
+        </div>
+
+        <div class="cards">
+            <a href="index.html" class="card">
+                <div class="card-icon">🗺️</div>
+                <h2>Leaflet</h2>
+                <p>Visualisation classique avec OpenStreetMap</p>
+                <ul class="features">
+                    <li>Open source et léger</li>
+                    <li>Pas de clé API requise</li>
+                    <li>Tuiles OpenStreetMap</li>
+                    <li>Performance optimale</li>
+                </ul>
+                <span class="badge leaflet-badge">Version par défaut</span>
+            </a>
+
+            <a href="index-mapbox.html" class="card">
+                <div class="card-icon">🌐</div>
+                <h2>Mapbox GL</h2>
+                <p>Visualisation moderne avec rendu vectoriel</p>
+                <ul class="features">
+                    <li>Rendu vectoriel performant</li>
+                    <li>Styles cartographiques variés</li>
+                    <li>Animations fluides</li>
+                    <li>Haute qualité visuelle</li>
+                </ul>
+                <span class="badge mapbox-badge">Version alternative</span>
+            </a>
+        </div>
+
+        <div class="info-box">
+            <h3>📌 À propos</h3>
+            <p>
+                Ces visualisations affichent les pannes de courant d'Hydro-Québec sous forme de grille hexagonale.
+                Chaque hexagone représente une zone de 1 km² et est coloré selon le nombre cumulatif d'heures de panne enregistrées.
+                Les données sont mises à jour automatiquement toutes les 15 minutes.
+            </p>
+        </div>
+    </div>
+</body>
+</html>
