@@ -533,19 +533,22 @@ cat("  ✓ Cache is safe even if later steps fail!\n")
 # ==================================================================
 # STEP 3.5: GENERATE CURRENT OUTAGES (from most recent file)
 # ==================================================================
-cat("\n[3.5] Generating current outages from most recent file...\n")
 
-# Get the most recent file
-most_recent_file <- files_dt$file[nrow(files_dt)]
-most_recent_datetime <- files_dt$datetime[nrow(files_dt)]
-cat(sprintf("  Most recent file: %s\n", basename(most_recent_file)))
-cat(sprintf("  Timestamp: %s\n", most_recent_datetime))
+# Skip in quick deploy mode (no data files available)
+if (!QUICK_DEPLOY) {
+  cat("\n[3.5] Generating current outages from most recent file...\n")
 
-# Store count for HTML generation
-current_outage_count <- 0
+  # Get the most recent file
+  most_recent_file <- files_dt$file[nrow(files_dt)]
+  most_recent_datetime <- files_dt$datetime[nrow(files_dt)]
+  cat(sprintf("  Most recent file: %s\n", basename(most_recent_file)))
+  cat(sprintf("  Timestamp: %s\n", most_recent_datetime))
 
-# Process the most recent file to get current outages
-tryCatch({
+  # Store count for HTML generation
+  current_outage_count <- 0
+
+  # Process the most recent file to get current outages
+  tryCatch({
   current_data <- st_read(most_recent_file, quiet = TRUE) %>%
     st_transform(32618)
   
@@ -642,11 +645,19 @@ tryCatch({
   rm(current_data)
   gc(verbose = FALSE)
   
-}, error = function(e) {
-  cat(sprintf("  ⚠ Error processing current outages: %s\n", e$message))
+  }, error = function(e) {
+    cat(sprintf("  ⚠ Error processing current outages: %s\n", e$message))
+    empty_geojson <- '{"type":"FeatureCollection","features":[]}'
+    writeLines(empty_geojson, file.path(output_dir, "current.geojson"))
+  })
+} else {
+  # Quick deploy mode: skip current outages processing
+  cat("\n[3.5] QUICK DEPLOY: Skipping current outages generation\n")
+  cat("  Creating empty current.geojson\n")
   empty_geojson <- '{"type":"FeatureCollection","features":[]}'
   writeLines(empty_geojson, file.path(output_dir, "current.geojson"))
-})
+  current_outage_count <- 0
+}
 
 # ==================================================================
 # STEP 4: GENERATE DAILY SUMMARIES (OPTIMIZED - USE EXISTING DATA)
