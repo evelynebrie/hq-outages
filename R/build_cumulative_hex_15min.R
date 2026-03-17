@@ -526,9 +526,20 @@ cache_data <- list(
   processed_files = c(processed_files, files_to_process)
 )
 saveRDS(cache_data, cache_file)
-cat(sprintf("  ✓ Cache saved with %d hexagons and %d total files\n", 
+cat(sprintf("  ✓ Cache saved with %d hexagons and %d total files\n",
             length(cumulative_hex_data), length(cache_data$processed_files)))
 cat("  ✓ Cache is safe even if later steps fail!\n")
+
+# Track which dates were updated (for incremental daily summary generation)
+if (exists("files_to_process_dt") && nrow(files_to_process_dt) > 0) {
+  updated_dates <- unique(files_to_process_dt$date)
+  updated_months <- unique(files_to_process_dt$yearmon)
+  cat(sprintf("\n[INFO] Data updated for %d dates and %d months\n",
+              length(updated_dates), length(updated_months)))
+} else {
+  updated_dates <- character()
+  updated_months <- character()
+}
 
 # ==================================================================
 # STEP 3.5: GENERATE CURRENT OUTAGES (from most recent file)
@@ -660,7 +671,7 @@ if (!QUICK_DEPLOY) {
 }
 
 # ==================================================================
-# STEP 4: GENERATE DAILY SUMMARIES (OPTIMIZED - USE EXISTING DATA)
+# STEP 4: GENERATE DAILY SUMMARIES (INCREMENTAL - ONLY UPDATED DATES)
 # ==================================================================
 cat("\n[4] Generating daily summaries...\n")
 
@@ -668,11 +679,32 @@ cat("\n[4] Generating daily summaries...\n")
 # This prevents generating empty daily files for dates that haven't been processed yet
 unique_dates <- unique(unlist(lapply(cumulative_hex_data, function(x) x$dates)))
 unique_dates <- sort(unique_dates)
-cat(sprintf("  Processing %d unique dates from cache...\n", length(unique_dates)))
+
+# OPTIMIZATION: Only regenerate dates that were updated
+if (length(updated_dates) > 0) {
+  dates_to_generate <- updated_dates
+  cat(sprintf("  INCREMENTAL: Only regenerating %d updated dates (out of %d total)\n",
+              length(dates_to_generate), length(unique_dates)))
+} else {
+  dates_to_generate <- unique_dates
+  cat(sprintf("  Regenerating all %d dates (no incremental data)\n", length(unique_dates)))
+}
 
 # Build daily summaries from cumulative data
+skipped_count <- 0
+generated_count <- 0
+
 for (date in unique_dates) {
+  output_file <- file.path(output_dir, "daily", sprintf("daily_%s.geojson", date))
+
+  # Skip if date wasn't updated and output file exists
+  if (!date %in% dates_to_generate && file.exists(output_file)) {
+    skipped_count <- skipped_count + 1
+    next
+  }
+
   cat(sprintf("  • %s...", date))
+  generated_count <- generated_count + 1
   
   daily_hex_data <- list()
   
@@ -710,18 +742,44 @@ for (date in unique_dates) {
   }
 }
 
-cat(sprintf("  ✓ Generated daily summaries for %d dates\n", length(unique_dates)))
+if (skipped_count > 0) {
+  cat(sprintf("  ✓ Generated %d daily summaries, skipped %d unchanged\n",
+              generated_count, skipped_count))
+} else {
+  cat(sprintf("  ✓ Generated daily summaries for %d dates\n", generated_count))
+}
 
 # ==================================================================
-# STEP 5: GENERATE MONTHLY SUMMARIES (OPTIMIZED)
+# STEP 5: GENERATE MONTHLY SUMMARIES (INCREMENTAL - ONLY UPDATED MONTHS)
 # ==================================================================
 cat("\n[5] Generating monthly summaries...\n")
 
 unique_months <- unique(files_dt$yearmon)
-cat(sprintf("  Processing %d unique months...\n", length(unique_months)))
+
+# OPTIMIZATION: Only regenerate months that were updated
+if (length(updated_months) > 0) {
+  months_to_generate <- updated_months
+  cat(sprintf("  INCREMENTAL: Only regenerating %d updated months (out of %d total)\n",
+              length(months_to_generate), length(unique_months)))
+} else {
+  months_to_generate <- unique_months
+  cat(sprintf("  Regenerating all %d months (no incremental data)\n", length(unique_months)))
+}
+
+monthly_skipped <- 0
+monthly_generated <- 0
 
 for (month in unique_months) {
+  output_file <- file.path(output_dir, "monthly", sprintf("monthly_%s.geojson", month))
+
+  # Skip if month wasn't updated and output file exists
+  if (!month %in% months_to_generate && file.exists(output_file)) {
+    monthly_skipped <- monthly_skipped + 1
+    next
+  }
+
   cat(sprintf("  • %s...", month))
+  monthly_generated <- monthly_generated + 1
   
   month_dates <- unique(files_dt$date[files_dt$yearmon == month])
   monthly_hex_data <- list()
@@ -767,7 +825,12 @@ for (month in unique_months) {
   }
 }
 
-cat(sprintf("  ✓ Generated monthly summaries for %d months\n", length(unique_months)))
+if (monthly_skipped > 0) {
+  cat(sprintf("  ✓ Generated %d monthly summaries, skipped %d unchanged\n",
+              monthly_generated, monthly_skipped))
+} else {
+  cat(sprintf("  ✓ Generated monthly summaries for %d months\n", monthly_generated))
+}
 
 # ==================================================================
 # STEP 6: GENERATE TOTAL CUMULATIVE SUMMARY
