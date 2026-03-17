@@ -55,16 +55,20 @@ jobs:
           fi
 
       - name: Run R script (uses cache, regenerates HTML)
+        env:
+          QUICK_DEPLOY: "true"
         run: |
-          echo "Running R script with cache..."
-          echo "This will skip processing cached files and regenerate HTML with regional loading"
+          echo "Running R script in QUICK DEPLOY mode..."
+          echo "This will skip file processing and regenerate HTML/summaries from cache"
 
           mkdir -p data/daily cache public
 
-          # Script will use cache and only generate outputs
+          # Script will use cache in quick deploy mode
           Rscript R/build_cumulative_hex_15min.R
 
       - name: Generate summary statistics
+        env:
+          QUICK_DEPLOY: "true"
         run: |
           echo "Generating summary statistics..."
           Rscript R/generate_summaries.R

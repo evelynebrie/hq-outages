@@ -44,6 +44,9 @@ MAX_FILES_PER_RUN <- 1000  # Process max 1000 files per run, then deploy. Next r
 DATE_FILTER_MIN <- "2026-02-15"  # Start date (inclusive)
 DATE_FILTER_MAX <- NULL  # No end date - process all files from MIN onwards
 
+# QUICK DEPLOY MODE: Set via environment variable to skip file processing
+QUICK_DEPLOY <- Sys.getenv("QUICK_DEPLOY", "false") == "true"
+
 # Create output directories
 dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
 dir.create(file.path(output_dir, "daily"), recursive = TRUE, showWarnings = FALSE)
@@ -55,62 +58,87 @@ dir.create(cache_dir, recursive = TRUE, showWarnings = FALSE)
 # ==================================================================
 # STEP 1: PARSE ALL FILES WITH TIMESTAMPS
 # ==================================================================
-cat("\n[1] Scanning and parsing input files...\n")
 
-# PRIORITY: Look for POLYGON files first (these contain the actual outage areas)
-# Pattern: polygons_YYYYMMDDTHHMMSS.geojson
-polygon_files <- list.files(data_path, 
-                            pattern = "^polygons_.*\\d{8}[Tt]\\d{6}.*\\.geojson$", 
-                            full.names = TRUE,
-                            recursive = TRUE)
+if (QUICK_DEPLOY) {
+  cat("\n[QUICK DEPLOY MODE] Skipping file scanning - using cache only\n")
 
-cat(sprintf("  Found %d polygon files\n", length(polygon_files)))
-
-# Also check for joined files as fallback (these contain points, not ideal)
-joined_files <- list.files(data_path, 
-                           pattern = "^outages_joined_full_.*\\d{8}[Tt]\\d{6}.*\\.geojson$", 
-                           full.names = TRUE,
-                           recursive = TRUE)
-
-cat(sprintf("  Found %d joined point files (fallback)\n", length(joined_files)))
-
-# Prefer polygon files - they have the actual outage AREAS
-if (length(polygon_files) > 0) {
-  files <- polygon_files
-  cat("  ✓ Using POLYGON files (recommended - contains outage areas)\n")
-} else if (length(joined_files) > 0) {
-  files <- joined_files
-  cat("  ⚠ Using joined point files as fallback (less accurate)\n")
-  cat("    Note: Point files only show outage locations, not full affected areas\n")
-} else {
-  cat("⚠️  No files found matching patterns. Looking for:\n")
-  cat("   - polygons_YYYYMMDDTHHMMSS.geojson (preferred)\n")
-  cat("   - outages_joined_full_YYYYMMDDTHHMMSS.geojson (fallback)\n")
-  
-  # Debug: show what files ARE in the directory
-  all_files <- list.files(data_path, pattern = "\\.geojson$", full.names = FALSE, recursive = TRUE)
-  if (length(all_files) > 0) {
-    cat("\n  Files found in data directory:\n")
-    cat(paste("   -", head(all_files, 10), collapse = "\n"), "\n")
-    if (length(all_files) > 10) cat(sprintf("   ... and %d more\n", length(all_files) - 10))
+  # Must have cache in quick deploy mode
+  if (!file.exists(cache_file)) {
+    stop("Quick deploy mode requires existing cache file at: ", cache_file)
   }
-  
-  stop("No input files found")
-}
 
-# ==================================================================
-# LOAD CACHE IF IT EXISTS
-# ==================================================================
-cumulative_hex_data <- list()
-processed_files <- character()
-
-if (file.exists(cache_file)) {
-  cat("\n[CACHE] Loading previously processed data...\n")
+  # Load cache to get processed files list
+  cat("[CACHE] Loading cache...\n")
   cached_data <- readRDS(cache_file)
   cumulative_hex_data <- cached_data$cumulative_hex_data
   processed_files <- cached_data$processed_files
+
   cat(sprintf("  ✓ Loaded cache with %d hexagons and %d processed files\n",
               length(cumulative_hex_data), length(processed_files)))
+
+  # Use processed files as the file list
+  files <- processed_files
+  files_to_process <- character()  # Nothing new to process
+
+} else {
+  cat("\n[1] Scanning and parsing input files...\n")
+
+  # PRIORITY: Look for POLYGON files first (these contain the actual outage areas)
+  # Pattern: polygons_YYYYMMDDTHHMMSS.geojson
+  polygon_files <- list.files(data_path,
+                              pattern = "^polygons_.*\\d{8}[Tt]\\d{6}.*\\.geojson$",
+                              full.names = TRUE,
+                              recursive = TRUE)
+
+  cat(sprintf("  Found %d polygon files\n", length(polygon_files)))
+
+  # Also check for joined files as fallback (these contain points, not ideal)
+  joined_files <- list.files(data_path,
+                             pattern = "^outages_joined_full_.*\\d{8}[Tt]\\d{6}.*\\.geojson$",
+                             full.names = TRUE,
+                             recursive = TRUE)
+
+  cat(sprintf("  Found %d joined point files (fallback)\n", length(joined_files)))
+
+  # Prefer polygon files - they have the actual outage AREAS
+  if (length(polygon_files) > 0) {
+    files <- polygon_files
+    cat("  ✓ Using POLYGON files (recommended - contains outage areas)\n")
+  } else if (length(joined_files) > 0) {
+    files <- joined_files
+    cat("  ⚠ Using joined point files as fallback (less accurate)\n")
+    cat("    Note: Point files only show outage locations, not full affected areas\n")
+  } else {
+    cat("⚠️  No files found matching patterns. Looking for:\n")
+    cat("   - polygons_YYYYMMDDTHHMMSS.geojson (preferred)\n")
+    cat("   - outages_joined_full_YYYYMMDDTHHMMSS.geojson (fallback)\n")
+
+    # Debug: show what files ARE in the directory
+    all_files <- list.files(data_path, pattern = "\\.geojson$", full.names = FALSE, recursive = TRUE)
+    if (length(all_files) > 0) {
+      cat("\n  Files found in data directory:\n")
+      cat(paste("   -", head(all_files, 10), collapse = "\n"), "\n")
+      if (length(all_files) > 10) cat(sprintf("   ... and %d more\n", length(all_files) - 10))
+    }
+
+    stop("No input files found")
+  }
+}
+
+# ==================================================================
+# LOAD CACHE IF IT EXISTS (skip if already loaded in quick deploy mode)
+# ==================================================================
+if (!QUICK_DEPLOY) {
+  cumulative_hex_data <- list()
+  processed_files <- character()
+
+  if (file.exists(cache_file)) {
+    cat("\n[CACHE] Loading previously processed data...\n")
+    cached_data <- readRDS(cache_file)
+    cumulative_hex_data <- cached_data$cumulative_hex_data
+    processed_files <- cached_data$processed_files
+    cat(sprintf("  ✓ Loaded cache with %d hexagons and %d processed files\n",
+                length(cumulative_hex_data), length(processed_files)))
 
   # Remove files in date filter range that have NO DATA in cumulative_hex_data
   # This clears corrupted/unprocessed files but keeps successfully processed ones
@@ -157,10 +185,11 @@ if (file.exists(cache_file)) {
       cat("  ✓ All files in range have data - no clearing needed\n")
     }
   }
-}
+}  # End of cache loading if block
+}  # End of if (!QUICK_DEPLOY)
 
-# Apply date range filter if specified
-if (!is.null(DATE_FILTER_MIN)) {
+# Apply date range filter if specified (skip in quick deploy mode)
+if (!QUICK_DEPLOY && !is.null(DATE_FILTER_MIN)) {
   max_desc <- if (is.null(DATE_FILTER_MAX)) "onwards" else paste("to", DATE_FILTER_MAX)
   cat(sprintf("\n[INFO]  DATE FILTER: Processing files from %s %s\n",
               DATE_FILTER_MIN, max_desc))
@@ -188,24 +217,31 @@ if (!is.null(DATE_FILTER_MIN)) {
   files <- date_filtered_files
 }
 
-# Filter to only new files
-new_files <- setdiff(files, processed_files)
+# Filter to only new files (skip in quick deploy mode)
+if (!QUICK_DEPLOY) {
+  new_files <- setdiff(files, processed_files)
 
-if (length(new_files) == 0) {
-  cat("\n[OK] All files already processed! Using cached data.\n")
-  cat(sprintf("  • Total files: %d\n", length(files)))
-  cat(sprintf("  • Already processed: %d\n", length(processed_files)))
-  cat(sprintf("  • New files: 0\n"))
-  cat("\nSkipping to summaries generation...\n")
-  
-  files_to_process <- character()
+  if (length(new_files) == 0) {
+    cat("\n[OK] All files already processed! Using cached data.\n")
+    cat(sprintf("  • Total files: %d\n", length(files)))
+    cat(sprintf("  • Already processed: %d\n", length(processed_files)))
+    cat(sprintf("  • New files: 0\n"))
+    cat("\nSkipping to summaries generation...\n")
+
+    files_to_process <- character()
+  } else {
+    cat(sprintf("\n[INFO] File Summary:\n"))
+    cat(sprintf("  • Total files found: %d\n", length(files)))
+    cat(sprintf("  • Previously processed: %d\n", length(processed_files)))
+    cat(sprintf("  • New files to process: %d\n", length(new_files)))
+
+    files_to_process <- new_files
+  }
 } else {
-  cat(sprintf("\n[INFO] File Summary:\n"))
-  cat(sprintf("  • Total files found: %d\n", length(files)))
-  cat(sprintf("  • Previously processed: %d\n", length(processed_files)))
-  cat(sprintf("  • New files to process: %d\n", length(new_files)))
-  
-  files_to_process <- new_files
+  # Quick deploy: no new files to process, just regenerate outputs
+  cat("\n[QUICK DEPLOY] Skipping file processing - regenerating outputs from cache\n")
+  cat(sprintf("  • Cached hexagons: %d\n", length(cumulative_hex_data)))
+  cat(sprintf("  • Cached files: %d\n", length(processed_files)))
 }
 
 # Parse timestamps for ALL files (needed for summaries)
