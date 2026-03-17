@@ -160,6 +160,7 @@
 
             const dateSelect = document.getElementById('dateSelect');
             const dates = [...new Set(allData.total.features.flatMap(f => {
+                if (!f.properties.datetimes_affected) return [];
                 return f.properties.datetimes_affected.split(',').map(dt => dt.trim().split(' ')[0]);
             }))].sort();
 
@@ -195,6 +196,7 @@
 
             const filtered = JSON.parse(JSON.stringify(dailyData));
             filtered.features = filtered.features.map(f => {
+                if (!f.properties.datetimes_affected) return null;
                 const dts = f.properties.datetimes_affected.split(',').map(s => s.trim());
                 const matchingDts = dts.filter(dt => {
                     const dtHour = parseInt(dt.split(' ')[1].split(':')[0]);
