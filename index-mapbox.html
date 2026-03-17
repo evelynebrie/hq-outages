@@ -77,8 +77,8 @@
     <div class="info">
         <h4>Pannes de courant cumulatives</h4>
         <p><b>Taille des hexagones:</b> 1 km</p>
-        <p><b>Jours analysés:</b> 8</p>
-        <p style="font-size:11px;color:#999;">Mise à jour: 2026-01-09</p>
+        <p><b>Jours analysés:</b> <span id="days-count">Chargement...</span></p>
+        <p style="font-size:11px;color:#999;">Mise à jour: <span id="update-date">Chargement...</span></p>
     </div>
 
     <div class="legend">
@@ -162,6 +162,11 @@
             const dates = [...new Set(allData.total.features.flatMap(f => {
                 return f.properties.datetimes_affected.split(',').map(dt => dt.trim().split(' ')[0]);
             }))].sort();
+
+            // Update info panel with actual data
+            document.getElementById('days-count').textContent = dates.length;
+            const lastDate = dates[dates.length - 1];
+            document.getElementById('update-date').textContent = lastDate;
 
             for (const date of dates) {
                 const opt = document.createElement('option');
