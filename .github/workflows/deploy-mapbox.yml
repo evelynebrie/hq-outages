@@ -53,6 +53,12 @@ jobs:
 
           echo "✅ Mapbox HTML ready for deployment"
 
+      # Wait a bit to avoid race condition with main workflow deployment
+      - name: Wait for main deployment to settle
+        run: |
+          echo "⏳ Waiting 30 seconds to avoid deployment race condition..."
+          sleep 30
+
       - name: Deploy Mapbox HTML to PUBLIC repo (gh-pages)
         uses: peaceiris/actions-gh-pages@v3
         with:
