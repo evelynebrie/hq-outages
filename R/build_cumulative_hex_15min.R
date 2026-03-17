@@ -773,7 +773,13 @@ cat(sprintf("\n  ✓ Total hexagons affected: %d\n", nrow(total_output)))
 cat(sprintf("  ✓ Max occurrences per hex: %d\n", max(total_summary$total_occurrences)))
 cat(sprintf("  ✓ Mean occurrences per hex: %.1f\n", mean(total_summary$total_occurrences)))
 
-# Save cumulative snapshot (DISABLED - files too large)
+# Clean up old cumulative snapshots directory (no longer needed with regional split)
+if (dir.exists(cumulative_snapshots_dir)) {
+  unlink(cumulative_snapshots_dir, recursive = TRUE)
+  cat("\n  ✓ Removed old cumulative_snapshots directory\n")
+}
+
+# Save cumulative snapshot (DISABLED - files too large, using regional split instead)
 # snapshot_date <- format(Sys.Date(), "%Y%m%d")
 # snapshot_file <- file.path(cumulative_snapshots_dir,
 #                           sprintf("cumulative_%s.geojson", snapshot_date))
@@ -1538,9 +1544,8 @@ cat(sprintf("Most recent reading: %s\n", most_recent_datetime))
 cat("========================================\n")
 cat("Output structure:\n")
 cat("  • public/current.geojson (CURRENT OUTAGES)\n")
-cat("  • public/total/total_exposure.geojson\n")
+cat("  • public/total/total_exposure_[region].geojson (6 regional files)\n")
 cat("  • public/daily/daily_YYYY-MM-DD.geojson\n")
 cat("  • public/monthly/monthly_YYYY-MM.geojson\n")
-cat("  • public/cumulative_snapshots/cumulative_YYYYMMDD.geojson\n")
 cat("  • public/index.html\n")
 cat("========================================\n")
