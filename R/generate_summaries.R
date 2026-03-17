@@ -20,14 +20,21 @@ dir.create(summary_dir, recursive = TRUE, showWarnings = FALSE)
 # ==================================================================
 cat("[1] Loading data...\n")
 
-# Load total cumulative
-total_file <- file.path(output_dir, "total", "total_exposure.geojson")
-if (!file.exists(total_file)) {
-  stop("Total exposure file not found. Run build_cumulative_hex_15min.R first.")
+# Load regional total files and merge them
+regions <- c("west", "central_west", "central", "central_east", "east", "far_east")
+regional_files <- file.path(output_dir, "total", sprintf("total_exposure_%s.geojson", regions))
+
+# Check if regional files exist
+if (!all(file.exists(regional_files))) {
+  missing <- regions[!file.exists(regional_files)]
+  stop(sprintf("Regional files not found: %s. Run build_cumulative_hex_15min.R first.",
+               paste(missing, collapse = ", ")))
 }
 
-total_data <- st_read(total_file, quiet = TRUE)
-cat(sprintf("  ✓ Loaded total data: %d hexagons\n", nrow(total_data)))
+# Load and combine all regional files
+regional_data_list <- lapply(regional_files, function(f) st_read(f, quiet = TRUE))
+total_data <- do.call(rbind, regional_data_list)
+cat(sprintf("  ✓ Loaded total data from %d regions: %d hexagons\n", length(regions), nrow(total_data)))
 
 # Load daily summaries
 daily_files <- list.files(file.path(output_dir, "daily"), 
