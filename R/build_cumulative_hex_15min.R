@@ -686,8 +686,9 @@ if (length(updated_dates) > 0) {
   cat(sprintf("  INCREMENTAL: Only regenerating %d updated dates (out of %d total)\n",
               length(dates_to_generate), length(unique_dates)))
 } else {
-  dates_to_generate <- unique_dates
-  cat(sprintf("  Regenerating all %d dates (no incremental data)\n", length(unique_dates)))
+  # No new data - set to empty so all existing files get skipped
+  dates_to_generate <- character()
+  cat(sprintf("  No new data - will skip all %d dates with existing output files\n", length(unique_dates)))
 }
 
 # Build daily summaries from cumulative data
@@ -762,8 +763,9 @@ if (length(updated_months) > 0) {
   cat(sprintf("  INCREMENTAL: Only regenerating %d updated months (out of %d total)\n",
               length(months_to_generate), length(unique_months)))
 } else {
-  months_to_generate <- unique_months
-  cat(sprintf("  Regenerating all %d months (no incremental data)\n", length(unique_months)))
+  # No new data - set to empty so all existing files get skipped
+  months_to_generate <- character()
+  cat(sprintf("  No new data - will skip all %d months with existing output files\n", length(unique_months)))
 }
 
 monthly_skipped <- 0
