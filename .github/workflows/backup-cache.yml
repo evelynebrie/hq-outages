@@ -1,0 +1,145 @@
+name: Backup everything (caches + deployed site)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      # ============================================================
+      # 1. Cumulative hex data cache (the critical one - source of truth)
+      # ============================================================
+      - name: Restore cumulative cache
+        uses: actions/cache/restore@v3
+        with:
+          path: cache/cumulative_hex_data.rds
+          key: hq-cumulative-cache-v2-
+          restore-keys: |
+            hq-cumulative-cache-v2-
+            hq-cumulative-cache-
+
+      - name: Verify cumulative cache
+        run: |
+          if [ ! -f "cache/cumulative_hex_data.rds" ]; then
+            echo "ERROR: cumulative cache file not found"
+            exit 1
+          fi
+          echo "=== Cumulative cache ==="
+          echo "File size: $(du -h cache/cumulative_hex_data.rds | cut -f1)"
+          echo "SHA256: $(sha256sum cache/cumulative_hex_data.rds | cut -d' ' -f1)"
+
+      - name: Upload cumulative cache artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cumulative-cache-backup
+          path: cache/cumulative_hex_data.rds
+          retention-days: 90
+
+      # ============================================================
+      # 2. Public outputs cache (all deployed geojsons + hex grid)
+      # ============================================================
+      - name: Restore public outputs cache
+        uses: actions/cache/restore@v3
+        with:
+          path: public
+          key: hq-public-outputs-v1-
+          restore-keys: |
+            hq-public-outputs-v1-
+
+      - name: Verify public outputs
+        run: |
+          if [ ! -d "public" ]; then
+            echo "WARNING: public directory not found"
+            mkdir -p public
+          else
+            echo "=== Public outputs ==="
+            du -sh public
+            echo "File count: $(find public -type f | wc -l)"
+            echo "Top-level:"
+            ls -la public/ || true
+          fi
+
+      - name: Upload public outputs artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: public-outputs-backup
+          path: public/
+          retention-days: 90
+          if-no-files-found: warn
+
+      # ============================================================
+      # 3. Dropbox files cache (raw polygon inputs)
+      # ============================================================
+      - name: Restore dropbox files cache
+        uses: actions/cache/restore@v3
+        with:
+          path: data/daily
+          key: dropbox-files-v2-
+          restore-keys: |
+            dropbox-files-v2-
+            dropbox-files-v1-
+
+      - name: Verify dropbox files
+        run: |
+          if [ ! -d "data/daily" ]; then
+            echo "WARNING: dropbox data directory not found"
+            mkdir -p data/daily
+          else
+            echo "=== Dropbox files cache ==="
+            du -sh data/daily
+            echo "File count: $(find data/daily -type f | wc -l)"
+          fi
+
+      - name: Upload dropbox files artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dropbox-files-backup
+          path: data/daily/
+          retention-days: 90
+          if-no-files-found: warn
+
+      # ============================================================
+      # 4. Deployed site (current gh-pages of hq-outages-public)
+      # ============================================================
+      - name: Clone gh-pages branch of public repo
+        run: |
+          git clone --branch gh-pages --single-branch --depth 1 \
+            https://github.com/evelynebrie/hq-outages-public.git \
+            gh-pages-snapshot
+          rm -rf gh-pages-snapshot/.git
+          du -sh gh-pages-snapshot
+          echo "File count: $(find gh-pages-snapshot -type f | wc -l)"
+
+      - name: Upload deployed site artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: deployed-site-backup
+          path: gh-pages-snapshot/
+          retention-days: 90
+
+      # ============================================================
+      # 5. Summary
+      # ============================================================
+      - name: Summary
+        run: |
+          echo ""
+          echo "================================================"
+          echo "BACKUP COMPLETE"
+          echo "================================================"
+          echo "Timestamp UTC: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo ""
+          echo "Artifacts uploaded (90-day retention):"
+          echo "  1. cumulative-cache-backup  - 3.5 MB  source of truth (.rds)"
+          echo "  2. public-outputs-backup    - ~180MB  deployed geojsons"
+          echo "  3. dropbox-files-backup     - ~75 MB  raw polygon inputs"
+          echo "  4. deployed-site-backup     - varies  live gh-pages content"
+          echo ""
+          echo "SHA256 of critical file:"
+          sha256sum cache/cumulative_hex_data.rds 2>/dev/null || echo "  (cumulative cache missing)"
+          echo "================================================"
