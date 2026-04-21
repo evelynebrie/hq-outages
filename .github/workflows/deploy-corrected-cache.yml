@@ -1,0 +1,117 @@
+name: Deploy corrected cumulative cache
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Release tag with corrected cumulative_hex_data.rds'
+        required: true
+        default: 'corrected-cache-20260421'
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Setup R
+        uses: r-lib/actions/setup-r@v2
+        with:
+          use-public-rspm: true
+
+      - name: System libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgdal-dev libgeos-dev libproj-dev libudunits2-dev
+
+      - name: Install R packages
+        run: |
+          Rscript -e 'pkgs <- c("sf","dplyr","fs","purrr","jsonlite","data.table"); inst <- setdiff(pkgs, rownames(installed.packages())); if(length(inst)) install.packages(inst, repos="https://cloud.r-project.org", Ncpus=2)'
+
+      - name: Download corrected cache from GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p cache
+          gh release download "${{ github.event.inputs.release_tag }}" \
+            --repo ${{ github.repository }} \
+            --pattern 'cumulative_hex_data.rds' \
+            --output cache/cumulative_hex_data.rds
+          echo "Downloaded size: $(du -h cache/cumulative_hex_data.rds | cut -f1)"
+          echo "SHA256: $(sha256sum cache/cumulative_hex_data.rds | cut -d' ' -f1)"
+
+      - name: Save corrected cache to Actions cache (so future runs pick it up)
+        uses: actions/cache/save@v3
+        with:
+          path: cache/cumulative_hex_data.rds
+          key: hq-cumulative-cache-v2-CORRECTED-${{ github.event.inputs.release_tag }}
+
+      - name: Restore hex grid cache
+        uses: actions/cache@v3
+        with:
+          path: public/hex_grid_template.rds
+          key: hq-hex-grid-15min-v2
+          restore-keys: hq-hex-grid-
+
+      - name: Regenerate all outputs from corrected cache (QUICK_DEPLOY mode)
+        env:
+          QUICK_DEPLOY: "true"
+        run: |
+          echo "Running R/build_cumulative_hex_15min.R in QUICK_DEPLOY mode..."
+          Rscript R/build_cumulative_hex_15min.R
+
+      - name: Generate summary statistics
+        run: |
+          if [ -f "R/generate_summaries.R" ]; then
+            Rscript R/generate_summaries.R || echo "summaries step failed, continuing"
+          fi
+
+      - name: Copy Mapbox and landing pages
+        run: |
+          [ -f index-mapbox.html ] && cp index-mapbox.html public/index-mapbox.html || true
+          [ -f index-landing.html ] && cp index-landing.html public/index-landing.html || true
+          ls -la public/ | head -20
+
+      - name: Verify outputs
+        run: |
+          REGIONS=("west" "central_west" "central" "central_east" "east" "far_east")
+          for r in "${REGIONS[@]}"; do
+            f="public/total/total_exposure_${r}.geojson"
+            if [ ! -f "$f" ]; then
+              echo "MISSING: $f"
+              exit 1
+            fi
+            echo "OK: $f ($(du -h "$f" | cut -f1))"
+          done
+          echo "Daily files: $(find public/daily -name 'daily_*.geojson' 2>/dev/null | wc -l)"
+          echo "Monthly files: $(find public/monthly -name 'monthly_*.geojson' 2>/dev/null | wc -l)"
+
+      - name: Save corrected public outputs to Actions cache
+        uses: actions/cache/save@v3
+        with:
+          path: public
+          key: hq-public-outputs-v1-CORRECTED-${{ github.event.inputs.release_tag }}
+
+      - name: Deploy to public gh-pages
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          personal_token: ${{ secrets.PUBLIC_REPO_TOKEN }}
+          external_repository: evelynebrie/hq-outages-public
+          publish_branch: gh-pages
+          publish_dir: public
+          keep_files: false
+          commit_message: "Deploy corrected cumulative cache (retroactive 10-min dedup)"
+
+      - name: Summary
+        run: |
+          echo "========================================"
+          echo "CORRECTED CACHE DEPLOYED"
+          echo "========================================"
+          echo "Release: ${{ github.event.inputs.release_tag }}"
+          echo "Live at: https://evelynebrie.github.io/hq-outages-public/"
+          echo "========================================"
