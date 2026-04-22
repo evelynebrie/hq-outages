@@ -772,6 +772,7 @@
         var calendarMonth = null;   // Date obj, first of month currently shown
         var availableDates = [];    // sorted array of dates present in allData.total
         var dayIntensityBuckets = {}; // { 'YYYY-MM-DD': 0..5 }
+        var INTENSITY_COLORS = ['#f9fafb', '#fee0d2', '#fcbba1', '#fc9272', '#ef3b2c', '#a50f15'];
 
         function setView(view, date) {
             currentView = view;
@@ -844,6 +845,11 @@
             currentFeatures = data;
 
             // Style per view
+            var dayColor = '#a50f15';
+            if (currentView === 'day' && currentDate) {
+                var bucket = dayIntensityBuckets[currentDate];
+                if (typeof bucket === 'number') dayColor = INTENSITY_COLORS[bucket];
+            }
             data.features.forEach(function(f) {
                 if (currentView === 'all') {
                     f.properties.display_color = getColor(f.properties.total_occurrences);
@@ -852,7 +858,7 @@
                     f.properties.display_color = '#fde68a';
                     f.properties.display_hours = f.properties.total_occurrences || 0;
                 } else {
-                    f.properties.display_color = '#a50f15';
+                    f.properties.display_color = dayColor;
                     f.properties.display_hours = (currentHour === 'all')
                         ? (f.properties.occurrences_today || f.properties.total_occurrences || 0)
                         : (f.properties.filtered_hours_count || 0);
@@ -878,10 +884,14 @@
                 map.setPaintProperty('hex-outline', 'line-color', '#b45309');
                 map.setPaintProperty('hex-outline', 'line-width', 1.5);
                 map.setPaintProperty('hex-layer', 'fill-opacity', 0.85);
+            } else if (currentView === 'day') {
+                map.setPaintProperty('hex-outline', 'line-color', '#000');
+                map.setPaintProperty('hex-outline', 'line-width', 1.2);
+                map.setPaintProperty('hex-layer', 'fill-opacity', 0.8);
             } else {
                 map.setPaintProperty('hex-outline', 'line-color', '#fff');
                 map.setPaintProperty('hex-outline', 'line-width', 0.5);
-                map.setPaintProperty('hex-layer', 'fill-opacity', currentView === 'all' ? 0.75 : 0.8);
+                map.setPaintProperty('hex-layer', 'fill-opacity', 0.75);
             }
         }
 
