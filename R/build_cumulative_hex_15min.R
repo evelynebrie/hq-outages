@@ -1350,6 +1350,9 @@ cat('<!DOCTYPE html>
     </div>
     <div id="faqModal">
         <button onclick="closeFaqModal()" class="close-btn">✕</button>
+        <h3>À propos de ce projet</h3>
+        <p>Ce projet est dirigé par Evelyne Brie, professeure adjointe en science politique affiliée à IVADO à l&apos;Université de Montréal. Vous pouvez la contacter par courriel au <a href="mailto:evelyne.brie@umontreal.ca">evelyne.brie@umontreal.ca</a>.</p>
+        <p>Ses recherches portent sur la cohésion sociale, les inégalités structurelles et la prise de décision en matière de politique urbaine. «&nbsp;Où sont les pannes?&nbsp;» fait partie de ce travail et vise à mettre en lumière les disparités en matière de coupures électriques au Québec.</p>
         <h3>FAQ</h3>
         <h4>D&apos;où proviennent ces données?</h4>
         <p>Les données sont collectées à chaque 15 minutes du site Info-Pannes d&apos;Hydro-Québec. Elles sont ensuite converties sur une grille hexagonale pour permettre de calculer les pannes cumulatives sur des aires géographiques d&apos;un kilomètre.</p>
