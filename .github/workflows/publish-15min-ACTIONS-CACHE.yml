@@ -506,6 +506,18 @@ jobs:
             echo "Copied logos: $(ls public/logos/)"
           fi
 
+      - name: Copy latest index-mapbox.html into public/ for deployment
+        run: |
+          # Main workflow's public/ cache can contain a stale index-mapbox.html.
+          # Since we deploy with keep_files: false, we must ship the fresh copy
+          # from the repo so the Mapbox visualization stays in sync with main.
+          if [ -f "index-mapbox.html" ]; then
+            cp index-mapbox.html public/index-mapbox.html
+            echo "Copied latest index-mapbox.html ($(du -h public/index-mapbox.html | cut -f1)) into public/"
+          else
+            echo "index-mapbox.html not found at repo root — skipping"
+          fi
+
       - name: Deploy to PUBLIC repo (gh-pages) - HTML and GeoJSON only
         uses: peaceiris/actions-gh-pages@v3
         with:
