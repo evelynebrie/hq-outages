@@ -1941,12 +1941,20 @@
 
             function peakY(h) { return BASE - (h / yMax) * (BASE - TOP); }
 
-            // Build path parts.
+            // Precompute peak x-positions so each spike's half-width can be
+            // clipped to *half* the gap to its neighbor. That way adjacent
+            // events never overlap and produce crossed triangles.
+            var xs = events.map(function(e) { return (e.day / (totalDays - 1)) * 240; });
+
             var parts = ['M 0,' + BASE];
-            events.forEach(function(e) {
-                var px = (e.day / (totalDays - 1)) * 240;
-                var lx = Math.max(0, px - HALF_VB);
-                var rx = Math.min(240, px + HALF_VB);
+            events.forEach(function(e, i) {
+                var px = xs[i];
+                var halfL = HALF_VB;
+                var halfR = HALF_VB;
+                if (i > 0) halfL = Math.min(halfL, (px - xs[i - 1]) / 2);
+                if (i < events.length - 1) halfR = Math.min(halfR, (xs[i + 1] - px) / 2);
+                var lx = Math.max(0, px - halfL);
+                var rx = Math.min(240, px + halfR);
                 parts.push('L ' + lx.toFixed(2) + ',' + BASE);
                 parts.push('L ' + px.toFixed(2) + ',' + peakY(e.hours).toFixed(2));
                 parts.push('L ' + rx.toFixed(2) + ',' + BASE);
@@ -1955,12 +1963,7 @@
             var linePath = parts.join(' ');
             var areaPath = linePath + ' Z';
 
-            // Chart subtitle: "Janvier à avril 2026 · jusqu'au 22 avril"
-            var firstMonthIdx = 0;
             var lastMonthIdx = endDate.getMonth();
-            var subtitle = FR_MONTHS[firstMonthIdx] + ' à ' + FR_MONTHS[lastMonthIdx] + ' ' + year +
-                           ' · jusqu\'au ' + endDate.getDate() + ' ' + FR_MONTHS[lastMonthIdx];
-            subtitle = subtitle.charAt(0).toUpperCase() + subtitle.slice(1);
 
             // Month axis: one span per month from Jan to endMonth, weighted by day count.
             var monthAxis = '';
