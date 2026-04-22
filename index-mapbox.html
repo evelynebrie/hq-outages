@@ -1160,6 +1160,7 @@
 
         var allData = { daily: {}, total: null, current: null };
         var geocoder = null;
+        var currentPopup = null;
         var currentFeatures = null;
         var quartileBreaks = null;
         var QUARTILE_COLORS = ['#fee0d2', '#fcbba1', '#fc9272', '#ef3b2c', '#a50f15'];
@@ -1760,6 +1761,7 @@
         }
 
         function showDetails(hexId) {
+            if (!allData.total || !allData.total.features) return;
             var feature = allData.total.features.find(function(f) { return f.properties.hex_id === hexId; });
             if (!feature) return;
 
@@ -1944,7 +1946,10 @@
             // Precompute peak x-positions so each spike's half-width can be
             // clipped to *half* the gap to its neighbor. That way adjacent
             // events never overlap and produce crossed triangles.
-            var xs = events.map(function(e) { return (e.day / (totalDays - 1)) * 240; });
+            // Guard against totalDays === 1 (Jan 1 edge case) where the
+            // naïve (day / 0) would produce NaN positions.
+            var xDenom = Math.max(1, totalDays - 1);
+            var xs = events.map(function(e) { return (e.day / xDenom) * 240; });
 
             var parts = ['M 0,' + BASE];
             events.forEach(function(e, i) {
@@ -2232,6 +2237,26 @@
             closeWelcomeModal();
         };
 
+        // Esc closes the topmost open modal. Same priority order as the
+        // overlay click handler: share > faq > detail > welcome.
+        document.addEventListener('keydown', function(ev) {
+            if (ev.key !== 'Escape' && ev.key !== 'Esc') return;
+            if (document.getElementById('shareModal').classList.contains('active')) {
+                closeShareModal(); return;
+            }
+            if (document.getElementById('faqModal').classList.contains('active')) {
+                closeFaqModal(); return;
+            }
+            if (document.getElementById('detailModal').classList.contains('active')) {
+                closeDetailModal(); return;
+            }
+            if (document.getElementById('welcomeModal').classList.contains('active')) {
+                // Welcome modal stays put until data is ready — don't let Esc
+                // dismiss it before the user has a working app.
+                return;
+            }
+        });
+
         // Fetch total visitor count from GoatCounter and show the pill.
         // If the request fails, the pill stays hidden.
         (function loadVisitorCount() {
@@ -2404,7 +2429,13 @@
                         '</div>' +
                         '<a class="hex-pop-cta" onclick="showDetails(' + props.hex_id + ')">Voir l\'historique détaillé</a>';
 
-                    new mapboxgl.Popup().setLngLat(e.lngLat).setHTML(popupContent).addTo(map);
+                    // Close any previous popup so rapid hex clicks don't
+                    // leave stacked popups behind the detail modal.
+                    if (currentPopup) { try { currentPopup.remove(); } catch (err) {} }
+                    currentPopup = new mapboxgl.Popup()
+                        .setLngLat(e.lngLat)
+                        .setHTML(popupContent)
+                        .addTo(map);
                 }
             });
 
