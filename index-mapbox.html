@@ -1212,8 +1212,18 @@
             var maxHour = Math.max.apply(null, hourly);
             if (maxHour === 0) { block.style.display = 'none'; return; }
 
+            // Only show hours that are fully complete. At 16:15 the
+            // 16h bucket is only 15 min deep and would look like a drop
+            // — so we cap lastHour at (current Montreal hour - 1).
+            var montrealHourStr = new Date().toLocaleString('en-US', {
+                timeZone: 'America/Toronto', hour: '2-digit', hour12: false
+            });
+            var currentMtlHour = parseInt(montrealHourStr, 10);
+            if (isNaN(currentMtlHour)) currentMtlHour = new Date().getHours();
+            var maxCompleteHour = currentMtlHour - 1;
+
             var lastHour = -1;
-            for (var h = 23; h >= 0; h--) {
+            for (var h = Math.min(23, maxCompleteHour); h >= 0; h--) {
                 if (hourly[h] > 0) { lastHour = h; break; }
             }
             if (lastHour < 0) { block.style.display = 'none'; return; }
