@@ -2014,11 +2014,11 @@ cat(';
                 bars += "<div style=\\"background:" + QUARTILE_COLORS[i] + ";\\"></div>";
             }
             var minLabel = q.min + (q.min === 1 ? " occurrence" : " occurrences");
-            var p1 = "Les hexagones sont regroupés en 5 niveaux d&apos;intensité, chacun comptant 20% du total. Les moins affectés (impact faible) ont entre " +
-                q.min + " et " + q.q1 + " occurrences de 15 minutes, et les plus affectés (impact élevé), " +
-                (q.q4 + 1) + " ou plus.";
-            var p2 = "Les seuils intermédiaires se situent à " + q.q2 + " et " + q.q3 + " occurrences.";
-            var p3 = "Ces valeurs sont mises à jour automatiquement pour refléter une proportion égale d&apos;observations dans chaque niveau d&apos;impact.";
+            var p1 = "Les hexagones sont classés en 5 niveaux d&apos;intensité par quintiles, chacun représentant 20&nbsp;% du total. Les seuils, exprimés en nombre d&apos;occurrences de 15 minutes, sont les suivants&nbsp;: impact faible (" +
+                q.min + " à " + q.q1 + "), puis des paliers intermédiaires à " +
+                q.q2 + " et " + q.q3 + " occurrences, jusqu&apos;à l&apos;impact élevé (" +
+                (q.q4 + 1) + " et plus).";
+            var p2 = "Ces valeurs sont mises à jour automatiquement pour refléter une proportion égale d&apos;observations dans chaque niveau d&apos;impact.";
             container.innerHTML =
                 "<div class=\\"scale-labels\\"><span>Faible</span><span>Élevée</span></div>" +
                 "<div class=\\"gradient-bar\\">" + bars + "</div>" +
@@ -2027,7 +2027,6 @@ cat(';
                     "<div id=\\"legendInfoPopover\\" class=\\"legend-info-popover\\">" +
                         "<p>" + p1 + "</p>" +
                         "<p>" + p2 + "</p>" +
-                        "<p>" + p3 + "</p>" +
                     "</div>" +
                     "<p class=\\"legend-detail-text\\">Chaque niveau regroupe <strong>20%</strong> des hexagones, du quintile inférieur (faible) au supérieur (élevé).</p>" +
                     "<button type=\\"button\\" class=\\"legend-info-btn\\" aria-label=\\"Comment sont calculés les seuils\\" onclick=\\"toggleLegendInfo(event)\\">i</button>" +
