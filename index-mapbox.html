@@ -966,17 +966,17 @@
             var html = '<h3>Hexagone #' + hexId + '</h3>';
             html += '<p><strong>Centroïde:</strong> ' + props.centroid_lat.toFixed(6) + ', ' + props.centroid_lon.toFixed(6) + '</p>';
             html += '<table class="detail-table">';
-            html += '<thead><tr><th>Date</th><th>Heures affectées</th><th>Nombre d\'heures</th></tr></thead><tbody>';
+            html += '<thead><tr><th>Date</th><th>Heures affectées</th><th>Nombre d\'occurrences</th></tr></thead><tbody>';
 
-            var totalDays = 0, totalHours = 0;
+            var totalDays = 0, totalOccurrences = 0;
             Object.keys(byDate).sort().forEach(function(date) {
                 var times = byDate[date].sort();
                 totalDays++;
-                totalHours += times.length;
+                totalOccurrences += times.length;
                 html += '<tr><td>' + date + '</td><td>' + times.join(', ') + '</td><td>' + times.length + '</td></tr>';
             });
 
-            html += '</tbody><tfoot><tr><td><strong>Total</strong></td><td>' + totalDays + ' jours</td><td>' + totalHours + ' heures</td></tr></tfoot>';
+            html += '</tbody><tfoot><tr><td><strong>Total</strong></td><td>' + totalDays + ' jours</td><td>' + totalOccurrences + ' occurrences</td></tr></tfoot>';
             html += '</table>';
 
             document.getElementById('modalContent').innerHTML = html;

@@ -1291,32 +1291,11 @@ cat('<!DOCTYPE html>
             opacity: 0.9;
         }
 
-        .date-row {
-            margin: 8px 0;
-            border-bottom: 1px solid #f3f4f6;
-            padding: 8px 0;
-        }
-        .date-header {
-            cursor: pointer;
-            font-weight: 600;
-            color: #2563eb;
-            padding: 6px;
-            border-radius: 6px;
-            transition: background 0.2s;
-        }
-        .date-header:hover {
-            background: #eff6ff;
-        }
-        .times-list {
-            display: none;
-            margin-left: 24px;
-            margin-top: 8px;
-            font-size: 13px;
-            color: #6b7280;
-        }
-        .times-list div {
-            padding: 4px 0;
-        }
+        .detail-table { width:100%; border-collapse:collapse; margin:15px 0; font-size:13px; }
+        .detail-table th, .detail-table td { padding:10px; text-align:left; border-bottom:1px solid #e0e0e0; vertical-align: top; }
+        .detail-table thead { background:#f5f5f5; }
+        .detail-table th { font-weight:600; color:#555; }
+        .detail-table tfoot { font-weight:600; background:#fafafa; }
         
         .loading {
             color: #9ca3af;
@@ -1735,10 +1714,10 @@ cat(';
                 byDate[date].push(time);
             });
             
-            var uniqueDates = Object.keys(byDate).sort().reverse();
-            
+            var uniqueDates = Object.keys(byDate).sort();
+
             var html = "<h3>Hexagone #" + hexId + "</h3>";
-            
+
             var isCurrentlyAffected = false;
             if (allData.current && allData.current.features) {
                 for (var c = 0; c < allData.current.features.length; c++) {
@@ -1751,40 +1730,29 @@ cat(';
             if (isCurrentlyAffected) {
                 html += "<p><span class=\\"current-badge\\">PANNE EN COURS</span></p>";
             }
-            
-            html += "<p><strong>Total occurrences:</strong> " + props.total_occurrences + "</p>";
-            html += "<p><strong>Jours affectés:</strong> " + uniqueDates.length + "</p>";
-            html += "<p style=\\"margin-top: 15px;\\"><strong>Historique (récent en premier):</strong></p>";
-            html += "<div style=\\"max-height: 400px; overflow-y: auto;\\">";
-            
+
+            if (props.centroid_lat != null && props.centroid_lon != null) {
+                html += "<p><strong>Centroïde:</strong> " + Number(props.centroid_lat).toFixed(6) + ", " + Number(props.centroid_lon).toFixed(6) + "</p>";
+            }
+
+            html += "<table class=\\"detail-table\\">";
+            html += "<thead><tr><th>Date</th><th>Heures affectées</th><th>Nombre d&apos;occurrences</th></tr></thead><tbody>";
+
+            var totalDays = 0, totalOccurrences = 0;
             for (var j = 0; j < uniqueDates.length; j++) {
                 var dateKey = uniqueDates[j];
-                var times = byDate[dateKey];
-                html += "<div class=\\"date-row\\">";
-                html += "<div class=\\"date-header\\" onclick=\\"toggleTimes(this)\\">";
-                html += "&#9654; " + dateKey + " (" + times.length + " occurrence" + (times.length > 1 ? "s" : "") + ")";
-                html += "</div>";
-                html += "<div class=\\"times-list\\">";
-                for (var k = 0; k < times.length; k++) {
-                    html += "<div>" + times[k] + "</div>";
-                }
-                html += "</div></div>";
+                var times = byDate[dateKey].slice().sort();
+                totalDays++;
+                totalOccurrences += times.length;
+                html += "<tr><td>" + dateKey + "</td><td>" + times.join(", ") + "</td><td>" + times.length + "</td></tr>";
             }
-            
-            html += "</div>";
-            
+
+            html += "</tbody><tfoot><tr><td><strong>Total</strong></td><td>" + totalDays + " jours</td><td>" + totalOccurrences + " occurrences</td></tr></tfoot>";
+            html += "</table>";
+
             document.getElementById("modalContent").innerHTML = html;
             document.getElementById("detailModal").classList.add("active");
             document.getElementById("modalOverlay").classList.add("active");
-        }
-        
-        function toggleTimes(header) {
-            var timesList = header.nextElementSibling;
-            if (timesList.style.display === "block") {
-                timesList.style.display = "none";
-            } else {
-                timesList.style.display = "block";
-            }
         }
         
         function closeDetailModal() {
