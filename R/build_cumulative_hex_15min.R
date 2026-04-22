@@ -1897,7 +1897,7 @@ cat(';
             }
 
             var totalHours = (props.total_occurrences * 0.25).toLocaleString("fr-CA", { maximumFractionDigits: 1 });
-            html += "<p><strong>Total occurrences:</strong> " + props.total_occurrences + "</p>";
+            html += "<p><strong>Nombre d\'occurrences de 15 min.:</strong> " + props.total_occurrences + "</p>";
             html += "<p><strong>Temps total de pannes:</strong> " + totalHours + " heures</p>";
             html += "<p><strong>Jours affectés:</strong> " + uniqueDates.length + "</p>";
             html += "<p style=\\"margin-top: 15px;\\"><strong>Historique :</strong></p>";
