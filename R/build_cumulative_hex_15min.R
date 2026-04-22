@@ -1419,7 +1419,7 @@ cat(';
         }
         
         var quartileBreaks = null; // computed from overall total_occurrences on load
-        var QUARTILE_COLORS = ["#fcbba1", "#fc9272", "#ef3b2c", "#a50f15"];
+        var QUARTILE_COLORS = ["#fee0d2", "#fcbba1", "#fc9272", "#ef3b2c", "#a50f15"];
 
         function percentile(sortedVals, p) {
             var idx = (sortedVals.length - 1) * p;
@@ -1439,9 +1439,10 @@ cat(';
             if (values.length === 0) return null;
             return {
                 min: values[0],
-                q1: Math.round(percentile(values, 0.25)),
-                q2: Math.round(percentile(values, 0.50)),
-                q3: Math.round(percentile(values, 0.75)),
+                q1: Math.round(percentile(values, 0.20)),
+                q2: Math.round(percentile(values, 0.40)),
+                q3: Math.round(percentile(values, 0.60)),
+                q4: Math.round(percentile(values, 0.80)),
                 max: values[values.length - 1]
             };
         }
@@ -1451,25 +1452,27 @@ cat(';
             if (d <= quartileBreaks.q1) return QUARTILE_COLORS[0];
             if (d <= quartileBreaks.q2) return QUARTILE_COLORS[1];
             if (d <= quartileBreaks.q3) return QUARTILE_COLORS[2];
-            return QUARTILE_COLORS[3];
+            if (d <= quartileBreaks.q4) return QUARTILE_COLORS[3];
+            return QUARTILE_COLORS[4];
         }
 
         function rebuildLegend() {
             var container = document.getElementById("legendItems");
             if (!container || !quartileBreaks) return;
             var q = quartileBreaks;
-            var labels = ["Faible", "Modéré", "Élevé", "Très élevé"];
+            var labels = ["Minimal", "Faible", "Modéré", "Élevé", "Intense"];
             var html = "";
-            for (var i = 0; i < 4; i++) {
+            for (var i = 0; i < 5; i++) {
                 html += "<div class=\\"legend-item\\"><i style=\\"background:" + QUARTILE_COLORS[i] + "\\"></i> " + labels[i] + "</div>";
             }
-            var sentence = "Un hexagone est classé comme faible lorsqu\\u0027il compte entre " +
-                q.min + " et " + q.q1 + " occurrences de pannes (mesurées aux 15 minutes), modéré entre " +
-                (q.q1 + 1) + " et " + q.q2 + ", élevé entre " +
-                (q.q2 + 1) + " et " + q.q3 + " et très élevé entre " +
-                (q.q3 + 1) + " et " + q.max + ".";
+            var sentence = "Un hexagone est classé comme minimal lorsqu\\u0027il compte entre " +
+                q.min + " et " + q.q1 + " occurrences de pannes (mesurées aux 15 minutes), faible entre " +
+                (q.q1 + 1) + " et " + q.q2 + ", modéré entre " +
+                (q.q2 + 1) + " et " + q.q3 + ", élevé entre " +
+                (q.q3 + 1) + " et " + q.q4 + " et intense entre " +
+                (q.q4 + 1) + " et " + q.max + ". Ces valeurs sont mises à jour quotidiennement pour refléter une proportion égale d\\u0027observations dans chaque niveau d\\u0027impact.";
             html += "<div style=\\"font-size:10px;color:#666;margin-top:10px;padding-top:8px;border-top:1px solid #e5e7eb;line-height:1.4;max-width:280px;\\">" + sentence + "</div>";
-            html += "<div style=\\"font-size:10px;color:#666;margin-top:6px;line-height:1.4;\\">Chaque niveau regroupe 25% des hexagones.</div>";
+            html += "<div style=\\"font-size:10px;color:#666;margin-top:6px;line-height:1.4;\\">Chaque niveau regroupe 20% des hexagones.</div>";
             container.innerHTML = html;
         }
         
