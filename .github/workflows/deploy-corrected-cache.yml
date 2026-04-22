@@ -47,6 +47,7 @@ jobs:
 
       - name: Save corrected cache to Actions cache (so future runs pick it up)
         uses: actions/cache/save@v3
+        continue-on-error: true  # OK if key already exists from a prior run
         with:
           path: cache/cumulative_hex_data.rds
           key: hq-cumulative-cache-v2-CORRECTED-${{ github.event.inputs.release_tag }}
@@ -104,6 +105,7 @@ jobs:
 
       - name: Save corrected public outputs to Actions cache
         uses: actions/cache/save@v3
+        continue-on-error: true  # OK if key already exists from a prior run
         with:
           path: public
           key: hq-public-outputs-v1-CORRECTED-${{ github.event.inputs.release_tag }}

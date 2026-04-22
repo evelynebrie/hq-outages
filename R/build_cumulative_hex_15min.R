@@ -1319,6 +1319,10 @@ cat('";
                 });
                 allData.total = { type: "FeatureCollection", features: allFeatures };
                 console.log("Total data loaded from", regions.length, "regions:", allFeatures.length, "features");
+                // Compute quartile breaks from overall total_occurrences distribution
+                quartileBreaks = computeQuartiles(allData.total.features);
+                console.log("Quartile breaks:", quartileBreaks);
+                rebuildLegend();
                 dataLoaded.total = true;
                 updateMap();
             })
@@ -1404,15 +1408,62 @@ cat(';
             }
         }
         
+        var quartileBreaks = null; // computed from overall total_occurrences on load
+        var QUARTILE_COLORS = ["#fcbba1", "#fc9272", "#ef3b2c", "#a50f15"];
+
+        function percentile(sortedVals, p) {
+            var idx = (sortedVals.length - 1) * p;
+            var lo = Math.floor(idx);
+            var hi = Math.ceil(idx);
+            if (lo === hi) return sortedVals[lo];
+            return sortedVals[lo] + (sortedVals[hi] - sortedVals[lo]) * (idx - lo);
+        }
+
+        function computeQuartiles(features) {
+            var values = [];
+            for (var i = 0; i < features.length; i++) {
+                var v = features[i].properties.total_occurrences;
+                if (typeof v === "number" && !isNaN(v)) values.push(v);
+            }
+            values.sort(function(a, b) { return a - b; });
+            if (values.length === 0) return null;
+            return {
+                min: values[0],
+                q1: Math.round(percentile(values, 0.25)),
+                q2: Math.round(percentile(values, 0.50)),
+                q3: Math.round(percentile(values, 0.75)),
+                max: values[values.length - 1]
+            };
+        }
+
         function getColor(d) {
-            if (d > 80) return "#67000d";
-            if (d > 60) return "#a50f15";
-            if (d > 40) return "#cb181d";
-            if (d > 20) return "#ef3b2c";
-            if (d > 10) return "#fb6a4a";
-            if (d > 5) return "#fc9272";
-            if (d > 2) return "#fcbba1";
-            return "#fee5d9";
+            if (!quartileBreaks) return "#fcbba1";
+            if (d <= quartileBreaks.q1) return QUARTILE_COLORS[0];
+            if (d <= quartileBreaks.q2) return QUARTILE_COLORS[1];
+            if (d <= quartileBreaks.q3) return QUARTILE_COLORS[2];
+            return QUARTILE_COLORS[3];
+        }
+
+        function rebuildLegend() {
+            var container = document.getElementById("legendItems");
+            if (!container || !quartileBreaks) return;
+            var q = quartileBreaks;
+            var labels = [
+                { label: "1er quartile", lo: q.min, hi: q.q1 },
+                { label: "2e quartile",  lo: q.q1 + 1, hi: q.q2 },
+                { label: "3e quartile",  lo: q.q2 + 1, hi: q.q3 },
+                { label: "4e quartile",  lo: q.q3 + 1, hi: q.max }
+            ];
+            var html = "<div class=\\"legend-item\\"><i style=\\"background:#ef4444;border:2px solid #dc2626\\"></i> En cours</div>";
+            for (var i = 0; i < 4; i++) {
+                var L = labels[i];
+                var range = (L.lo === L.hi)
+                    ? (L.lo + " occurrence" + (L.lo === 1 ? "" : "s") + " de 15 min.")
+                    : (L.lo + " à " + L.hi + " occurrences de 15 min.");
+                html += "<div class=\\"legend-item\\"><i style=\\"background:" + QUARTILE_COLORS[i] + "\\"></i> " + L.label + " (" + range + ")</div>";
+            }
+            html += "<div style=\\"font-size:10px;color:#666;margin-top:10px;padding-top:8px;border-top:1px solid #e5e7eb;line-height:1.4;\\">1 quartile = 25% des données</div>";
+            container.innerHTML = html;
         }
         
         function updateMap() {
@@ -1571,17 +1622,13 @@ cat(';
         var legend = L.control({position: "bottomright"});
         legend.onAdd = function() {
             var div = L.DomUtil.create("div", "info legend");
-            var grades = [0, 2, 5, 10, 20, 40, 60, 80];
-            div.innerHTML = "<h4>Occurrences</h4>";
-            div.innerHTML += "<div class=\\"legend-item\\"><i style=\\"background:#ef4444;border:2px solid #dc2626\\"></i> En cours</div>";
-            for (var i = 0; i < grades.length; i++) {
-                div.innerHTML += "<div class=\\"legend-item\\"><i style=\\"background:" + getColor(grades[i] + 1) + "\\"></i> " +
-                    grades[i] + (grades[i + 1] ? "–" + grades[i + 1] : "+") + "</div>";
-            }
-            div.innerHTML += "<div style=\\"font-size:10px;color:#666;margin-top:12px;padding-top:8px;border-top:1px solid #e5e7eb;line-height:1.4;\\">Occurrences = Nombre de fois qu&apos;une panne<br>a été détectée dans cet hexagone<br>lors des lectures aux 15 minutes</div>";
+            div.id = "legend";
+            div.innerHTML = "<h4>Quartiles d\\u0027impact des pannes</h4>" +
+                "<div id=\\"legendItems\\"><div style=\\"font-size:12px;color:#999;\\">Chargement...</div></div>";
             return div;
         };
         legend.addTo(map);
+        if (quartileBreaks) { rebuildLegend(); }
         
         var info = L.control({position: "topright"});
         info.onAdd = function() {

@@ -81,16 +81,10 @@
         <p style="font-size:11px;color:#999;">Mise à jour: <span id="update-date">Chargement...</span></p>
     </div>
 
-    <div class="legend">
-        <h4>Heures (nombre)</h4>
-        <div><i style="background:#fee5d9"></i>0–2</div>
-        <div><i style="background:#fcbba1"></i>2–5</div>
-        <div><i style="background:#fc9272"></i>5–10</div>
-        <div><i style="background:#fb6a4a"></i>10–20</div>
-        <div><i style="background:#ef3b2c"></i>20–40</div>
-        <div><i style="background:#cb181d"></i>40–60</div>
-        <div><i style="background:#a50f15"></i>60–80</div>
-        <div><i style="background:#67000d"></i>80+</div>
+    <div class="legend" id="legend">
+        <h4>Quartiles d'impact des pannes</h4>
+        <div id="legendItems"><div style="font-size:12px;color:#999;">Chargement...</div></div>
+        <div style="font-size:11px;color:#666;margin-top:10px;padding-top:8px;border-top:1px solid #e5e7eb;line-height:1.4;">1 quartile = 25% des données</div>
     </div>
 
     <div class="controls">
@@ -148,10 +142,67 @@
 
         var allData = { daily: {}, total: null };
         var currentFeatures = null;
+        var quartileBreaks = null; // computed from overall total_occurrences on load
+
+        var QUARTILE_COLORS = ['#fcbba1', '#fc9272', '#ef3b2c', '#a50f15'];
+
+        function percentile(sortedVals, p) {
+            var idx = (sortedVals.length - 1) * p;
+            var lo = Math.floor(idx);
+            var hi = Math.ceil(idx);
+            if (lo === hi) return sortedVals[lo];
+            return sortedVals[lo] + (sortedVals[hi] - sortedVals[lo]) * (idx - lo);
+        }
+
+        function computeQuartiles(features) {
+            var values = [];
+            for (var i = 0; i < features.length; i++) {
+                var v = features[i].properties.total_occurrences;
+                if (typeof v === 'number' && !isNaN(v)) values.push(v);
+            }
+            values.sort(function(a, b) { return a - b; });
+            if (values.length === 0) return null;
+            return {
+                min: values[0],
+                q1: Math.round(percentile(values, 0.25)),
+                q2: Math.round(percentile(values, 0.50)),
+                q3: Math.round(percentile(values, 0.75)),
+                max: values[values.length - 1]
+            };
+        }
 
         function getColor(d) {
-            return d>80?'#67000d':d>60?'#a50f15':d>40?'#cb181d':d>20?'#ef3b2c':
-                   d>10?'#fb6a4a':d>5?'#fc9272':d>2?'#fcbba1':'#fee5d9';
+            if (!quartileBreaks) return '#fcbba1';
+            if (d <= quartileBreaks.q1) return QUARTILE_COLORS[0];
+            if (d <= quartileBreaks.q2) return QUARTILE_COLORS[1];
+            if (d <= quartileBreaks.q3) return QUARTILE_COLORS[2];
+            return QUARTILE_COLORS[3];
+        }
+
+        function updateLegend() {
+            var container = document.getElementById('legendItems');
+            if (!container) return;
+            if (!quartileBreaks) {
+                container.innerHTML = '<div style="font-size:12px;color:#999;">Chargement...</div>';
+                return;
+            }
+            var q = quartileBreaks;
+            var labels = [
+                { label: "1er quartile", lo: q.min, hi: q.q1 },
+                { label: "2e quartile",  lo: q.q1 + 1, hi: q.q2 },
+                { label: "3e quartile",  lo: q.q2 + 1, hi: q.q3 },
+                { label: "4e quartile",  lo: q.q3 + 1, hi: q.max }
+            ];
+            var html = '';
+            for (var i = 0; i < 4; i++) {
+                var L = labels[i];
+                var range = (L.lo === L.hi)
+                    ? (L.lo + ' occurrence' + (L.lo === 1 ? '' : 's') + ' de 15 min.')
+                    : (L.lo + ' à ' + L.hi + ' occurrences de 15 min.');
+                html += '<div><i style="background:' + QUARTILE_COLORS[i] + '"></i>' +
+                        L.label + ' (' + range + ')</div>';
+            }
+            container.innerHTML = html;
         }
 
         async function loadAllDailyData() {
@@ -170,6 +221,11 @@
             };
 
             console.log(`Loaded ${allData.total.features.length} hexagons from ${regions.length} regions`);
+
+            // Compute quartile breaks from overall total_occurrences distribution
+            quartileBreaks = computeQuartiles(allData.total.features);
+            console.log('Quartile breaks:', quartileBreaks);
+            updateLegend();
 
             const dateSelect = document.getElementById('dateSelect');
             const dates = [...new Set(allData.total.features.flatMap(f => {
