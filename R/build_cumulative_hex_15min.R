@@ -1755,7 +1755,7 @@ cat(' km</div>" +
 cat(num_days, file = html_file, sep = "")
 
 cat('</div>" +
-                    "<div>1 occurrence: 1 panne de 15 minutes</div>" +
+                    "<div>1 occurrence: panne de 15 minutes</div>" +
                 "</div>";
             return div;
         };
