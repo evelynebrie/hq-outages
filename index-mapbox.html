@@ -9,22 +9,57 @@
     <script src="https://api.mapbox.com/mapbox-gl-js/plugins/mapbox-gl-geocoder/v5.0.0/mapbox-gl-geocoder.min.js"></script>
     <link rel="stylesheet" href="https://api.mapbox.com/mapbox-gl-js/plugins/mapbox-gl-geocoder/v5.0.0/mapbox-gl-geocoder.css" type="text/css">
     <style>
+        * { box-sizing: border-box; }
         body { margin:0; padding:0; font-family: -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
         #map { position:absolute; top:0; bottom:0; width:100%; }
         .mapboxgl-popup-content { padding: 15px; max-width: 300px; }
+
+        /* Stats panel (Statistiques) */
         .info {
             position: absolute;
             top: 10px;
             right: 10px;
-            padding:10px 15px;
-            background:white;
-            border-radius:5px;
-            box-shadow:0 0 15px rgba(0,0,0,0.2);
-            max-width:300px;
+            padding: 16px;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            min-width: 260px;
+            max-width: 320px;
             z-index: 1;
         }
-        .info h4 { margin:0 0 10px; font-size:16px; color:#333; }
-        .info p { margin:5px 0; font-size:13px; color:#666; }
+        .info h4 {
+            margin: 0 0 14px 0;
+            color: #000000;
+            font-size: 16px;
+            font-weight: 600;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #e5e7eb;
+        }
+        .info-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 20px;
+            padding: 8px 0;
+            border-bottom: 1px solid #f3f4f6;
+        }
+        .info-row:last-child { border-bottom: none; }
+        .info-label { font-weight: 500; color: #6b7280; font-size: 13px; }
+        .info-value { font-weight: 600; color: #111827; font-size: 14px; }
+        .loading { color: #9ca3af; font-size: 12px; font-style: italic; }
+
+        /* Yellow badge for Pannes en cours */
+        .current-badge {
+            background: #f5d05d;
+            color: #422006;
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 600;
+            letter-spacing: 0.02em;
+        }
+
+        /* Legend */
         .legend {
             position: absolute;
             bottom: 30px;
@@ -32,32 +67,38 @@
             line-height:20px;
             color:#555;
             background:white;
-            padding:10px;
-            border-radius:5px;
-            box-shadow:0 0 15px rgba(0,0,0,0.2);
+            padding:14px;
+            border-radius:12px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            max-width: 320px;
             z-index: 1;
         }
-        .legend i { width:18px; height:18px; float:left; margin-right:8px; opacity:0.8; }
-        .legend h4 { margin:0 0 8px; font-size:14px; }
+        .legend i { width:18px; height:18px; float:left; margin-right:8px; opacity:0.85; border-radius: 3px; }
+        .legend h4 { margin:0 0 10px; font-size:14px; color:#111827; }
+        .legend > div { margin-bottom: 4px; }
+
+        /* Filter controls */
         .controls {
             position: absolute;
             top: 10px;
             left: 10px;
             background:white;
             padding:15px;
-            border-radius:5px;
-            box-shadow:0 0 15px rgba(0,0,0,0.2);
+            border-radius:12px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
             min-width:200px;
             z-index: 1;
         }
         .controls h4 { margin:0 0 10px; font-size:14px; color:#333; }
         .controls label { display:block; margin:8px 0 4px; font-size:12px; color:#666; font-weight:500; }
         .controls select { width:100%; padding:6px; border:1px solid #ddd; border-radius:4px; font-size:13px; }
+
+        /* Detail modal */
         .detail-link { color:#1e88e5; cursor:pointer; text-decoration:underline; font-size:12px; }
         .detail-link:hover { color:#1565c0; }
         .modal-overlay { display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.5); z-index:2000; }
         .modal-overlay.active { display:block; }
-        .detail-modal { display:none; position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); background:white; padding:25px; border-radius:8px; box-shadow:0 4px 20px rgba(0,0,0,0.3); z-index:2001; max-width:90%; max-height:90%; overflow-y:auto; }
+        .detail-modal { display:none; position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); background:white; padding:25px; border-radius:12px; box-shadow:0 4px 20px rgba(0,0,0,0.3); z-index:2001; max-width:90%; max-height:90%; overflow-y:auto; }
         .detail-modal.active { display:block; }
         .detail-modal h3 { margin:0 0 15px; color:#333; }
         .detail-modal p { margin:10px 0; color:#666; }
@@ -69,22 +110,73 @@
         .close-modal { position:absolute; top:10px; right:15px; font-size:24px; cursor:pointer; color:#999; }
         .close-modal:hover { color:#333; }
         .mapboxgl-ctrl-geocoder { max-width: 300px; }
+
+        /* Loading overlay */
+        .map-loader {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(255,255,255,0.96);
+            padding: 22px 32px;
+            border-radius: 12px;
+            box-shadow: 0 6px 24px rgba(0,0,0,0.2);
+            z-index: 100;
+            text-align: center;
+            min-width: 200px;
+        }
+        .map-loader.hidden { display: none; }
+        .spinner {
+            width: 32px;
+            height: 32px;
+            border: 3px solid #e5e7eb;
+            border-top-color: #6b7280;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            margin: 0 auto 10px;
+        }
+        .map-loader-text { font-size: 13px; color: #374151; }
+        @keyframes spin { to { transform: rotate(360deg); } }
     </style>
 </head>
 <body>
     <div id="map"></div>
 
+    <div id="mapLoader" class="map-loader">
+        <div class="spinner"></div>
+        <div class="map-loader-text">Chargement des données...</div>
+    </div>
+
     <div class="info">
-        <h4>Pannes de courant cumulatives</h4>
-        <p><b>Taille des hexagones:</b> 1 km</p>
-        <p><b>Jours analysés:</b> <span id="days-count">Chargement...</span></p>
-        <p style="font-size:11px;color:#999;">Mise à jour: <span id="update-date">Chargement...</span></p>
+        <h4>Statistiques</h4>
+        <div class="info-row">
+            <span class="info-label">Pannes en cours:</span>
+            <span id="currentCount" class="loading">chargement...</span>
+        </div>
+        <div class="info-row">
+            <span class="info-label">Dernière lecture:</span>
+            <span id="lastReading" class="loading">chargement...</span>
+        </div>
+        <div class="info-row">
+            <span class="info-label">Nombre total d'occurrences<br>en 2026:</span>
+            <span id="totalOccurrences" class="loading">chargement...</span>
+        </div>
+        <div class="info-row">
+            <span class="info-label">Nombre d'hexagones impactés<br>en 2026:</span>
+            <span id="totalHexCount" class="loading">chargement...</span>
+        </div>
+        <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #e5e7eb; font-size:11px; color:#9ca3af; line-height:1.6;">
+            <div>Généré: <span id="genDate">—</span></div>
+            <div>Taille hexagones: 1.0 km</div>
+            <div>Jours analysés: <span id="daysCount">—</span></div>
+            <div>1 occurrence: 1 panne de 15 minutes</div>
+        </div>
     </div>
 
     <div class="legend" id="legend">
         <h4>Impact relatif des pannes</h4>
         <div id="legendItems"><div style="font-size:12px;color:#999;">Chargement...</div></div>
-        <div id="legendFooter" style="font-size:11px;color:#666;margin-top:10px;padding-top:8px;border-top:1px solid #e5e7eb;line-height:1.4;max-width:280px;"></div>
+        <div id="legendFooter" style="font-size:11px;color:#666;margin-top:10px;padding-top:8px;border-top:1px solid #e5e7eb;line-height:1.4;"></div>
     </div>
 
     <div class="controls">
@@ -96,30 +188,14 @@
         <label>Heure:</label>
         <select id="hourSelect" onchange="updateMap()">
             <option value="all">Toutes</option>
-            <option value="0">0:00</option>
-            <option value="1">1:00</option>
-            <option value="2">2:00</option>
-            <option value="3">3:00</option>
-            <option value="4">4:00</option>
-            <option value="5">5:00</option>
-            <option value="6">6:00</option>
-            <option value="7">7:00</option>
-            <option value="8">8:00</option>
-            <option value="9">9:00</option>
-            <option value="10">10:00</option>
-            <option value="11">11:00</option>
-            <option value="12">12:00</option>
-            <option value="13">13:00</option>
-            <option value="14">14:00</option>
-            <option value="15">15:00</option>
-            <option value="16">16:00</option>
-            <option value="17">17:00</option>
-            <option value="18">18:00</option>
-            <option value="19">19:00</option>
-            <option value="20">20:00</option>
-            <option value="21">21:00</option>
-            <option value="22">22:00</option>
-            <option value="23">23:00</option>
+            <option value="0">0:00</option><option value="1">1:00</option><option value="2">2:00</option>
+            <option value="3">3:00</option><option value="4">4:00</option><option value="5">5:00</option>
+            <option value="6">6:00</option><option value="7">7:00</option><option value="8">8:00</option>
+            <option value="9">9:00</option><option value="10">10:00</option><option value="11">11:00</option>
+            <option value="12">12:00</option><option value="13">13:00</option><option value="14">14:00</option>
+            <option value="15">15:00</option><option value="16">16:00</option><option value="17">17:00</option>
+            <option value="18">18:00</option><option value="19">19:00</option><option value="20">20:00</option>
+            <option value="21">21:00</option><option value="22">22:00</option><option value="23">23:00</option>
         </select>
     </div>
 
@@ -130,7 +206,6 @@
     </div>
 
     <script>
-        // Set your Mapbox access token here
         mapboxgl.accessToken = 'pk.eyJ1IjoiZXZlbHluZWJyaWUiLCJhIjoiY2themE5OGF2MDdxazJybG9oNzUyaXoxNSJ9.njPe2lcTp82DKjDeGkHaQA';
 
         var map = new mapboxgl.Map({
@@ -140,11 +215,19 @@
             zoom: 7.5
         });
 
-        var allData = { daily: {}, total: null };
+        var allData = { daily: {}, total: null, current: null };
         var currentFeatures = null;
-        var quartileBreaks = null; // computed from overall total_occurrences on load
-
+        var quartileBreaks = null;
         var QUARTILE_COLORS = ['#fee0d2', '#fcbba1', '#fc9272', '#ef3b2c', '#a50f15'];
+
+        function hideLoader() {
+            var el = document.getElementById('mapLoader');
+            if (el) el.classList.add('hidden');
+        }
+        function setLoaderText(t) {
+            var el = document.querySelector('.map-loader-text');
+            if (el) el.textContent = t;
+        }
 
         function percentile(sortedVals, p) {
             var idx = (sortedVals.length - 1) * p;
@@ -210,97 +293,171 @@
             }
         }
 
-        async function loadAllDailyData() {
-            // Load all regional files
-            const regions = ['west', 'central_west', 'central', 'central_east', 'east', 'far_east'];
-            const regionalPromises = regions.map(region =>
-                fetch(`total/total_exposure_${region}.geojson`).then(r => r.json())
+        function updateStatsPanel() {
+            if (!allData.total) return;
+            var features = allData.total.features;
+
+            // Total occurrences
+            var totalOcc = 0;
+            features.forEach(function(f) {
+                var v = f.properties.total_occurrences;
+                if (typeof v === 'number' && !isNaN(v)) totalOcc += v;
+            });
+            var totalOccEl = document.getElementById('totalOccurrences');
+            if (totalOccEl) {
+                totalOccEl.className = 'info-value';
+                totalOccEl.textContent = totalOcc.toLocaleString('fr-CA');
+            }
+
+            // Hex count
+            var hexCountEl = document.getElementById('totalHexCount');
+            if (hexCountEl) {
+                hexCountEl.className = 'info-value';
+                hexCountEl.textContent = features.length.toLocaleString('fr-CA');
+            }
+
+            // Latest datetime across all hexes
+            var maxDt = '';
+            features.forEach(function(f) {
+                var s = f.properties.all_datetimes;
+                if (!s) return;
+                var parts = s.split(',');
+                for (var i = 0; i < parts.length; i++) {
+                    var t = parts[i].trim();
+                    if (t > maxDt) maxDt = t;
+                }
+            });
+            var lastReadingEl = document.getElementById('lastReading');
+            if (lastReadingEl) {
+                lastReadingEl.className = 'info-value';
+                lastReadingEl.textContent = maxDt || '—';
+            }
+
+            // Days count
+            var dates = new Set();
+            features.forEach(function(f) {
+                if (!f.properties.all_datetimes) return;
+                f.properties.all_datetimes.split(',').forEach(function(dt) {
+                    var d = dt.trim().split(' ')[0];
+                    if (d) dates.add(d);
+                });
+            });
+            var daysCountEl = document.getElementById('daysCount');
+            if (daysCountEl) daysCountEl.textContent = dates.size;
+
+            // Generated date (now)
+            var now = new Date();
+            var pad = function(n) { return n < 10 ? '0' + n : n; };
+            var genDateEl = document.getElementById('genDate');
+            if (genDateEl) {
+                genDateEl.textContent = now.getFullYear() + '-' + pad(now.getMonth() + 1) + '-' +
+                    pad(now.getDate()) + ' ' + pad(now.getHours()) + ':' + pad(now.getMinutes());
+            }
+        }
+
+        function updateCurrentBadge() {
+            var el = document.getElementById('currentCount');
+            if (!el) return;
+            var count = (allData.current && allData.current.features) ? allData.current.features.length : 0;
+            el.className = '';
+            el.innerHTML = '<span class="current-badge">' + count + ' hexagone' + (count === 1 ? '' : 's') + '</span>';
+        }
+
+        // Parallel load: regional totals + current outages. Map shows as soon as totals ready.
+        async function loadCoreData() {
+            setLoaderText('Chargement des données...');
+            var regions = ['west', 'central_west', 'central', 'central_east', 'east', 'far_east'];
+
+            var totalsPromise = Promise.all(
+                regions.map(function(region) {
+                    return fetch('total/total_exposure_' + region + '.geojson').then(function(r) { return r.json(); });
+                })
             );
+            var currentPromise = fetch('current.geojson').then(function(r) {
+                return r.ok ? r.json() : { type: 'FeatureCollection', features: [] };
+            }).catch(function() { return { type: 'FeatureCollection', features: [] }; });
 
-            const regionalData = await Promise.all(regionalPromises);
+            var results = await Promise.all([totalsPromise, currentPromise]);
+            var regionalData = results[0];
+            allData.current = results[1];
 
-            // Merge all regions into one GeoJSON
             allData.total = {
                 type: 'FeatureCollection',
-                features: regionalData.flatMap(data => data.features)
+                features: regionalData.flatMap(function(d) { return d.features || []; })
             };
+            console.log('Loaded ' + allData.total.features.length + ' hexagons from ' + regions.length + ' regions');
 
-            console.log(`Loaded ${allData.total.features.length} hexagons from ${regions.length} regions`);
-
-            // Compute quartile breaks from overall total_occurrences distribution
             quartileBreaks = computeQuartiles(allData.total.features);
-            console.log('Quartile breaks:', quartileBreaks);
             updateLegend();
+            updateStatsPanel();
+            updateCurrentBadge();
 
-            const dateSelect = document.getElementById('dateSelect');
-            const dates = [...new Set(allData.total.features.flatMap(f => {
-                if (!f.properties.all_datetimes) return [];
-                return f.properties.all_datetimes.split(',').map(dt => dt.trim().split(' ')[0]);
-            }))].sort();
-
-            // Update info panel with actual data
-            document.getElementById('days-count').textContent = dates.length;
-            const lastDate = dates[dates.length - 1];
-            document.getElementById('update-date').textContent = lastDate;
-
-            for (const date of dates) {
-                const opt = document.createElement('option');
-                opt.value = date;
-                opt.textContent = date;
+            // Populate date selector
+            var dateSelect = document.getElementById('dateSelect');
+            var dateSet = new Set();
+            allData.total.features.forEach(function(f) {
+                if (!f.properties.all_datetimes) return;
+                f.properties.all_datetimes.split(',').forEach(function(dt) {
+                    var d = dt.trim().split(' ')[0];
+                    if (d) dateSet.add(d);
+                });
+            });
+            var dates = Array.from(dateSet).sort();
+            dates.forEach(function(d) {
+                var opt = document.createElement('option');
+                opt.value = d; opt.textContent = d;
                 dateSelect.appendChild(opt);
-            }
+            });
 
-            for (const date of dates) {
-                try {
-                    const resp = await fetch(`daily/daily_${date}.geojson`);
-                    allData.daily[date] = await resp.json();
-                } catch(e) {
-                    console.warn('Could not load daily data for', date);
-                }
-            }
+            return dates;
+        }
+
+        // Parallel load of per-day files (in background, non-blocking).
+        async function loadDailyDataInBackground(dates) {
+            setLoaderText('Chargement des données quotidiennes...');
+            var promises = dates.map(function(date) {
+                return fetch('daily/daily_' + date + '.geojson')
+                    .then(function(r) { return r.ok ? r.json() : null; })
+                    .then(function(data) { if (data) allData.daily[date] = data; })
+                    .catch(function() {});
+            });
+            await Promise.all(promises);
+            console.log('All daily files loaded');
         }
 
         function filterDataByDateTime(date, hour) {
             if (date === 'all') return allData.total;
-
-            const dailyData = allData.daily[date];
+            var dailyData = allData.daily[date];
             if (!dailyData) return null;
-
             if (hour === 'all') return dailyData;
 
-            const filtered = JSON.parse(JSON.stringify(dailyData));
-            filtered.features = filtered.features.map(f => {
-                if (!f.properties.all_datetimes) return null;
-                const dts = f.properties.all_datetimes.split(',').map(s => s.trim());
-                const matchingDts = dts.filter(dt => {
-                    const dtHour = parseInt(dt.split(' ')[1].split(':')[0]);
+            var filtered = { type: 'FeatureCollection', features: [] };
+            dailyData.features.forEach(function(f) {
+                if (!f.properties.all_datetimes) return;
+                var dts = f.properties.all_datetimes.split(',').map(function(s) { return s.trim(); });
+                var matchingDts = dts.filter(function(dt) {
+                    var dtHour = parseInt(dt.split(' ')[1].split(':')[0]);
                     return dtHour === parseInt(hour);
                 });
-
-                if (matchingDts.length === 0) return null;
-
-                f.properties.filtered_hours_count = matchingDts.length;
-                return f;
-            }).filter(f => f !== null);
-
+                if (matchingDts.length === 0) return;
+                var copy = Object.assign({}, f, { properties: Object.assign({}, f.properties, { filtered_hours_count: matchingDts.length }) });
+                filtered.features.push(copy);
+            });
             return filtered;
         }
 
         function updateMap() {
-            const date = document.getElementById('dateSelect').value;
-            const hour = document.getElementById('hourSelect').value;
-
-            const data = filterDataByDateTime(date, hour);
+            var date = document.getElementById('dateSelect').value;
+            var hour = document.getElementById('hourSelect').value;
+            var data = filterDataByDateTime(date, hour);
             if (!data) return;
 
             currentFeatures = data;
+            var isFiltered = date !== 'all';
+            var useFixedColor = isFiltered;
 
-            const isFiltered = date !== 'all';
-            const useFixedColor = isFiltered;
-
-            // Add color property to each feature
-            data.features.forEach(f => {
-                const hoursCount = isFiltered ? (f.properties.filtered_hours_count || 0) : f.properties.total_occurrences;
+            data.features.forEach(function(f) {
+                var hoursCount = isFiltered ? (f.properties.filtered_hours_count || 0) : f.properties.total_occurrences;
                 f.properties.display_color = useFixedColor ? '#a50f15' : getColor(hoursCount);
                 f.properties.display_hours = hoursCount;
             });
@@ -308,65 +465,44 @@
             if (map.getSource('hex-data')) {
                 map.getSource('hex-data').setData(data);
             } else {
-                map.addSource('hex-data', {
-                    type: 'geojson',
-                    data: data
-                });
-
+                map.addSource('hex-data', { type: 'geojson', data: data });
                 map.addLayer({
-                    id: 'hex-layer',
-                    type: 'fill',
-                    source: 'hex-data',
-                    paint: {
-                        'fill-color': ['get', 'display_color'],
-                        'fill-opacity': useFixedColor ? 0.8 : 0.75
-                    }
+                    id: 'hex-layer', type: 'fill', source: 'hex-data',
+                    paint: { 'fill-color': ['get', 'display_color'], 'fill-opacity': useFixedColor ? 0.8 : 0.75 }
                 });
-
                 map.addLayer({
-                    id: 'hex-outline',
-                    type: 'line',
-                    source: 'hex-data',
-                    paint: {
-                        'line-color': '#fff',
-                        'line-width': 0.5
-                    }
+                    id: 'hex-outline', type: 'line', source: 'hex-data',
+                    paint: { 'line-color': '#fff', 'line-width': 0.5 }
                 });
             }
-
-            // Update layer paint properties
             map.setPaintProperty('hex-layer', 'fill-opacity', useFixedColor ? 0.8 : 0.75);
         }
 
         function showDetails(hexId) {
-            const feature = allData.total.features.find(f => f.properties.hex_id === hexId);
+            var feature = allData.total.features.find(function(f) { return f.properties.hex_id === hexId; });
             if (!feature) return;
 
-            const props = feature.properties;
-            const datetimes = props.all_datetimes.split(',').map(s => s.trim()).sort();
+            var props = feature.properties;
+            var datetimes = props.all_datetimes.split(',').map(function(s) { return s.trim(); }).sort();
 
-            const byDate = {};
-            datetimes.forEach(dt => {
-                const [date, time] = dt.split(' ');
-                if (!byDate[date]) byDate[date] = [];
-                byDate[date].push(time);
+            var byDate = {};
+            datetimes.forEach(function(dt) {
+                var parts = dt.split(' ');
+                if (!byDate[parts[0]]) byDate[parts[0]] = [];
+                byDate[parts[0]].push(parts[1]);
             });
 
-            let html = '<h3>Hexagone #' + hexId + '</h3>';
+            var html = '<h3>Hexagone #' + hexId + '</h3>';
             html += '<p><strong>Centroïde:</strong> ' + props.centroid_lat.toFixed(6) + ', ' + props.centroid_lon.toFixed(6) + '</p>';
             html += '<table class="detail-table">';
             html += '<thead><tr><th>Date</th><th>Heures affectées</th><th>Nombre d\'heures</th></tr></thead><tbody>';
 
-            let totalDays = 0;
-            let totalHours = 0;
-
-            Object.keys(byDate).sort().forEach(date => {
-                const times = byDate[date].sort();
-                const numHours = times.length;
-                const timeList = times.join(', ');
+            var totalDays = 0, totalHours = 0;
+            Object.keys(byDate).sort().forEach(function(date) {
+                var times = byDate[date].sort();
                 totalDays++;
-                totalHours += numHours;
-                html += '<tr><td>' + date + '</td><td>' + timeList + '</td><td>' + numHours + '</td></tr>';
+                totalHours += times.length;
+                html += '<tr><td>' + date + '</td><td>' + times.join(', ') + '</td><td>' + times.length + '</td></tr>';
             });
 
             html += '</tbody><tfoot><tr><td><strong>Total</strong></td><td>' + totalDays + ' jours</td><td>' + totalHours + ' heures</td></tr></tfoot>';
@@ -381,16 +517,22 @@
             document.getElementById('detailModal').classList.remove('active');
             document.getElementById('modalOverlay').classList.remove('active');
         }
-
         document.getElementById('modalOverlay').onclick = closeDetailModal;
 
         // Initialize map
-        map.on('load', async () => {
-            await loadAllDailyData();
-            updateMap();
+        map.on('load', async function() {
+            try {
+                var dates = await loadCoreData();
+                updateMap();
+                hideLoader();
+                // Kick off per-day loads in the background so date filters work soon
+                loadDailyDataInBackground(dates);
+            } catch (e) {
+                console.error('Error loading data:', e);
+                setLoaderText('Erreur de chargement');
+            }
 
-            // Add geocoder control
-            const geocoder = new MapboxGeocoder({
+            var geocoder = new MapboxGeocoder({
                 accessToken: mapboxgl.accessToken,
                 mapboxgl: mapboxgl,
                 placeholder: 'Rechercher une adresse...',
@@ -398,19 +540,16 @@
                 language: 'fr'
             });
             map.addControl(geocoder);
-
-            // Add navigation controls
             map.addControl(new mapboxgl.NavigationControl(), 'bottom-left');
 
-            // Add click handler for hexagons
-            map.on('click', 'hex-layer', (e) => {
+            map.on('click', 'hex-layer', function(e) {
                 if (e.features.length > 0) {
-                    const props = e.features[0].properties;
-                    const date = document.getElementById('dateSelect').value;
-                    const isFiltered = date !== 'all';
-                    const hoursCount = isFiltered ? props.display_hours : props.total_occurrences;
+                    var props = e.features[0].properties;
+                    var date = document.getElementById('dateSelect').value;
+                    var isFiltered = date !== 'all';
+                    var hoursCount = isFiltered ? props.display_hours : props.total_occurrences;
 
-                    const popupContent = '<div style="font-size:13px;">' +
+                    var popupContent = '<div style="font-size:13px;">' +
                         '<b>Hexagone #' + props.hex_id + '</b><br>' +
                         '<b>Nombre d\'heures impactées:</b> ' + hoursCount + '<br>' +
                         '<b>Nombre de jours impactés:</b> ' + props.days_affected + '<br>' +
@@ -419,21 +558,12 @@
                         '<a class="detail-link" onclick="showDetails(' + props.hex_id + ')">Voir les détails complets</a>' +
                         '</div>';
 
-                    new mapboxgl.Popup()
-                        .setLngLat(e.lngLat)
-                        .setHTML(popupContent)
-                        .addTo(map);
+                    new mapboxgl.Popup().setLngLat(e.lngLat).setHTML(popupContent).addTo(map);
                 }
             });
 
-            // Change cursor on hover
-            map.on('mouseenter', 'hex-layer', () => {
-                map.getCanvas().style.cursor = 'pointer';
-            });
-
-            map.on('mouseleave', 'hex-layer', () => {
-                map.getCanvas().style.cursor = '';
-            });
+            map.on('mouseenter', 'hex-layer', function() { map.getCanvas().style.cursor = 'pointer'; });
+            map.on('mouseleave', 'hex-layer', function() { map.getCanvas().style.cursor = ''; });
         });
     </script>
 </body>
