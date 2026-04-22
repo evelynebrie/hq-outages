@@ -416,6 +416,11 @@
 
         <h4 style="margin-top:14px;">Affichage</h4>
 
+        <button class="summary-btn" id="hideBtn" onclick="setView('none')">
+            <strong>Masquer les hexagones</strong>
+            <small>Carte de base seulement</small>
+        </button>
+
         <button class="summary-btn active" id="summaryBtn" onclick="setView('all')">
             <strong>Résumé complet</strong>
             <small>Depuis le 1er janvier 2026</small>
@@ -491,8 +496,9 @@
     <div id="welcomeModal" class="detail-modal welcome-modal active">
         <span class="close-modal" onclick="closeWelcomeModal()">×</span>
         <h2>Où sont les pannes?</h2>
-        <p>Cet outil vous permet de localiser les pannes de courant ayant eu lieu au Québec depuis le 1<sup>er</sup> janvier 2026. L'objectif de cette carte est de promouvoir la transparence de l'information au sujet des pannes de courant au Québec.</p>
-        <p>Chaque occurrence de panne représente une panne de 15 minutes. À ce jour, <strong id="welcomeCount">…</strong> occurrences ont été dénombrées au Québec depuis le début de l'année.</p>
+        <p>Cet outil vous permet de localiser les pannes de courant ayant eu lieu au Québec depuis le 1<sup>er</sup> janvier 2026.</p>
+        <p>L'objectif de cette carte est de promouvoir la transparence de l'information au sujet des pannes de courant au Québec. Chaque occurrence de panne représente une panne de 15 minutes.</p>
+        <p>À ce jour, <strong id="welcomeCount">…</strong> occurrences ont été dénombrées au Québec depuis le début de l'année.</p>
         <div class="welcome-actions">
             <button class="btn-secondary" onclick="openFaqFromWelcome()">À propos de ce projet</button>
             <button class="btn-primary" onclick="closeWelcomeModal()">Commencer</button>
@@ -780,6 +786,7 @@
         }
 
         function updateSelectionUI() {
+            document.getElementById('hideBtn').classList.toggle('active', currentView === 'none');
             document.getElementById('summaryBtn').classList.toggle('active', currentView === 'all');
             document.getElementById('currentBtn').classList.toggle('active', currentView === 'current');
             document.querySelectorAll('.day[data-date]').forEach(function(el) {
@@ -815,6 +822,14 @@
         }
 
         function updateMap() {
+            if (currentView === 'none') {
+                if (map.getLayer('hex-layer')) map.setLayoutProperty('hex-layer', 'visibility', 'none');
+                if (map.getLayer('hex-outline')) map.setLayoutProperty('hex-outline', 'visibility', 'none');
+                return;
+            }
+            if (map.getLayer('hex-layer')) map.setLayoutProperty('hex-layer', 'visibility', 'visible');
+            if (map.getLayer('hex-outline')) map.setLayoutProperty('hex-outline', 'visibility', 'visible');
+
             var data = null;
             if (currentView === 'all') {
                 data = allData.total;
