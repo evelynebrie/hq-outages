@@ -9,6 +9,7 @@
     <link href='https://api.mapbox.com/mapbox-gl-js/v3.0.1/mapbox-gl.css' rel='stylesheet' />
     <script src="https://api.mapbox.com/mapbox-gl-js/plugins/mapbox-gl-geocoder/v5.0.0/mapbox-gl-geocoder.min.js"></script>
     <link rel="stylesheet" href="https://api.mapbox.com/mapbox-gl-js/plugins/mapbox-gl-geocoder/v5.0.0/mapbox-gl-geocoder.css" type="text/css">
+    <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
     <script data-goatcounter="https://ebudem.goatcounter.com/count"
             async src="//gc.zgo.at/count.js"></script>
     <style>
@@ -429,6 +430,167 @@
             font-variant-numeric: tabular-nums;
         }
         .hex-current-line { margin: 0 0 8px; }
+
+        /* ====== "Partager ces statistiques" button inside hex detail modal ====== */
+        .share-trigger {
+            display: block;
+            width: 100%;
+            margin: 18px 0 14px;
+            padding: 10px 14px;
+            background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+            color: #78350f;
+            border: 1px solid #fcd34d;
+            border-radius: 8px;
+            font-family: inherit;
+            font-size: 13px;
+            font-weight: 700;
+            cursor: pointer;
+            letter-spacing: 0.01em;
+            transition: filter 0.15s;
+        }
+        .share-trigger:hover { filter: brightness(0.97); }
+        .share-trigger::before {
+            content: '↗ ';
+            margin-right: 4px;
+        }
+
+        /* ====== Share modal (shows the social-share card) ====== */
+        #shareModal.detail-modal {
+            max-width: 540px;
+            padding: 0;
+            overflow: hidden;
+            z-index: 2010;
+        }
+        #shareModal .share-modal-inner { padding: 20px 22px 22px; }
+        #shareModal .share-hint {
+            font-size: 12.5px; color: #6b7280;
+            margin: 0 0 12px; line-height: 1.5;
+        }
+
+        /* The card itself — matches v5 Option A */
+        .share-card {
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 6px 18px rgba(0,0,0,0.08);
+            overflow: hidden;
+            box-sizing: border-box;
+            width: 100%;
+            margin-bottom: 18px;
+        }
+        .share-card .sc-hero {
+            background: linear-gradient(160deg, #fef3c7 0%, #fcd34d 55%, #f59e0b 100%);
+            padding: 20px 22px 16px;
+        }
+        .share-card .sc-eyebrow {
+            font-size: 10.5px; font-weight: 700;
+            text-transform: uppercase; letter-spacing: 0.08em;
+            color: #78350f; margin-bottom: 10px;
+            display: flex; align-items: center; gap: 8px;
+        }
+        .share-card .sc-hex-id {
+            font-family: "SF Mono", Menlo, monospace;
+            background: rgba(120, 53, 15, 0.14);
+            color: #78350f; padding: 2px 8px;
+            border-radius: 5px; font-size: 10.5px;
+            letter-spacing: 0.02em; text-transform: none;
+            font-weight: 700;
+        }
+        .share-card .sc-rank {
+            font-size: 80px; font-weight: 800;
+            color: #78350f; font-variant-numeric: tabular-nums;
+            line-height: 0.95; letter-spacing: -0.03em; margin: 0;
+        }
+        .share-card .sc-rank sup {
+            font-size: 30px; font-weight: 700;
+            margin-left: 4px; vertical-align: 22px;
+        }
+        .share-card .sc-caption {
+            font-size: 13px; color: #422006;
+            margin-top: 6px; line-height: 1.35;
+        }
+        .share-card .sc-caption strong { font-weight: 700; }
+
+        .share-card .sc-stats {
+            display: flex; padding: 14px 22px;
+            gap: 18px; border-bottom: 1px solid #f3f4f6;
+        }
+        .share-card .sc-stats > div { flex: 1; }
+        .share-card .sc-stat-label {
+            font-size: 9.5px; color: #9ca3af;
+            text-transform: uppercase; letter-spacing: 0.06em;
+            margin-bottom: 3px; font-weight: 600;
+        }
+        .share-card .sc-stat-value {
+            font-size: 18px; font-weight: 700; color: #111827;
+            font-variant-numeric: tabular-nums; line-height: 1;
+        }
+
+        .share-card .sc-chart { padding: 14px 22px 14px; }
+        .share-card .sc-chart-title {
+            font-size: 10.5px; font-weight: 600; color: #6b7280;
+            text-transform: uppercase; letter-spacing: 0.06em;
+            margin: 0 0 4px;
+        }
+        .share-card .sc-chart-sub { font-size: 10.5px; color: #9ca3af; margin: 0 0 12px; }
+        .share-card .sc-chart-wrap { display: flex; gap: 6px; }
+        .share-card .sc-yaxis {
+            display: flex; flex-direction: column; justify-content: space-between;
+            font-size: 9.5px; color: #9ca3af; font-variant-numeric: tabular-nums;
+            text-align: right; padding: 2px 0 14px; min-width: 22px;
+        }
+        .share-card .sc-chart-body { flex: 1; min-width: 0; }
+        .share-card .sc-svg { width: 100%; height: 78px; display: block; }
+        .share-card .sc-xaxis {
+            display: flex; font-size: 9.5px; color: #9ca3af; margin-top: 2px;
+        }
+        .share-card .sc-xaxis span { text-align: left; }
+
+        .share-card .sc-footer {
+            background: #f9fafb;
+            padding: 9px 22px;
+            font-size: 10.5px; color: #6b7280;
+            display: flex; justify-content: space-between;
+            align-items: center; border-top: 1px solid #f3f4f6;
+        }
+        .share-card .sc-footer .sc-logo { font-weight: 700; color: #111827; }
+
+        /* Social share buttons */
+        .share-btns {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 8px;
+        }
+        .share-btns button {
+            display: inline-flex; align-items: center;
+            justify-content: center; gap: 6px;
+            padding: 9px 6px;
+            border: 1px solid #e5e7eb;
+            background: white;
+            border-radius: 8px;
+            font-family: inherit;
+            font-size: 12px; font-weight: 600;
+            color: #374151;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .share-btns button:hover {
+            border-color: #9ca3af;
+            background: #f9fafb;
+        }
+        .share-btns button svg {
+            width: 16px; height: 16px; flex-shrink: 0;
+        }
+        .share-btns button.download {
+            grid-column: 1 / -1;
+            background: #111827;
+            color: white;
+            border-color: #111827;
+        }
+        .share-btns button.download:hover {
+            background: #374151;
+            border-color: #374151;
+        }
+
         .hex-hero-stat {
             background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
             border: 1px solid #fcd34d;
@@ -917,6 +1079,22 @@
     <div id="detailModal" class="detail-modal">
         <span class="close-modal" onclick="closeDetailModal()">×</span>
         <div id="modalContent"></div>
+    </div>
+    <div id="shareModal" class="detail-modal">
+        <span class="close-modal" onclick="closeShareModal()">×</span>
+        <div class="share-modal-inner">
+            <p class="share-hint">Voici un résumé partageable de votre secteur. Téléchargez l'image pour Instagram, ou partagez le lien directement sur d'autres réseaux.</p>
+            <div id="shareCard" class="share-card"></div>
+            <div class="share-btns">
+                <button onclick="shareVia('twitter')" title="Partager sur X"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg> X</button>
+                <button onclick="shareVia('bluesky')" title="Partager sur Bluesky"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M5.8 3.4C8.2 5.2 10.8 8.8 12 10.7c1.2-1.9 3.8-5.5 6.2-7.3 1.7-1.3 4.5-2.3 4.5 0.9 0 0.6-0.4 5.2-0.6 5.9-0.6 2.5-3.1 3.1-5.3 2.7 3.9 0.7 4.9 2.9 2.7 5.1-4 4.2-5.8-1-6.3-2.3-0.1-0.2-0.1-0.4-0.2-0.4-0.1 0-0.1 0.1-0.2 0.4-0.5 1.3-2.3 6.5-6.3 2.3-2.2-2.2-1.2-4.4 2.7-5.1-2.2 0.4-4.7-0.2-5.3-2.7-0.2-0.7-0.6-5.3-0.6-5.9 0-3.2 2.8-2.2 4.5-0.9z"/></svg> Bluesky</button>
+                <button onclick="shareVia('facebook')" title="Partager sur Facebook"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M24 12.07C24 5.41 18.63 0 12 0S0 5.4 0 12.07C0 18.1 4.39 23.1 10.13 24v-8.44H7.08v-3.49h3.04V9.41c0-3.02 1.79-4.7 4.54-4.7 1.31 0 2.68.24 2.68.24v2.97h-1.5c-1.49 0-1.96.93-1.96 1.89v2.26h3.32l-.53 3.5h-2.79V24C19.61 23.1 24 18.1 24 12.07"/></svg> Facebook</button>
+                <button onclick="shareVia('whatsapp')" title="Partager sur WhatsApp"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M17.5 14.4c-.3-.15-1.77-.87-2.04-.97-.27-.1-.47-.15-.67.15-.2.3-.77.97-.94 1.17-.17.2-.35.22-.65.07-.3-.15-1.26-.46-2.4-1.48-.89-.79-1.49-1.77-1.66-2.07-.17-.3-.02-.46.13-.61.13-.13.3-.35.45-.52.15-.17.2-.3.3-.5.1-.2.05-.37-.02-.52s-.67-1.62-.92-2.22c-.24-.58-.49-.5-.67-.51H7.9c-.17 0-.45.06-.69.3s-.92.9-.92 2.19c0 1.3.94 2.55 1.07 2.72.13.17 1.85 2.83 4.48 3.97.63.27 1.12.43 1.5.55.63.2 1.2.17 1.65.1.5-.07 1.55-.63 1.77-1.25.22-.61.22-1.13.15-1.25-.07-.12-.25-.17-.55-.32zM12.04 21.78h-.01a9.87 9.87 0 0 1-5.03-1.38l-.36-.21-3.74.98 1-3.65-.24-.37a9.86 9.86 0 0 1-1.51-5.26c0-5.45 4.43-9.88 9.89-9.88 2.64 0 5.12 1.03 6.99 2.9a9.82 9.82 0 0 1 2.89 6.99c0 5.45-4.44 9.88-9.88 9.88zm8.41-18.29A11.8 11.8 0 0 0 12.04.21C5.48.21.13 5.56.13 12.12c0 2.1.55 4.14 1.59 5.95L.03 24l6.08-1.59a11.87 11.87 0 0 0 5.93 1.5h.01c6.56 0 11.9-5.35 11.9-11.9 0-3.18-1.23-6.17-3.48-8.42z"/></svg> WhatsApp</button>
+                <button onclick="shareVia('email')" title="Partager par courriel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 5L2 7"/></svg> Courriel</button>
+                <button onclick="shareVia('copy')" title="Copier le lien"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> <span id="copyLinkLabel">Copier</span></button>
+                <button class="download" onclick="downloadShareCard()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Télécharger l'image (pour Instagram)</button>
+            </div>
+        </div>
     </div>
     <div id="faqModal" class="detail-modal faq-modal">
         <span class="close-modal" onclick="closeFaqModal()">×</span>
@@ -1614,6 +1792,8 @@
                     '<div class="hex-hero-sub">sur ' + daysLabel + ' &middot; ' + occLabel + '</div>' +
                 '</div>';
 
+            html += '<button class="share-trigger" onclick="openShareModal(' + hexId + ')">Partager ces statistiques</button>';
+
             html += '<div class="hist-section-title">Historique détaillé</div>';
             html += '<div class="hist-list">';
 
@@ -1659,6 +1839,248 @@
             document.getElementById('detailModal').classList.remove('active');
             document.getElementById('modalOverlay').classList.remove('active');
             if (geocoder) { try { geocoder.clear(); } catch (e) {} }
+        }
+
+        // ============================================================
+        //  Shareable card — "Partager ces statistiques"
+        // ============================================================
+        var currentShareState = null;
+
+        function openShareModal(hexId) {
+            if (!allData.total || !allData.total.features) return;
+            var feature = allData.total.features.find(function(f) { return f.properties.hex_id === hexId; });
+            if (!feature) return;
+            var props = feature.properties;
+
+            // Compute rank among all hexes (1 + number of hexes with strictly more occurrences).
+            var myOcc = props.total_occurrences;
+            var rank = 1;
+            var totalHexes = allData.total.features.length;
+            for (var i = 0; i < totalHexes; i++) {
+                if (allData.total.features[i].properties.total_occurrences > myOcc) rank++;
+            }
+
+            // Break hex history into per-day occurrence counts (byDate).
+            var datetimes = (props.all_datetimes || '').split(',').map(function(s){return s.trim();}).filter(function(s){return s.length>0;});
+            var byDate = {};
+            datetimes.forEach(function(dt) {
+                var dayKey = dt.split(' ')[0];
+                byDate[dayKey] = (byDate[dayKey] || 0) + 1;
+            });
+            var daysAffected = Object.keys(byDate).length;
+
+            // Total outage time in h/min.
+            var totalMin = myOcc * 15;
+            var totH = Math.floor(totalMin / 60);
+            var totM = totalMin % 60;
+            var timeLabel = totH === 0 ? totM + ' min'
+                           : (totM === 0 ? totH + ' h' : totH + ' h ' + totM);
+
+            // Worst month: group by YYYY-MM, sum occurrences, pick max.
+            var monthTotals = {};
+            Object.keys(byDate).forEach(function(k) {
+                var ym = k.substring(0, 7);
+                monthTotals[ym] = (monthTotals[ym] || 0) + byDate[k];
+            });
+            var worstMonth = null, worstMonthCount = 0;
+            Object.keys(monthTotals).forEach(function(ym) {
+                if (monthTotals[ym] > worstMonthCount) {
+                    worstMonthCount = monthTotals[ym];
+                    worstMonth = ym;
+                }
+            });
+            var worstMonthLabel = worstMonth
+                ? FR_MONTHS[parseInt(worstMonth.substring(5,7), 10) - 1]
+                : '—';
+            worstMonthLabel = worstMonthLabel.charAt(0).toUpperCase() + worstMonthLabel.slice(1);
+
+            // Build chart — one spike per day that had occurrences.
+            // Range = Jan 1 of latest year in data → latest date.
+            var dayKeys = Object.keys(byDate).sort();
+            var latest = dayKeys.length ? dayKeys[dayKeys.length - 1] : null;
+            var year = latest ? parseInt(latest.substring(0,4), 10) : new Date().getFullYear();
+            var startDate = new Date(year, 0, 1);
+            var endDate = latest ? new Date(latest + 'T00:00:00') : new Date();
+            var totalDays = Math.max(1, Math.round((endDate - startDate) / 86400000) + 1);
+            var events = dayKeys.map(function(k) {
+                var d = new Date(k + 'T00:00:00');
+                var dayIdx = Math.round((d - startDate) / 86400000);
+                return { day: dayIdx, hours: byDate[k] * 0.25 };
+            }).sort(function(a,b){ return a.day - b.day; });
+
+            var maxHours = 1;
+            events.forEach(function(e){ if (e.hours > maxHours) maxHours = e.hours; });
+            // Round y-axis top up a little so peaks don't kiss the top line.
+            var yMax = Math.ceil(maxHours * 1.05 * 2) / 2;
+            if (yMax < 1) yMax = 1;
+
+            // Triangle half-width in viewBox units, ±2.5 days.
+            var HALF_VB = Math.max(3, 2.5 * (240 / totalDays));
+            // But also cap so it doesn't overwhelm short ranges.
+            HALF_VB = Math.min(HALF_VB, 10);
+            var BASE = 99, TOP = 4;
+
+            function peakY(h) { return BASE - (h / yMax) * (BASE - TOP); }
+
+            // Build path parts.
+            var parts = ['M 0,' + BASE];
+            events.forEach(function(e) {
+                var px = (e.day / (totalDays - 1)) * 240;
+                var lx = Math.max(0, px - HALF_VB);
+                var rx = Math.min(240, px + HALF_VB);
+                parts.push('L ' + lx.toFixed(2) + ',' + BASE);
+                parts.push('L ' + px.toFixed(2) + ',' + peakY(e.hours).toFixed(2));
+                parts.push('L ' + rx.toFixed(2) + ',' + BASE);
+            });
+            parts.push('L 240,' + BASE);
+            var linePath = parts.join(' ');
+            var areaPath = linePath + ' Z';
+
+            // Chart subtitle: "Janvier à avril 2026 · jusqu'au 22 avril"
+            var firstMonthIdx = 0;
+            var lastMonthIdx = endDate.getMonth();
+            var subtitle = FR_MONTHS[firstMonthIdx] + ' à ' + FR_MONTHS[lastMonthIdx] + ' ' + year +
+                           ' · jusqu\'au ' + endDate.getDate() + ' ' + FR_MONTHS[lastMonthIdx];
+            subtitle = subtitle.charAt(0).toUpperCase() + subtitle.slice(1);
+
+            // Month axis: one span per month from Jan to endMonth, weighted by day count.
+            var monthAxis = '';
+            for (var mo = 0; mo <= lastMonthIdx; mo++) {
+                var monthStart = new Date(year, mo, 1);
+                var monthEnd = (mo === lastMonthIdx)
+                    ? endDate
+                    : new Date(year, mo + 1, 0); // last day of that month
+                var daysInSpan = Math.round((monthEnd - monthStart) / 86400000) + 1;
+                var name = FR_MONTHS[mo].charAt(0).toUpperCase() + FR_MONTHS[mo].slice(1);
+                monthAxis += '<span style="flex:' + daysInSpan + ';">' + name + '</span>';
+            }
+
+            // Last peak (today-ish dot) for the halo.
+            var lastPeak = events.length ? events[events.length - 1] : null;
+            var lastDotSvg = '';
+            if (lastPeak) {
+                var lpx = (lastPeak.day / (totalDays - 1)) * 240;
+                var lpy = peakY(lastPeak.hours);
+                lastDotSvg =
+                    '<circle cx="' + lpx.toFixed(2) + '" cy="' + lpy.toFixed(2) + '" r="2.4" fill="#d97706"/>' +
+                    '<circle cx="' + lpx.toFixed(2) + '" cy="' + lpy.toFixed(2) + '" r="4.2" fill="#fbbf24" opacity="0.4"/>';
+            }
+
+            var html =
+                '<div class="sc-hero">' +
+                    '<div class="sc-eyebrow"><span>Mon secteur</span><span class="sc-hex-id">#' + hexId + '</span></div>' +
+                    '<div class="sc-rank">' + rank.toLocaleString('fr-CA') + '<sup>e</sup></div>' +
+                    '<div class="sc-caption">pire secteur au Québec pour les pannes en <strong>' + year + '</strong>, sur <strong>' + totalHexes.toLocaleString('fr-CA') + '</strong> hexagones.</div>' +
+                '</div>' +
+                '<div class="sc-stats">' +
+                    '<div><div class="sc-stat-label">Temps sans courant</div><div class="sc-stat-value">' + timeLabel + '</div></div>' +
+                    '<div><div class="sc-stat-label">Jours affectés</div><div class="sc-stat-value">' + daysAffected + '</div></div>' +
+                    '<div><div class="sc-stat-label">Pire mois</div><div class="sc-stat-value">' + worstMonthLabel + '</div></div>' +
+                '</div>' +
+                '<div class="sc-chart">' +
+                    '<div class="sc-chart-title">Mes pannes</div>' +
+                    '<div class="sc-chart-sub">' + subtitle + '</div>' +
+                    '<div class="sc-chart-wrap">' +
+                        '<div class="sc-yaxis"><span>' + yMax.toFixed(yMax % 1 === 0 ? 0 : 1) + ' h</span><span></span><span></span><span>0</span></div>' +
+                        '<div class="sc-chart-body">' +
+                            '<svg class="sc-svg" viewBox="0 0 240 100" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">' +
+                                '<defs><linearGradient id="scGrad" x1="0" y1="0" x2="0" y2="1">' +
+                                    '<stop offset="0%" stop-color="#f59e0b" stop-opacity="0.95"/>' +
+                                    '<stop offset="60%" stop-color="#fcd34d" stop-opacity="0.75"/>' +
+                                    '<stop offset="100%" stop-color="#fef3c7" stop-opacity="0.45"/>' +
+                                '</linearGradient></defs>' +
+                                '<line x1="0" y1="99" x2="240" y2="99" stroke="#e5e7eb" stroke-width="0.5"/>' +
+                                '<line x1="240" y1="0" x2="240" y2="100" stroke="#d1d5db" stroke-width="0.5" stroke-dasharray="2 2"/>' +
+                                '<path d="' + areaPath + '" fill="url(#scGrad)"/>' +
+                                '<path d="' + linePath + '" fill="none" stroke="#d97706" stroke-width="1.3" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>' +
+                                lastDotSvg +
+                            '</svg>' +
+                            '<div class="sc-xaxis">' + monthAxis + '</div>' +
+                        '</div>' +
+                    '</div>' +
+                '</div>' +
+                '<div class="sc-footer"><span class="sc-logo">Où sont les pannes?</span><span>ousontlespannes.ca</span></div>';
+
+            document.getElementById('shareCard').innerHTML = html;
+
+            currentShareState = {
+                hexId: hexId,
+                rank: rank,
+                totalHexes: totalHexes,
+                timeLabel: timeLabel,
+                daysAffected: daysAffected,
+                year: year
+            };
+
+            document.getElementById('shareModal').classList.add('active');
+            document.getElementById('modalOverlay').classList.add('active');
+        }
+
+        function closeShareModal() {
+            document.getElementById('shareModal').classList.remove('active');
+            // Re-show the detail modal underneath if it's still marked active
+            if (!document.getElementById('detailModal').classList.contains('active')) {
+                document.getElementById('modalOverlay').classList.remove('active');
+            }
+            var copyLabel = document.getElementById('copyLinkLabel');
+            if (copyLabel) copyLabel.textContent = 'Copier';
+        }
+
+        function shareVia(platform) {
+            if (!currentShareState) return;
+            var s = currentShareState;
+            var url = 'https://ousontlespannes.ca/';
+            var msg = 'Mon secteur (#' + s.hexId + ') est le ' + s.rank + 'e pire au Québec pour les pannes en ' + s.year +
+                      ' — ' + s.timeLabel + ' sans courant sur ' + s.daysAffected + ' jour' + (s.daysAffected > 1 ? 's' : '') +
+                      '. Voyez le vôtre :';
+            var shareUrl = '';
+            switch (platform) {
+                case 'twitter':
+                    shareUrl = 'https://twitter.com/intent/tweet?text=' + encodeURIComponent(msg) + '&url=' + encodeURIComponent(url);
+                    break;
+                case 'bluesky':
+                    shareUrl = 'https://bsky.app/intent/compose?text=' + encodeURIComponent(msg + ' ' + url);
+                    break;
+                case 'facebook':
+                    shareUrl = 'https://www.facebook.com/sharer/sharer.php?u=' + encodeURIComponent(url) + '&quote=' + encodeURIComponent(msg);
+                    break;
+                case 'whatsapp':
+                    shareUrl = 'https://wa.me/?text=' + encodeURIComponent(msg + ' ' + url);
+                    break;
+                case 'email':
+                    shareUrl = 'mailto:?subject=' + encodeURIComponent('Où sont les pannes?') +
+                               '&body=' + encodeURIComponent(msg + '\n\n' + url);
+                    break;
+                case 'copy':
+                    var toCopy = msg + ' ' + url;
+                    if (navigator.clipboard && navigator.clipboard.writeText) {
+                        navigator.clipboard.writeText(toCopy).then(function() {
+                            var l = document.getElementById('copyLinkLabel');
+                            if (l) { l.textContent = 'Copié!'; setTimeout(function(){ l.textContent = 'Copier'; }, 1800); }
+                        });
+                    }
+                    return;
+            }
+            if (shareUrl) window.open(shareUrl, '_blank', 'noopener');
+        }
+
+        function downloadShareCard() {
+            if (typeof html2canvas === 'undefined') {
+                alert('Impossible de générer l\'image (html2canvas n\'est pas chargé).');
+                return;
+            }
+            var card = document.getElementById('shareCard');
+            if (!card) return;
+            html2canvas(card, { scale: 2, backgroundColor: '#ffffff', useCORS: true }).then(function(canvas) {
+                var link = document.createElement('a');
+                var id = currentShareState ? currentShareState.hexId : 'secteur';
+                link.download = 'ousontlespannes-' + id + '.png';
+                link.href = canvas.toDataURL('image/png');
+                link.click();
+            }).catch(function(err) {
+                console.error('html2canvas error:', err);
+                alert('Erreur lors de la génération de l\'image.');
+            });
         }
         // Tracks whether the FAQ modal was opened from the welcome modal, so
         // closing the FAQ (via ×, overlay click, or Esc) returns the user to
@@ -1719,6 +2141,12 @@
             // welcome modal — don't cascade and dismiss everything.
             if (document.getElementById('faqModal').classList.contains('active')) {
                 closeFaqModal();
+                return;
+            }
+            // Share modal sits on top of the detail modal; dismissing it
+            // returns the user to the detail view without closing everything.
+            if (document.getElementById('shareModal').classList.contains('active')) {
+                closeShareModal();
                 return;
             }
             closeDetailModal();
