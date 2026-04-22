@@ -27,13 +27,15 @@
             max-width: 320px;
             z-index: 1;
         }
-        .info h4 {
-            margin: 0 0 14px 0;
-            color: #000000;
-            font-size: 16px;
-            font-weight: 600;
-            padding-bottom: 10px;
-            border-bottom: 2px solid #e5e7eb;
+        .info h4 { margin: 0; color: #111827; font-size: 16px; font-weight: 600; }
+        .panel-title {
+            margin: 0 0 14px !important;
+            color: #111827 !important;
+            font-size: 19px !important;
+            font-weight: 600 !important;
+            padding-bottom: 12px !important;
+            border-bottom: 3px solid #f3f4f6 !important;
+            line-height: 1.2 !important;
         }
         .info-row {
             display: flex;
@@ -47,6 +49,31 @@
         .info-label { font-weight: 500; color: #6b7280; font-size: 13px; }
         .info-value { font-weight: 600; color: #111827; font-size: 14px; }
         .loading { color: #9ca3af; font-size: 12px; font-style: italic; }
+
+        /* Option B stats cards */
+        .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        .stats-card {
+            background: #f9fafb;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            padding: 12px 14px;
+        }
+        .stats-card .card-label { font-size: 11px; color: #6b7280; font-weight: 500; line-height: 1.35; margin-bottom: 6px; }
+        .stats-card .card-value { font-size: 20px; font-weight: 700; color: #111827; font-variant-numeric: tabular-nums; }
+        .stats-card-current {
+            grid-column: span 2;
+            background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+            border-color: #fcd34d;
+        }
+        .stats-card-current .card-label { color: #78350f; }
+        .stats-card-current .card-value { color: #78350f; display: flex; align-items: center; gap: 8px; }
+        .stats-card-current .card-value::before {
+            content: '';
+            width: 8px; height: 8px;
+            background: #f59e0b;
+            border-radius: 50%;
+            box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.25);
+        }
 
         /* Yellow badge for Pannes en cours */
         .current-badge {
@@ -64,19 +91,24 @@
             position: absolute;
             bottom: 30px;
             right: 10px;
-            line-height:20px;
-            color:#555;
-            background:white;
-            padding:14px;
-            border-radius:12px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            min-width: 240px;
             max-width: 320px;
+            font-size: 13px;
+            line-height: 22px;
+            color: #374151;
+            background: white;
+            padding: 18px 22px;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
             z-index: 1;
         }
-        .legend i { width:18px; height:18px; float:left; margin-right:8px; opacity:0.85; border-radius: 3px; }
-        .legend h4 { margin:0 0 10px; font-size:14px; color:#111827; }
-        .legend > div { margin-bottom: 4px; }
-        .legend-info-wrap { position: relative; display: flex; justify-content: flex-end; margin-top: 8px; padding-top: 8px; border-top: 1px solid #e5e7eb; }
+        .legend i { width:20px; height:20px; float:left; margin-right:10px; opacity:0.9; border-radius: 3px; }
+        .legend h4 { margin:0; font-size:15px; color:#111827; }
+        .legend > div { margin-bottom: 6px; }
+        .legend-last-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+        .legend-last-row span { display: flex; align-items: center; }
+        .legend-last-row span i { float: none; margin-right: 10px; }
+        .legend-caption { font-size: 11px; color: #9ca3af; line-height: 1.4; }
         .legend-info-btn {
             width: 22px; height: 22px;
             border-radius: 50%;
@@ -414,41 +446,38 @@
     </div>
 
     <div class="info">
-        <h4>Statistiques</h4>
-        <div class="info-row">
-            <span class="info-label">Pannes en cours:</span>
-            <span id="currentCount" class="loading">chargement...</span>
+        <h4 class="panel-title">Statistiques</h4>
+        <div class="stats-grid">
+            <div class="stats-card stats-card-current">
+                <div class="card-label">Pannes en cours &middot; <span id="lastReading">chargement&hellip;</span></div>
+                <div class="card-value" id="currentCount">&mdash;</div>
+            </div>
+            <div class="stats-card">
+                <div class="card-label">Occurrences depuis le 1<sup>er</sup>&nbsp;janvier&nbsp;2026</div>
+                <div class="card-value" id="totalOccurrences">&mdash;</div>
+            </div>
+            <div class="stats-card">
+                <div class="card-label">Hexagones impactés</div>
+                <div class="card-value" id="totalHexCount">&mdash;</div>
+            </div>
         </div>
-        <div class="info-row">
-            <span class="info-label">Dernière lecture:</span>
-            <span id="lastReading" class="loading">chargement...</span>
-        </div>
-        <div class="info-row">
-            <span class="info-label">Nombre total d'occurrences<br>en 2026:</span>
-            <span id="totalOccurrences" class="loading">chargement...</span>
-        </div>
-        <div class="info-row">
-            <span class="info-label">Nombre d'hexagones impactés<br>en 2026:</span>
-            <span id="totalHexCount" class="loading">chargement...</span>
-        </div>
-        <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid #e5e7eb; font-size:11px; color:#9ca3af; line-height:1.6;">
-            <div>Généré: <span id="genDate">—</span></div>
-            <div>Taille hexagones: 1.0 km</div>
-            <div>Jours analysés: <span id="daysCount">—</span></div>
+        <div style="margin-top: 12px; padding-top: 10px; border-top: 1px solid #e5e7eb; font-size:11px; color:#9ca3af; line-height:1.6;">
+            <div>Généré: <span id="genDate">&mdash;</span></div>
+            <div>Hexagones d'1&nbsp;km</div>
+            <div>Jours analysés: <span id="daysCount">&mdash;</span></div>
             <div>1 occurrence: panne de 15 minutes</div>
         </div>
     </div>
 
     <div class="legend" id="legend">
-        <h4>Impact relatif des pannes</h4>
+        <h4 class="panel-title">Impact relatif des pannes</h4>
         <div id="legendItems"><div style="font-size:12px;color:#999;">Chargement...</div></div>
         <div id="legendFooter" style="font-size:11px;color:#666;margin-top:10px;padding-top:8px;border-top:1px solid #e5e7eb;line-height:1.4;"></div>
     </div>
 
     <div class="controls">
+        <h4 class="panel-title">Affichage</h4>
         <div id="geocoderContainer" class="geocoder-container"></div>
-
-        <h4 style="margin-top:14px;">Affichage</h4>
 
         <button class="summary-btn" id="hideBtn" onclick="setView('none')">
             <strong>Masquer les hexagones</strong>
@@ -663,21 +692,15 @@
                 if (typeof v === 'number' && !isNaN(v)) totalOcc += v;
             });
             var totalOccEl = document.getElementById('totalOccurrences');
-            if (totalOccEl) {
-                totalOccEl.className = 'info-value';
-                totalOccEl.textContent = totalOcc.toLocaleString('fr-CA');
-            }
+            if (totalOccEl) totalOccEl.textContent = totalOcc.toLocaleString('fr-CA');
             var welcomeCountEl = document.getElementById('welcomeCount');
             if (welcomeCountEl) welcomeCountEl.textContent = totalOcc.toLocaleString('fr-CA');
 
             // Hex count
             var hexCountEl = document.getElementById('totalHexCount');
-            if (hexCountEl) {
-                hexCountEl.className = 'info-value';
-                hexCountEl.textContent = features.length.toLocaleString('fr-CA');
-            }
+            if (hexCountEl) hexCountEl.textContent = features.length.toLocaleString('fr-CA');
 
-            // Latest datetime across all hexes
+            // Latest datetime across all hexes (rendered in the Pannes en cours card label)
             var maxDt = '';
             features.forEach(function(f) {
                 var s = f.properties.all_datetimes;
@@ -689,10 +712,7 @@
                 }
             });
             var lastReadingEl = document.getElementById('lastReading');
-            if (lastReadingEl) {
-                lastReadingEl.className = 'info-value';
-                lastReadingEl.textContent = maxDt || '—';
-            }
+            if (lastReadingEl) lastReadingEl.textContent = formatFrDateTime(maxDt) || '—';
 
             // Days count
             var dates = new Set();
@@ -716,12 +736,22 @@
             }
         }
 
+        var FR_MONTHS = ['janvier','février','mars','avril','mai','juin','juillet','août','septembre','octobre','novembre','décembre'];
+        function formatFrDateTime(s) {
+            if (!s) return '';
+            var m = s.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/);
+            if (!m) return s;
+            var day = parseInt(m[3], 10);
+            var month = FR_MONTHS[parseInt(m[2], 10) - 1];
+            var year = m[1];
+            return day + ' ' + month + ' ' + year + ' à ' + m[4] + 'h' + m[5];
+        }
+
         function updateCurrentBadge() {
             var el = document.getElementById('currentCount');
             if (!el) return;
             var count = (allData.current && allData.current.features) ? allData.current.features.length : 0;
-            el.className = '';
-            el.innerHTML = '<span class="current-badge">' + count + ' hexagone' + (count === 1 ? '' : 's') + '</span>';
+            el.textContent = count.toLocaleString('fr-CA') + ' hexagone' + (count === 1 ? '' : 's');
         }
 
         // Parallel load: regional totals + current outages. Map shows as soon as totals ready.
