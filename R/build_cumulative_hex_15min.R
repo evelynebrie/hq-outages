@@ -1262,6 +1262,20 @@ cat('<!DOCTYPE html>
             font-size: 20px;
             font-weight: 700;
         }
+        #faqModal .faq-back-btn {
+            background: #f3f4f6;
+            color: #374151;
+            border: none;
+            border-radius: 999px;
+            padding: 5px 12px;
+            margin: 0 0 14px;
+            font-family: inherit;
+            font-size: 12.5px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+        #faqModal .faq-back-btn:hover { background: #e5e7eb; color: #111827; }
 
         /* About block — prose intro above the FAQ */
         #faqModal .about-block { margin: 0 0 22px; }
@@ -1516,6 +1530,7 @@ cat('<!DOCTYPE html>
     </div>
     <div id="faqModal">
         <button onclick="closeFaqModal()" class="close-btn">✕</button>
+        <button id="faqBackBtn" class="faq-back-btn" onclick="closeFaqModal()" style="display:none;">&larr;&nbsp;Retour</button>
         <h3>À propos de ce projet</h3>
 
         <div class="about-block">
@@ -2030,6 +2045,8 @@ cat(';
         }
         function closeFaqModal() {
             document.getElementById("faqModal").classList.remove("active");
+            var backBtn = document.getElementById("faqBackBtn");
+            if (backBtn) backBtn.style.display = "none";
             if (faqOpenedFromWelcome) {
                 faqOpenedFromWelcome = false;
                 document.getElementById("welcomeModal").classList.add("active");
@@ -2047,6 +2064,8 @@ cat(';
         }
         function openFaqFromWelcome() {
             faqOpenedFromWelcome = true;
+            var backBtn = document.getElementById("faqBackBtn");
+            if (backBtn) backBtn.style.display = "inline-block";
             document.getElementById("welcomeModal").classList.remove("active");
             openFaqModal();
         }
