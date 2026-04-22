@@ -472,6 +472,19 @@
         }
         .map-loader-text { font-size: 13px; color: #374151; }
         @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* Inline spinner shown inside the welcome button while data loads */
+        .btn-spinner {
+            display: inline-block;
+            width: 14px; height: 14px;
+            border: 2px solid rgba(255,255,255,0.35);
+            border-top-color: white;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            vertical-align: -2px;
+            margin-right: 8px;
+        }
+        .btn-primary[disabled] { cursor: wait; opacity: 0.9; }
     </style>
 </head>
 <body>
@@ -599,7 +612,7 @@
         <p>L'objectif de cette carte est de promouvoir la transparence de l'information au sujet des pannes de courant au Québec. Chaque occurrence de panne représente une panne de 15 minutes.</p>
         <div class="welcome-actions">
             <button class="btn-secondary" onclick="openFaqFromWelcome()">À propos de ce projet</button>
-            <button class="btn-primary" onclick="closeWelcomeModal()">Commencer</button>
+            <button class="btn-primary" id="welcomeStartBtn" onclick="startFromWelcome()">Accéder à l'outil</button>
         </div>
         <div id="visitorPill" class="visitor-pill">
             Vous êtes le <span class="num" id="visitorCount">&mdash;</span> visiteur depuis le lancement
@@ -1226,17 +1239,50 @@
                 .catch(function() { /* silent */ });
         })();
 
+        // Tracks whether core data has finished loading. If the user clicks
+        // "Accéder à l'outil" before this flips to true, we keep the modal
+        // open with a spinner and close it automatically once data is ready.
+        var dataLoaded = false;
+        var waitingToStart = false;
+        function onDataLoaded() {
+            dataLoaded = true;
+            if (waitingToStart) {
+                waitingToStart = false;
+                closeWelcomeModal();
+            }
+        }
+        function startFromWelcome() {
+            if (dataLoaded) {
+                closeWelcomeModal();
+                return;
+            }
+            var btn = document.getElementById('welcomeStartBtn');
+            if (btn && !waitingToStart) {
+                waitingToStart = true;
+                btn.disabled = true;
+                btn.innerHTML = '<span class="btn-spinner"></span>Chargement&hellip;';
+            }
+        }
+
         // Initialize map
         map.on('load', async function() {
             try {
                 var dates = await loadCoreData();
                 updateMap();
                 hideLoader();
+                onDataLoaded();
                 // Kick off per-day loads in the background so date filters work soon
                 loadDailyDataInBackground(dates);
             } catch (e) {
                 console.error('Error loading data:', e);
                 setLoaderText('Erreur de chargement');
+                // Re-enable the button so the user can retry / dismiss.
+                var btn = document.getElementById('welcomeStartBtn');
+                if (btn) {
+                    btn.disabled = false;
+                    btn.textContent = 'Accéder à l\'outil';
+                }
+                waitingToStart = false;
             }
 
             var geocoder = new MapboxGeocoder({

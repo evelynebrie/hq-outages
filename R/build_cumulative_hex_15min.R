@@ -1361,6 +1361,20 @@ cat('<!DOCTYPE html>
             font-variant-numeric: tabular-nums;
         }
 
+        /* Inline spinner shown inside the welcome button while data loads */
+        .btn-spinner {
+            display: inline-block;
+            width: 14px; height: 14px;
+            border: 2px solid rgba(255,255,255,0.35);
+            border-top-color: white;
+            border-radius: 50%;
+            animation: btn-spin 0.8s linear infinite;
+            vertical-align: -2px;
+            margin-right: 8px;
+        }
+        @keyframes btn-spin { to { transform: rotate(360deg); } }
+        .btn-primary[disabled] { cursor: wait; opacity: 0.9; }
+
         .date-row {
             margin: 8px 0;
             border-bottom: 1px solid #f3f4f6;
@@ -1428,7 +1442,7 @@ cat('<!DOCTYPE html>
         <p>L&apos;objectif de cette carte est de promouvoir la transparence de l&apos;information au sujet des pannes de courant au Québec. Chaque occurrence de panne représente une panne de 15 minutes.</p>
         <div class="welcome-actions">
             <button class="btn-secondary" onclick="openFaqFromWelcome()">À propos de ce projet</button>
-            <button class="btn-primary" onclick="closeWelcomeModal()">Commencer</button>
+            <button class="btn-primary" id="welcomeStartBtn" onclick="startFromWelcome()">Accéder à l&apos;outil</button>
         </div>
         <div id="visitorPill" class="visitor-pill">
             Vous êtes le <span class="num" id="visitorCount">&mdash;</span> visiteur depuis le lancement
@@ -1494,6 +1508,27 @@ cat('";
         var hexDataVisible = true;
         var previousView = "all";
 
+        // If the user clicks the welcome start button before data is loaded,
+        // we keep the modal open with a spinner and close it automatically
+        // once both the total and current datasets have arrived.
+        var waitingToStart = false;
+        function isDataReady() { return dataLoaded.total && dataLoaded.current; }
+        function maybeFinishStart() {
+            if (waitingToStart && isDataReady()) {
+                waitingToStart = false;
+                closeWelcomeModal();
+            }
+        }
+        function startFromWelcome() {
+            if (isDataReady()) { closeWelcomeModal(); return; }
+            var btn = document.getElementById("welcomeStartBtn");
+            if (btn && !waitingToStart) {
+                waitingToStart = true;
+                btn.disabled = true;
+                btn.innerHTML = \'<span class="btn-spinner"></span>Chargement&hellip;\';
+            }
+        }
+
         function toggleHexData() {
             var btn = document.getElementById("toggleDataBtn");
             var dateSelect = document.getElementById("dateSelect");
@@ -1526,17 +1561,19 @@ cat('";
                 allData.current = data;
                 dataLoaded.current = true;
                 updateCurrentCount();
+                maybeFinishStart();
                 // If current is selected, update map
                 var dateSelect = document.getElementById("dateSelect");
                 if (dateSelect && dateSelect.value === "current") {
                     updateMap();
                 }
             })
-            .catch(function(e) { 
+            .catch(function(e) {
                 console.error("Error loading current.geojson:", e);
                 allData.current = { type: "FeatureCollection", features: [] };
                 dataLoaded.current = true;
                 updateCurrentCount();
+                maybeFinishStart();
             });
         
         // Load regional data files and merge them
@@ -1573,10 +1610,20 @@ cat('";
                 var hexCountSpan = document.getElementById("totalHexCount");
                 if (hexCountSpan) hexCountSpan.innerHTML = "<span class=\\"info-value\\">" + allData.total.features.length.toLocaleString("fr-CA") + "</span>";
                 dataLoaded.total = true;
+                maybeFinishStart();
                 updateMap();
             })
             .catch(function(e) {
                 console.error("Error loading regional data:", e);
+                // Re-enable the welcome start button so the user can dismiss.
+                if (waitingToStart) {
+                    waitingToStart = false;
+                    var btn = document.getElementById("welcomeStartBtn");
+                    if (btn) {
+                        btn.disabled = false;
+                        btn.textContent = "Accéder à l\'outil";
+                    }
+                }
             });
         
         var dates = ', file = html_file, sep = "")
