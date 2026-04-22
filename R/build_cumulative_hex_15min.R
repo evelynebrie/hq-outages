@@ -1053,6 +1053,7 @@ cat('<!DOCTYPE html>
             display: flex;
             justify-content: space-between;
             align-items: center;
+            gap: 20px;
             padding: 8px 0;
             border-bottom: 1px solid #f3f4f6;
         }
