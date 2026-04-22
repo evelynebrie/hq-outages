@@ -1647,8 +1647,8 @@ cat(';
             div.innerHTML = "<h4>Statistiques</h4>" +
                 "<div class=\\"info-row\\"><span class=\\"info-label\\">Pannes en cours:</span> <span id=\\"currentCount\\" class=\\"loading\\">chargement...</span></div>" +
                 "<div class=\\"info-row\\"><span class=\\"info-label\\">Dernière lecture:</span> <span id=\\"lastReading\\" class=\\"loading\\">chargement...</span></div>" +
-                "<div class=\\"info-row\\"><span class=\\"info-label\\">Nombre total d\\u0027occurrences<br>de 15 min:</span> <span id=\\"totalOccurrences\\" class=\\"loading\\">chargement...</span></div>" +
-                "<div class=\\"info-row\\"><span class=\\"info-label\\">Nombre d\\u0027hexagones affectés<br>depuis le 1er janvier 2026:</span> <span id=\\"totalHexCount\\" class=\\"loading\\">chargement...</span></div>" +
+                "<div class=\\"info-row\\"><span class=\\"info-label\\">Nombre total d\\u0027occurrences<br>en 2026:</span> <span id=\\"totalOccurrences\\" class=\\"loading\\">chargement...</span></div>" +
+                "<div class=\\"info-row\\"><span class=\\"info-label\\">Nombre d\\u0027hexagones impactés<br>en 2026:</span> <span id=\\"totalHexCount\\" class=\\"loading\\">chargement...</span></div>" +
                 "<div style=\\"margin-top: 10px; padding-top: 10px; border-top: 1px solid #e5e7eb;font-size:11px;color:#9ca3af;line-height:1.6;\\">" +
                     "<div>Généré: ', file = html_file, sep = "")
 
