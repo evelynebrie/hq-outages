@@ -1251,20 +1251,68 @@ cat('<!DOCTYPE html>
             margin: 0 0 16px 0;
             color: #111827;
             font-size: 20px;
+            font-weight: 700;
         }
-        #faqModal h4 {
-            margin: 20px 0 6px;
-            color: #1f2937;
-            font-size: 14px;
-            font-weight: 600;
-        }
-        #faqModal h4:first-of-type { margin-top: 0; }
-        #faqModal p {
+
+        /* About block — prose intro above the FAQ */
+        #faqModal .about-block { margin: 0 0 22px; }
+        #faqModal .about-block p {
             margin: 0 0 12px;
-            color: #4b5563;
-            font-size: 13px;
-            line-height: 1.55;
+            color: #374151;
+            font-size: 13.5px;
+            line-height: 1.6;
         }
+        #faqModal .about-block p:last-child { margin-bottom: 0; }
+        #faqModal .about-block strong { color: #111827; font-weight: 700; }
+        #faqModal .about-block a {
+            color: #78350f;
+            background: #fef3c7;
+            padding: 1px 6px;
+            border-radius: 4px;
+            text-decoration: none;
+            font-weight: 500;
+        }
+        #faqModal .about-block a:hover { background: #fde68a; }
+
+        /* Small all-caps label above the FAQ items */
+        #faqModal .faq-section-title {
+            font-size: 11px;
+            font-weight: 600;
+            color: #9ca3af;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            margin: 0 0 10px;
+        }
+
+        /* Collapsible FAQ items */
+        #faqModal details.faq-item {
+            border-top: 1px solid #e5e7eb;
+            padding: 10px 0;
+        }
+        #faqModal details.faq-item:last-of-type { border-bottom: 1px solid #e5e7eb; }
+        #faqModal details.faq-item summary {
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 13.5px;
+            color: #111827;
+            list-style: none;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 4px 0;
+        }
+        #faqModal details.faq-item summary::-webkit-details-marker { display: none; }
+        #faqModal details.faq-item summary::after {
+            content: "+";
+            font-size: 18px;
+            color: #6b7280;
+            font-weight: 400;
+            line-height: 1;
+            margin-left: 10px;
+        }
+        #faqModal details.faq-item[open] summary::after { content: "–"; }
+        #faqModal details.faq-item summary:hover { color: #78350f; }
+        #faqModal details.faq-item p { margin: 8px 0 4px; color: #4b5563; font-size: 13px; line-height: 1.55; }
 
         /* Welcome modal */
         #welcomeModal {
@@ -1459,17 +1507,33 @@ cat('<!DOCTYPE html>
     <div id="faqModal">
         <button onclick="closeFaqModal()" class="close-btn">✕</button>
         <h3>À propos de ce projet</h3>
-        <p>Ce projet est dirigé par Evelyne Brie, professeure adjointe en science politique affiliée à IVADO à l&apos;Université de Montréal. Vous pouvez la contacter par courriel au <a href="mailto:evelyne.brie@umontreal.ca">evelyne.brie@umontreal.ca</a>.</p>
-        <p>Ses recherches portent sur la cohésion sociale, les inégalités structurelles et la prise de décision en matière de politique urbaine. «&nbsp;Où sont les pannes?&nbsp;» fait partie de ce travail et vise à mettre en lumière les disparités en matière de coupures électriques au Québec.</p>
-        <h3>FAQ</h3>
-        <h4>D&apos;où proviennent ces données?</h4>
-        <p>Les données sont collectées à chaque 15 minutes du site Info-Pannes d&apos;Hydro-Québec. Elles sont ensuite converties sur une grille hexagonale pour permettre de calculer les pannes cumulatives sur des aires géographiques d&apos;un kilomètre.</p>
-        <h4>Qu&apos;est-ce qui constitue une occurrence de panne?</h4>
-        <p>Une occurrence de panne est une lecture de panne, mesurée à chaque 15 minutes, via le site d&apos;Info-Pannes d&apos;Hydro-Québec. Par exemple, pour une coupure électrique d&apos;une durée totale d&apos;une heure, 4 occurrences sont comptabilisées. Cette technique permet de comparer la durée totale des pannes, plutôt que de comptabiliser des coupures de courant de durées différentes.</p>
-        <h4>Une panne est indiquée dans l&apos;hexagone où je réside, mais mon logement n&apos;est pas affecté. S&apos;agit-il d&apos;une erreur?</h4>
-        <p>Non. Les hexagones indiquent l&apos;occurrence d&apos;une panne à n&apos;importe quel endroit au sein de cet hexagone. Autrement dit, si vos voisins sont affectés par une panne sans que vous le soyez, l&apos;historique des pannes indiquera une occurrence sans que vous ayez été affecté.</p>
-        <h4>Dans quel but cette carte a-t-elle été créée?</h4>
-        <p>L&apos;objectif de cette carte est de promouvoir la transparence de l&apos;information au sujet des pannes de courant au Québec. L&apos;outil actuel d&apos;Info-Pannes d&apos;Hydro-Québec permet seulement de visualiser les pannes actuelles ou planifiées, sans partager d&apos;information sur les pannes résolues.</p>
+
+        <div class="about-block">
+            <p>Ce projet est dirigé par <strong>Evelyne Brie</strong>, professeure adjointe en science politique affiliée à IVADO à l&apos;Université de Montréal. Vous pouvez la contacter par courriel au <a href="mailto:evelyne.brie@umontreal.ca">evelyne.brie@umontreal.ca</a>.</p>
+            <p>Ses recherches portent sur la cohésion sociale, les inégalités structurelles et la prise de décision en matière de politique urbaine. «&nbsp;Où sont les pannes?&nbsp;» fait partie de ce travail et vise à mettre en lumière les disparités en matière de coupures électriques au Québec.</p>
+        </div>
+
+        <div class="faq-section-title">Questions fréquentes</div>
+
+        <details class="faq-item" open>
+            <summary>D&apos;où proviennent ces données?</summary>
+            <p>Les données sont collectées à chaque 15 minutes du site Info-Pannes d&apos;Hydro-Québec. Elles sont ensuite converties sur une grille hexagonale pour permettre de calculer les pannes cumulatives sur des aires géographiques d&apos;un kilomètre.</p>
+        </details>
+
+        <details class="faq-item">
+            <summary>Qu&apos;est-ce qui constitue une occurrence de panne?</summary>
+            <p>Une occurrence de panne est une lecture de panne, mesurée à chaque 15 minutes, via le site d&apos;Info-Pannes d&apos;Hydro-Québec. Par exemple, pour une coupure électrique d&apos;une durée totale d&apos;une heure, 4 occurrences sont comptabilisées. Cette technique permet de comparer la durée totale des pannes, plutôt que de comptabiliser des coupures de courant de durées différentes.</p>
+        </details>
+
+        <details class="faq-item">
+            <summary>Une panne est indiquée dans l&apos;hexagone où je réside, mais mon logement n&apos;est pas affecté. S&apos;agit-il d&apos;une erreur?</summary>
+            <p>Non. Les hexagones indiquent l&apos;occurrence d&apos;une panne à n&apos;importe quel endroit au sein de cet hexagone. Autrement dit, si vos voisins sont affectés par une panne sans que vous le soyez, l&apos;historique des pannes indiquera une occurrence sans que vous ayez été affecté.</p>
+        </details>
+
+        <details class="faq-item">
+            <summary>Dans quel but cette carte a-t-elle été créée?</summary>
+            <p>L&apos;objectif de cette carte est de promouvoir la transparence de l&apos;information au sujet des pannes de courant au Québec. L&apos;outil actuel d&apos;Info-Pannes d&apos;Hydro-Québec permet seulement de visualiser les pannes actuelles ou planifiées, sans partager d&apos;information sur les pannes résolues.</p>
+        </details>
     </div>
     
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
