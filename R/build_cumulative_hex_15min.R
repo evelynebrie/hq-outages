@@ -1323,6 +1323,16 @@ cat('";
                 quartileBreaks = computeQuartiles(allData.total.features);
                 console.log("Quartile breaks:", quartileBreaks);
                 rebuildLegend();
+                // Update stats panel totals
+                var totalOcc = 0;
+                allData.total.features.forEach(function(f) {
+                    var v = f.properties.total_occurrences;
+                    if (typeof v === "number" && !isNaN(v)) totalOcc += v;
+                });
+                var totalOccSpan = document.getElementById("totalOccurrences");
+                if (totalOccSpan) totalOccSpan.innerHTML = "<span class=\\"info-value\\">" + totalOcc.toLocaleString("fr-CA") + "</span>";
+                var hexCountSpan = document.getElementById("totalHexCount");
+                if (hexCountSpan) hexCountSpan.innerHTML = "<span class=\\"info-value\\">" + allData.total.features.length.toLocaleString("fr-CA") + "</span>";
                 dataLoaded.total = true;
                 updateMap();
             })
@@ -1633,21 +1643,25 @@ cat(';
             div.innerHTML = "<h4>Statistiques</h4>" +
                 "<div class=\\"info-row\\"><span class=\\"info-label\\">Pannes en cours:</span> <span id=\\"currentCount\\" class=\\"loading\\">chargement...</span></div>" +
                 "<div class=\\"info-row\\"><span class=\\"info-label\\">Dernière lecture:</span> <span id=\\"lastReading\\" class=\\"loading\\">chargement...</span></div>" +
-                "<div class=\\"info-row\\"><span class=\\"info-label\\">Taille hexagones:</span> <span class=\\"info-value\\">', file = html_file, sep = "")
-
-cat(hex_size_km, file = html_file, sep = "")
-
-cat(' km</span></div>" +
-                "<div class=\\"info-row\\"><span class=\\"info-label\\">Jours analysés:</span> <span class=\\"info-value\\">', file = html_file, sep = "")
-
-cat(num_days, file = html_file, sep = "")
-
-cat('</span></div>" +
-                "<div style=\\"margin-top: 10px; padding-top: 10px; border-top: 1px solid #e5e7eb;\\"><span style=\\"font-size:11px;color:#9ca3af;\\">Généré: ', file = html_file, sep = "")
+                "<div class=\\"info-row\\"><span class=\\"info-label\\">Nombre total d\\u0027occurrences de 15 min:</span> <span id=\\"totalOccurrences\\" class=\\"loading\\">chargement...</span></div>" +
+                "<div class=\\"info-row\\"><span class=\\"info-label\\">Nombre d\\u0027hexagones affectés depuis 1er janvier:</span> <span id=\\"totalHexCount\\" class=\\"loading\\">chargement...</span></div>" +
+                "<div style=\\"margin-top: 10px; padding-top: 10px; border-top: 1px solid #e5e7eb;font-size:11px;color:#9ca3af;line-height:1.6;\\">" +
+                    "<div>Généré: ', file = html_file, sep = "")
 
 cat(current_date, file = html_file, sep = "")
 
-cat('</span></div>";
+cat('</div>" +
+                    "<div>Taille hexagones: ', file = html_file, sep = "")
+
+cat(hex_size_km, file = html_file, sep = "")
+
+cat(' km</div>" +
+                    "<div>Jours analysés: ', file = html_file, sep = "")
+
+cat(num_days, file = html_file, sep = "")
+
+cat('</div>" +
+                "</div>";
             return div;
         };
         info.addTo(map);
