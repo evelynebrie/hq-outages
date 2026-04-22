@@ -729,6 +729,18 @@
                 calendarMonth = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, 1);
                 computeDayIntensities();
                 renderCalendar();
+
+                // Clicking anywhere on the calendar box (padding, grid gaps, legend)
+                // without hitting a specific day selects today's data (latest date).
+                var calBox = document.getElementById('calendarBox');
+                if (calBox && !calBox.dataset.blankClickBound) {
+                    calBox.dataset.blankClickBound = '1';
+                    calBox.addEventListener('click', function(e) {
+                        if (e.target.closest('button')) return;
+                        if (availableDates.length === 0) return;
+                        setView('day', availableDates[availableDates.length - 1]);
+                    });
+                }
             }
 
             return availableDates;
