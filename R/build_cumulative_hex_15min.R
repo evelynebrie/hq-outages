@@ -1100,10 +1100,10 @@ cat('<!DOCTYPE html>
             font-size: 13px;
         }
         
-        /* Enhanced badges - flashy red */
+        /* Enhanced badges - bright yellow */
         .current-badge {
-            background: #ef4444;
-            color: white;
+            background: #f5d05d;
+            color: #422006;
             padding: 4px 10px;
             border-radius: 6px;
             font-size: 12px;
@@ -1509,10 +1509,10 @@ cat(';
                 style: function(f) {
                     var count = f.properties.total_occurrences || f.properties.occurrences_today || 1;
                     return {
-                        fillColor: isCurrent ? "#ef4444" : getColor(count),
+                        fillColor: isCurrent ? "#fde68a" : getColor(count),
                         weight: isCurrent ? 2.5 : 0.5,
-                        color: isCurrent ? "#dc2626" : "#fff",
-                        fillOpacity: isCurrent ? 0.65 : 0.75
+                        color: isCurrent ? "#b45309" : "#fff",
+                        fillOpacity: isCurrent ? 0.75 : 0.75
                     };
                 },
                 onEachFeature: function(f, layer) {
