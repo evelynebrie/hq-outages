@@ -1912,11 +1912,14 @@
 
             // Build chart — one spike per day that had occurrences.
             // Range = Jan 1 of latest year in data → latest date.
+            // Chart range: Jan 1 of the current year → today's date (client clock),
+            // regardless of when the hex was last impacted. That way a secteur that
+            // was only affected in January still shows Feb/Mar/Apr as empty history.
             var dayKeys = Object.keys(byDate).sort();
-            var latest = dayKeys.length ? dayKeys[dayKeys.length - 1] : null;
-            var year = latest ? parseInt(latest.substring(0,4), 10) : new Date().getFullYear();
+            var now = new Date();
+            var year = now.getFullYear();
             var startDate = new Date(year, 0, 1);
-            var endDate = latest ? new Date(latest + 'T00:00:00') : new Date();
+            var endDate = new Date(year, now.getMonth(), now.getDate());
             var totalDays = Math.max(1, Math.round((endDate - startDate) / 86400000) + 1);
             var events = dayKeys.map(function(k) {
                 var d = new Date(k + 'T00:00:00');
