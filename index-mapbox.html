@@ -1023,17 +1023,20 @@
             map.on('click', 'hex-layer', function(e) {
                 if (e.features.length > 0) {
                     var props = e.features[0].properties;
-                    var date = document.getElementById('dateSelect').value;
-                    var isFiltered = date !== 'all';
-                    var hoursCount = isFiltered ? props.display_hours : props.total_occurrences;
+                    var isCurrent = currentView === 'current';
+                    var count = isCurrent
+                        ? (props.occurrences_today || props.total_occurrences || 1)
+                        : (props.total_occurrences || props.occurrences_today || 1);
 
                     var popupContent = '<div style="font-size:13px;">' +
-                        '<b>Hexagone #' + props.hex_id + '</b><br>' +
-                        '<b>Nombre d\'heures impactées:</b> ' + hoursCount + '<br>' +
-                        '<b>Nombre de jours impactés:</b> ' + props.days_affected + '<br>' +
-                        '<b>Coordonnées du centroïde:</b><br>' +
-                        'Lat: ' + props.centroid_lat.toFixed(6) + ', Lon: ' + props.centroid_lon.toFixed(6) + '<br>' +
-                        '<a class="detail-link" onclick="showDetails(' + props.hex_id + ')">Voir les détails complets</a>' +
+                        '<b>Hexagone #' + props.hex_id + '</b>';
+                    if (isCurrent) {
+                        popupContent += ' <span class="current-badge">EN COURS</span>';
+                    }
+                    popupContent += '<br><b>Occurrences totales:</b> ' + count + '<br>' +
+                        '<b>Jours affectés:</b> ' + (props.days_affected || 1) + '<br>' +
+                        '<b>Centroïde:</b> ' + Number(props.centroid_lat).toFixed(6) + ', ' + Number(props.centroid_lon).toFixed(6) + '<br>' +
+                        '<a class="detail-link" onclick="showDetails(' + props.hex_id + ')">Voir historique</a>' +
                         '</div>';
 
                     new mapboxgl.Popup().setLngLat(e.lngLat).setHTML(popupContent).addTo(map);
