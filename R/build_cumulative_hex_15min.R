@@ -1967,7 +1967,7 @@ cat(';
                 .then(function(r) { return r.ok ? r.json() : null; })
                 .then(function(data) {
                     if (!data || !data.count) return;
-                    var n = parseInt(String(data.count).replace(/\s/g, ""), 10);
+                    var n = parseInt(String(data.count).replace(/\\s/g, ""), 10);
                     if (isNaN(n) || n <= 0) return;
                     document.getElementById("visitorCount").textContent = n.toLocaleString("fr-CA");
                     document.getElementById("visitorPill").classList.add("visible");
