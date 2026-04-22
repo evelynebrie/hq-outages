@@ -1962,7 +1962,7 @@ cat(';
             var p2 = "Chaque niveau regroupe 20% des hexagones.";
             var p3 = "Ces valeurs sont mises à jour automatiquement pour refléter une proportion égale d&apos;observations dans chaque niveau d&apos;impact.";
             container.innerHTML =
-                "<div class=\\"scale-labels\\"><span>Minimal</span><span>Intense</span></div>" +
+                "<div class=\\"scale-labels\\"><span>Faible</span><span>Élevé</span></div>" +
                 "<div class=\\"gradient-bar\\">" + bars + "</div>" +
                 "<div class=\\"range-labels\\"><span>" + minLabel + "</span><span>" + q.max + "+</span></div>" +
                 "<div class=\\"legend-info-wrap\\">" +

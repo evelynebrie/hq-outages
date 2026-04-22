@@ -709,7 +709,7 @@
             </div>
         </div>
         <div id="hourlyChartBlock" class="hourly-chart" style="display:none;">
-            <div class="hourly-chart-title">Hexagones en panne aujourd'hui</div>
+            <div class="hourly-chart-title">Occurrences aujourd'hui</div>
             <div class="hourly-chart-sub" id="hourlyChartSub">&mdash;</div>
             <div class="hourly-chart-wrap">
                 <div class="hourly-yaxis" id="hourlyYAxis">
@@ -968,7 +968,7 @@
             }
             var minLabel = q.min + (q.min === 1 ? ' occurrence' : ' occurrences');
             container.innerHTML =
-                '<div class="scale-labels"><span>Minimal</span><span>Intense</span></div>' +
+                '<div class="scale-labels"><span>Faible</span><span>Élevé</span></div>' +
                 '<div class="gradient-bar">' + barHtml + '</div>' +
                 '<div class="range-labels"><span>' + minLabel + '</span><span>' + q.max + '+</span></div>';
 
