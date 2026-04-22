@@ -111,6 +111,52 @@
         .close-modal:hover { color:#333; }
         .mapboxgl-ctrl-geocoder { max-width: 300px; }
 
+        /* Info button (FAQ trigger) */
+        .info-btn {
+            position: absolute;
+            bottom: 140px;
+            left: 10px;
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            background: white;
+            border: none;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            cursor: pointer;
+            font-family: Georgia, "Times New Roman", serif;
+            font-size: 20px;
+            font-style: italic;
+            font-weight: bold;
+            color: #374151;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 100;
+            transition: transform 0.15s, box-shadow 0.15s;
+            padding: 0;
+        }
+        .info-btn:hover {
+            transform: scale(1.08);
+            box-shadow: 0 6px 16px rgba(0,0,0,0.2);
+        }
+
+        /* FAQ modal content */
+        .faq-modal { max-width: 640px; }
+        .faq-modal h3 { margin: 0 0 16px; color: #111827; }
+        .faq-modal h4 {
+            margin: 20px 0 6px;
+            color: #1f2937;
+            font-size: 14px;
+            font-weight: 600;
+        }
+        .faq-modal h4:first-of-type { margin-top: 0; }
+        .faq-modal p {
+            margin: 0 0 12px;
+            color: #4b5563;
+            font-size: 13px;
+            line-height: 1.55;
+        }
+
         /* Loading overlay */
         .map-loader {
             position: absolute;
@@ -199,10 +245,24 @@
         </select>
     </div>
 
+    <button class="info-btn" onclick="openFaqModal()" title="À propos de la carte" aria-label="Informations">i</button>
+
     <div id="modalOverlay" class="modal-overlay"></div>
     <div id="detailModal" class="detail-modal">
         <span class="close-modal" onclick="closeDetailModal()">×</span>
         <div id="modalContent"></div>
+    </div>
+    <div id="faqModal" class="detail-modal faq-modal">
+        <span class="close-modal" onclick="closeFaqModal()">×</span>
+        <h3>FAQ</h3>
+        <h4>D'où proviennent ces données?</h4>
+        <p>Les données sont collectées à chaque 15 minutes du site Info-Pannes d'Hydro-Québec. Elles sont ensuite converties sur une grille hexagonale pour permettre de calculer les pannes cumulatives sur des aires géographiques d'un kilomètre.</p>
+        <h4>Qu'est-ce qui constitue une occurrence de panne?</h4>
+        <p>Une occurrence de panne est une lecture de panne, mesurée à chaque 15 minutes, via le site d'Info-Pannes d'Hydro-Québec. Par exemple, pour une coupure électrique d'une durée totale d'une heure, 4 occurrences sont comptabilisées. Cette technique permet de comparer la durée totale des pannes, plutôt que de comptabiliser des coupures de courant de durées différentes.</p>
+        <h4>Une panne est indiquée dans l'hexagone où je réside, mais mon logement n'est pas affecté. S'agit-il d'une erreur?</h4>
+        <p>Non. Les hexagones indiquent l'occurrence d'une panne à n'importe quel endroit au sein de cet hexagone. Autrement dit, si vos voisins sont affectés par une panne sans que vous le soyez, l'historique des pannes indiquera une occurrence sans que vous ayez été affecté.</p>
+        <h4>Dans quel but cette carte a-t-elle été créée?</h4>
+        <p>L'objectif de cette carte est de promouvoir la transparence de l'information au sujet des pannes de courant au Québec. L'outil actuel d'Info-Pannes d'Hydro-Québec permet seulement de visualiser les pannes actuelles ou planifiées, sans partager d'information sur les pannes résolues.</p>
     </div>
 
     <script>
@@ -517,7 +577,18 @@
             document.getElementById('detailModal').classList.remove('active');
             document.getElementById('modalOverlay').classList.remove('active');
         }
-        document.getElementById('modalOverlay').onclick = closeDetailModal;
+        function openFaqModal() {
+            document.getElementById('faqModal').classList.add('active');
+            document.getElementById('modalOverlay').classList.add('active');
+        }
+        function closeFaqModal() {
+            document.getElementById('faqModal').classList.remove('active');
+            document.getElementById('modalOverlay').classList.remove('active');
+        }
+        document.getElementById('modalOverlay').onclick = function() {
+            closeDetailModal();
+            closeFaqModal();
+        };
 
         // Initialize map
         map.on('load', async function() {
