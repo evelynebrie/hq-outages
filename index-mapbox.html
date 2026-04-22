@@ -2028,6 +2028,7 @@
                 rank: rank,
                 totalHexes: totalHexes,
                 timeLabel: timeLabel,
+                totalMinutes: totalMin,
                 daysAffected: daysAffected,
                 year: year
             };
@@ -2046,13 +2047,29 @@
             if (copyLabel) copyLabel.textContent = 'Copier';
         }
 
+        // Insert a regular space as the French thousands separator (e.g. 8588 → "8 588").
+        function frNum(n) {
+            return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+        }
+
+        function buildShareMessage(s) {
+            var h = Math.floor(s.totalMinutes / 60);
+            var m = s.totalMinutes % 60;
+            var timeCompact;
+            if (h === 0) timeCompact = m + ' min';
+            else if (m === 0) timeCompact = h + 'h';
+            else timeCompact = h + 'h' + (m < 10 ? '0' + m : m);
+            var dayWord = s.daysAffected > 1 ? ' jours' : ' jour';
+            return 'Mon secteur (#' + s.hexId + ') est le ' + frNum(s.rank) + 'e pire au Québec pour les pannes en ' + s.year +
+                   ' (sur ' + frNum(s.totalHexes) + '), avec ' + timeCompact + ' sans courant sur ' + s.daysAffected + dayWord +
+                   ' depuis le 1er janvier ' + s.year + '. Voyez les statistiques pour votre secteur:';
+        }
+
         function shareVia(platform) {
             if (!currentShareState) return;
             var s = currentShareState;
             var url = 'https://ousontlespannes.ca/';
-            var msg = 'Mon secteur (#' + s.hexId + ') est le ' + s.rank + 'e pire au Québec pour les pannes en ' + s.year +
-                      ' — ' + s.timeLabel + ' sans courant sur ' + s.daysAffected + ' jour' + (s.daysAffected > 1 ? 's' : '') +
-                      '. Voyez le vôtre :';
+            var msg = buildShareMessage(s);
             var shareUrl = '';
             switch (platform) {
                 case 'twitter':
@@ -2068,8 +2085,16 @@
                     shareUrl = 'https://wa.me/?text=' + encodeURIComponent(msg + ' ' + url);
                     break;
                 case 'email':
+                    // Download the share card as PNG so the user can attach it to the
+                    // email. mailto: doesn't support real attachments, so we trigger
+                    // a save to their Downloads folder first, then open the mail
+                    // composer with the pre-written body.
+                    downloadShareCard();
                     shareUrl = 'mailto:?subject=' + encodeURIComponent('Où sont les pannes?') +
-                               '&body=' + encodeURIComponent(msg + '\n\n' + url);
+                               '&body=' + encodeURIComponent(
+                                   msg + '\n\n' + url +
+                                   '\n\n(L\'image du résumé vient d\'être téléchargée — ajoutez-la en pièce jointe.)'
+                               );
                     break;
                 case 'copy':
                     var toCopy = msg + ' ' + url;
