@@ -807,11 +807,14 @@
             if (hour === 'all') return dailyData;
             var filtered = { type: 'FeatureCollection', features: [] };
             dailyData.features.forEach(function(f) {
-                if (!f.properties.all_datetimes) return;
-                var dts = f.properties.all_datetimes.split(',').map(function(s) { return s.trim(); });
+                var raw = f.properties.datetimes_today || f.properties.all_datetimes;
+                if (!raw) return;
+                var dts = raw.split(',').map(function(s) { return s.trim(); }).filter(function(s) { return s.length > 0; });
                 var match = dts.filter(function(dt) {
-                    var h = parseInt(dt.split(' ')[1].split(':')[0]);
-                    return h === parseInt(hour);
+                    var parts = dt.split(/[ T]/);
+                    if (parts.length < 2) return false;
+                    var h = parseInt(parts[1].split(':')[0], 10);
+                    return h === parseInt(hour, 10);
                 });
                 if (match.length === 0) return;
                 var copy = Object.assign({}, f, {
