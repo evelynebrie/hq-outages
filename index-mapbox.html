@@ -2082,16 +2082,8 @@
                     shareUrl = 'https://wa.me/?text=' + encodeURIComponent(msg + ' ' + url);
                     break;
                 case 'email':
-                    // Download the share card as PNG so the user can attach it to the
-                    // email. mailto: doesn't support real attachments, so we trigger
-                    // a save to their Downloads folder first, then open the mail
-                    // composer with the pre-written body.
-                    downloadShareCard();
                     shareUrl = 'mailto:?subject=' + encodeURIComponent('Où sont les pannes?') +
-                               '&body=' + encodeURIComponent(
-                                   msg + '\n\n' + url +
-                                   '\n\n(L\'image du résumé vient d\'être téléchargée — ajoutez-la en pièce jointe.)'
-                               );
+                               '&body=' + encodeURIComponent(msg + '\n\n' + url);
                     break;
                 case 'copy':
                     var toCopy = msg + ' ' + url;
