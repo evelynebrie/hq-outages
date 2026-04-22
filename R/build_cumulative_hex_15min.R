@@ -1214,6 +1214,7 @@ cat('<!DOCTYPE html>
         .hex-pop-row {
             display: flex; justify-content: space-between;
             align-items: baseline;
+            gap: 24px;
             padding: 5px 0;
             border-bottom: 1px solid #f3f4f6;
         }
@@ -2121,7 +2122,7 @@ cat(';
                         popDuration = popH + " h " + popM + " min";
                     }
 
-                    var popupContent = "<div class=\\"hex-pop-title\\">#" + props.hex_id;
+                    var popupContent = "<div class=\\"hex-pop-title\\">Hexagone #" + props.hex_id;
                     if (isCurrent) {
                         popupContent += "<span class=\\"current-badge\\">EN COURS</span>";
                     }
