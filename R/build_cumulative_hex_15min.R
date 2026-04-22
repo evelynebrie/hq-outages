@@ -76,6 +76,16 @@ if (QUICK_DEPLOY) {
   cat(sprintf("  ✓ Loaded cache with %d hexagons and %d processed files\n",
               length(cumulative_hex_data), length(processed_files)))
 
+  # Derive most_recent_datetime from processed_files (HTML generation needs it;
+  # the block that normally defines it (step 3.5) is skipped in QUICK_DEPLOY mode).
+  qd_ts <- regmatches(processed_files,
+                      regexpr("[0-9]{8}[Tt][0-9]{6}", processed_files))
+  qd_max_ts <- max(qd_ts)
+  most_recent_datetime <- sprintf("%s-%s-%s %s:%s:%s",
+    substr(qd_max_ts, 1, 4), substr(qd_max_ts, 5, 6), substr(qd_max_ts, 7, 8),
+    substr(qd_max_ts, 10, 11), substr(qd_max_ts, 12, 13), substr(qd_max_ts, 14, 15))
+  cat(sprintf("  ✓ Most recent datetime (from cache): %s\n", most_recent_datetime))
+
   # Use processed files as the file list
   files <- processed_files
   files_to_process <- character()  # Nothing new to process
@@ -1043,6 +1053,7 @@ cat('<!DOCTYPE html>
             display: flex;
             justify-content: space-between;
             align-items: center;
+            gap: 20px;
             padding: 8px 0;
             border-bottom: 1px solid #f3f4f6;
         }
@@ -1090,10 +1101,10 @@ cat('<!DOCTYPE html>
             font-size: 13px;
         }
         
-        /* Enhanced badges - flashy red */
+        /* Enhanced badges - bright yellow */
         .current-badge {
-            background: #ef4444;
-            color: white;
+            background: #f5d05d;
+            color: #422006;
             padding: 4px 10px;
             border-radius: 6px;
             font-size: 12px;
@@ -1147,7 +1158,71 @@ cat('<!DOCTYPE html>
             backdrop-filter: blur(2px);
         }
         #modalOverlay.active { display: block; }
-        
+
+        /* Info button (FAQ trigger) */
+        .info-btn {
+            position: absolute;
+            bottom: 30px;
+            left: 10px;
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            background: white;
+            border: none;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            cursor: pointer;
+            font-family: Georgia, "Times New Roman", serif;
+            font-size: 20px;
+            font-style: italic;
+            font-weight: bold;
+            color: #374151;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            transition: transform 0.15s, box-shadow 0.15s;
+            padding: 0;
+        }
+        .info-btn:hover {
+            transform: scale(1.08);
+            box-shadow: 0 6px 16px rgba(0,0,0,0.2);
+        }
+        #faqModal {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: white;
+            padding: 28px;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            max-height: 80vh;
+            overflow-y: auto;
+            z-index: 10000;
+            display: none;
+            min-width: 320px;
+            max-width: 640px;
+        }
+        #faqModal.active { display: block; }
+        #faqModal h3 {
+            margin: 0 0 16px 0;
+            color: #111827;
+            font-size: 20px;
+        }
+        #faqModal h4 {
+            margin: 20px 0 6px;
+            color: #1f2937;
+            font-size: 14px;
+            font-weight: 600;
+        }
+        #faqModal h4:first-of-type { margin-top: 0; }
+        #faqModal p {
+            margin: 0 0 12px;
+            color: #4b5563;
+            font-size: 13px;
+            line-height: 1.55;
+        }
+
         .date-row {
             margin: 8px 0;
             border-bottom: 1px solid #f3f4f6;
@@ -1205,10 +1280,24 @@ cat('<!DOCTYPE html>
 <body>
     <div class="main-title">Cartographie des pannes au Québec</div>
     <div id="map"></div>
-    <div id="modalOverlay" onclick="closeDetailModal()"></div>
+    <button class="info-btn" onclick="openFaqModal()" title="À propos de la carte" aria-label="Informations">i</button>
+
+    <div id="modalOverlay" onclick="closeAllModals()"></div>
     <div id="detailModal">
         <button onclick="closeDetailModal()" class="close-btn">✕</button>
         <div id="modalContent"></div>
+    </div>
+    <div id="faqModal">
+        <button onclick="closeFaqModal()" class="close-btn">✕</button>
+        <h3>FAQ</h3>
+        <h4>D&apos;où proviennent ces données?</h4>
+        <p>Les données sont collectées à chaque 15 minutes du site Info-Pannes d&apos;Hydro-Québec. Elles sont ensuite converties sur une grille hexagonale pour permettre de calculer les pannes cumulatives sur des aires géographiques d&apos;un kilomètre.</p>
+        <h4>Qu&apos;est-ce qui constitue une occurrence de panne?</h4>
+        <p>Une occurrence de panne est une lecture de panne, mesurée à chaque 15 minutes, via le site d&apos;Info-Pannes d&apos;Hydro-Québec. Par exemple, pour une coupure électrique d&apos;une durée totale d&apos;une heure, 4 occurrences sont comptabilisées. Cette technique permet de comparer la durée totale des pannes, plutôt que de comptabiliser des coupures de courant de durées différentes.</p>
+        <h4>Une panne est indiquée dans l&apos;hexagone où je réside, mais mon logement n&apos;est pas affecté. S&apos;agit-il d&apos;une erreur?</h4>
+        <p>Non. Les hexagones indiquent l&apos;occurrence d&apos;une panne à n&apos;importe quel endroit au sein de cet hexagone. Autrement dit, si vos voisins sont affectés par une panne sans que vous le soyez, l&apos;historique des pannes indiquera une occurrence sans que vous ayez été affecté.</p>
+        <h4>Dans quel but cette carte a-t-elle été créée?</h4>
+        <p>L&apos;objectif de cette carte est de promouvoir la transparence de l&apos;information au sujet des pannes de courant au Québec. L&apos;outil actuel d&apos;Info-Pannes d&apos;Hydro-Québec permet seulement de visualiser les pannes actuelles ou planifiées, sans partager d&apos;information sur les pannes résolues.</p>
     </div>
     
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -1309,6 +1398,20 @@ cat('";
                 });
                 allData.total = { type: "FeatureCollection", features: allFeatures };
                 console.log("Total data loaded from", regions.length, "regions:", allFeatures.length, "features");
+                // Compute quartile breaks from overall total_occurrences distribution
+                quartileBreaks = computeQuartiles(allData.total.features);
+                console.log("Quartile breaks:", quartileBreaks);
+                rebuildLegend();
+                // Update stats panel totals
+                var totalOcc = 0;
+                allData.total.features.forEach(function(f) {
+                    var v = f.properties.total_occurrences;
+                    if (typeof v === "number" && !isNaN(v)) totalOcc += v;
+                });
+                var totalOccSpan = document.getElementById("totalOccurrences");
+                if (totalOccSpan) totalOccSpan.innerHTML = "<span class=\\"info-value\\">" + totalOcc.toLocaleString("fr-CA") + "</span>";
+                var hexCountSpan = document.getElementById("totalHexCount");
+                if (hexCountSpan) hexCountSpan.innerHTML = "<span class=\\"info-value\\">" + allData.total.features.length.toLocaleString("fr-CA") + "</span>";
                 dataLoaded.total = true;
                 updateMap();
             })
@@ -1394,15 +1497,62 @@ cat(';
             }
         }
         
+        var quartileBreaks = null; // computed from overall total_occurrences on load
+        var QUARTILE_COLORS = ["#fee0d2", "#fcbba1", "#fc9272", "#ef3b2c", "#a50f15"];
+
+        function percentile(sortedVals, p) {
+            var idx = (sortedVals.length - 1) * p;
+            var lo = Math.floor(idx);
+            var hi = Math.ceil(idx);
+            if (lo === hi) return sortedVals[lo];
+            return sortedVals[lo] + (sortedVals[hi] - sortedVals[lo]) * (idx - lo);
+        }
+
+        function computeQuartiles(features) {
+            var values = [];
+            for (var i = 0; i < features.length; i++) {
+                var v = features[i].properties.total_occurrences;
+                if (typeof v === "number" && !isNaN(v)) values.push(v);
+            }
+            values.sort(function(a, b) { return a - b; });
+            if (values.length === 0) return null;
+            return {
+                min: values[0],
+                q1: Math.round(percentile(values, 0.20)),
+                q2: Math.round(percentile(values, 0.40)),
+                q3: Math.round(percentile(values, 0.60)),
+                q4: Math.round(percentile(values, 0.80)),
+                max: values[values.length - 1]
+            };
+        }
+
         function getColor(d) {
-            if (d > 80) return "#67000d";
-            if (d > 60) return "#a50f15";
-            if (d > 40) return "#cb181d";
-            if (d > 20) return "#ef3b2c";
-            if (d > 10) return "#fb6a4a";
-            if (d > 5) return "#fc9272";
-            if (d > 2) return "#fcbba1";
-            return "#fee5d9";
+            if (!quartileBreaks) return "#fcbba1";
+            if (d <= quartileBreaks.q1) return QUARTILE_COLORS[0];
+            if (d <= quartileBreaks.q2) return QUARTILE_COLORS[1];
+            if (d <= quartileBreaks.q3) return QUARTILE_COLORS[2];
+            if (d <= quartileBreaks.q4) return QUARTILE_COLORS[3];
+            return QUARTILE_COLORS[4];
+        }
+
+        function rebuildLegend() {
+            var container = document.getElementById("legendItems");
+            if (!container || !quartileBreaks) return;
+            var q = quartileBreaks;
+            var labels = ["Minimal", "Faible", "Modéré", "Élevé", "Intense"];
+            var html = "";
+            for (var i = 0; i < 5; i++) {
+                html += "<div class=\\"legend-item\\"><i style=\\"background:" + QUARTILE_COLORS[i] + "\\"></i> " + labels[i] + "</div>";
+            }
+            var sentence = "Un hexagone est classé comme minimal lorsqu&apos;il compte entre " +
+                q.min + " et " + q.q1 + " occurrences de pannes (mesurées aux 15 minutes), faible entre " +
+                (q.q1 + 1) + " et " + q.q2 + ", modéré entre " +
+                (q.q2 + 1) + " et " + q.q3 + ", élevé entre " +
+                (q.q3 + 1) + " et " + q.q4 + " et intense entre " +
+                (q.q4 + 1) + " et " + q.max + ". Ces valeurs sont mises à jour quotidiennement pour refléter une proportion égale d&apos;observations dans chaque niveau d&apos;impact.";
+            html += "<div style=\\"font-size:10px;color:#666;margin-top:10px;padding-top:8px;border-top:1px solid #e5e7eb;line-height:1.4;max-width:280px;\\">" + sentence + "</div>";
+            html += "<div style=\\"font-size:10px;color:#666;margin-top:6px;line-height:1.4;\\">Chaque niveau regroupe 20% des hexagones.</div>";
+            container.innerHTML = html;
         }
         
         function updateMap() {
@@ -1451,10 +1601,10 @@ cat(';
                 style: function(f) {
                     var count = f.properties.total_occurrences || f.properties.occurrences_today || 1;
                     return {
-                        fillColor: isCurrent ? "#ef4444" : getColor(count),
+                        fillColor: isCurrent ? "#fde68a" : getColor(count),
                         weight: isCurrent ? 2.5 : 0.5,
-                        color: isCurrent ? "#dc2626" : "#fff",
-                        fillOpacity: isCurrent ? 0.65 : 0.75
+                        color: isCurrent ? "#b45309" : "#fff",
+                        fillOpacity: isCurrent ? 0.75 : 0.75
                     };
                 },
                 onEachFeature: function(f, layer) {
@@ -1519,8 +1669,8 @@ cat(';
             }
             
             html += "<p><strong>Total occurrences:</strong> " + props.total_occurrences + "</p>";
-            html += "<p><strong>Jours affectes:</strong> " + uniqueDates.length + "</p>";
-            html += "<p style=\\"margin-top: 15px;\\"><strong>Historique (recent en premier):</strong></p>";
+            html += "<p><strong>Jours affectés:</strong> " + uniqueDates.length + "</p>";
+            html += "<p style=\\"margin-top: 15px;\\"><strong>Historique (récent en premier):</strong></p>";
             html += "<div style=\\"max-height: 400px; overflow-y: auto;\\">";
             
             for (var j = 0; j < uniqueDates.length; j++) {
@@ -1557,21 +1707,29 @@ cat(';
             document.getElementById("detailModal").classList.remove("active");
             document.getElementById("modalOverlay").classList.remove("active");
         }
-        
+        function openFaqModal() {
+            document.getElementById("faqModal").classList.add("active");
+            document.getElementById("modalOverlay").classList.add("active");
+        }
+        function closeFaqModal() {
+            document.getElementById("faqModal").classList.remove("active");
+            document.getElementById("modalOverlay").classList.remove("active");
+        }
+        function closeAllModals() {
+            closeDetailModal();
+            closeFaqModal();
+        }
+
         var legend = L.control({position: "bottomright"});
         legend.onAdd = function() {
             var div = L.DomUtil.create("div", "info legend");
-            var grades = [0, 2, 5, 10, 20, 40, 60, 80];
-            div.innerHTML = "<h4>Occurrences</h4>";
-            div.innerHTML += "<div class=\\"legend-item\\"><i style=\\"background:#ef4444;border:2px solid #dc2626\\"></i> En cours</div>";
-            for (var i = 0; i < grades.length; i++) {
-                div.innerHTML += "<div class=\\"legend-item\\"><i style=\\"background:" + getColor(grades[i] + 1) + "\\"></i> " +
-                    grades[i] + (grades[i + 1] ? "–" + grades[i + 1] : "+") + "</div>";
-            }
-            div.innerHTML += "<div style=\\"font-size:10px;color:#666;margin-top:12px;padding-top:8px;border-top:1px solid #e5e7eb;line-height:1.4;\\">Occurrences = Nombre de fois qu&apos;une panne<br>a été détectée dans cet hexagone<br>lors des lectures aux 15 minutes</div>";
+            div.id = "legend";
+            div.innerHTML = "<h4>Impact relatif des pannes</h4>" +
+                "<div id=\\"legendItems\\"><div style=\\"font-size:12px;color:#999;\\">Chargement...</div></div>";
             return div;
         };
         legend.addTo(map);
+        if (quartileBreaks) { rebuildLegend(); }
         
         var info = L.control({position: "topright"});
         info.onAdd = function() {
@@ -1579,21 +1737,26 @@ cat(';
             div.innerHTML = "<h4>Statistiques</h4>" +
                 "<div class=\\"info-row\\"><span class=\\"info-label\\">Pannes en cours:</span> <span id=\\"currentCount\\" class=\\"loading\\">chargement...</span></div>" +
                 "<div class=\\"info-row\\"><span class=\\"info-label\\">Dernière lecture:</span> <span id=\\"lastReading\\" class=\\"loading\\">chargement...</span></div>" +
-                "<div class=\\"info-row\\"><span class=\\"info-label\\">Taille hexagones:</span> <span class=\\"info-value\\">', file = html_file, sep = "")
-
-cat(hex_size_km, file = html_file, sep = "")
-
-cat(' km</span></div>" +
-                "<div class=\\"info-row\\"><span class=\\"info-label\\">Jours analysés:</span> <span class=\\"info-value\\">', file = html_file, sep = "")
-
-cat(num_days, file = html_file, sep = "")
-
-cat('</span></div>" +
-                "<div style=\\"margin-top: 10px; padding-top: 10px; border-top: 1px solid #e5e7eb;\\"><span style=\\"font-size:11px;color:#9ca3af;\\">Généré: ', file = html_file, sep = "")
+                "<div class=\\"info-row\\"><span class=\\"info-label\\">Nombre total d&apos;occurrences<br>en 2026:</span> <span id=\\"totalOccurrences\\" class=\\"loading\\">chargement...</span></div>" +
+                "<div class=\\"info-row\\"><span class=\\"info-label\\">Nombre d&apos;hexagones impactés<br>en 2026:</span> <span id=\\"totalHexCount\\" class=\\"loading\\">chargement...</span></div>" +
+                "<div style=\\"margin-top: 10px; padding-top: 10px; border-top: 1px solid #e5e7eb;font-size:11px;color:#9ca3af;line-height:1.6;\\">" +
+                    "<div>Généré: ', file = html_file, sep = "")
 
 cat(current_date, file = html_file, sep = "")
 
-cat('</span></div>";
+cat('</div>" +
+                    "<div>Taille hexagones: ', file = html_file, sep = "")
+
+cat(hex_size_km, file = html_file, sep = "")
+
+cat(' km</div>" +
+                    "<div>Jours analysés: ', file = html_file, sep = "")
+
+cat(num_days, file = html_file, sep = "")
+
+cat('</div>" +
+                    "<div>1 occurrence: panne de 15 minutes</div>" +
+                "</div>";
             return div;
         };
         info.addTo(map);
