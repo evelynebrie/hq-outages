@@ -1977,15 +1977,7 @@
                 monthAxis += '<span style="flex:' + daysInSpan + ';">' + name + '</span>';
             }
 
-            // Last peak (today-ish dot) for the halo.
-            var lastPeak = events.length ? events[events.length - 1] : null;
             var lastDotSvg = '';
-            if (lastPeak) {
-                var lpx = (lastPeak.day / (totalDays - 1)) * 240;
-                var lpy = peakY(lastPeak.hours);
-                lastDotSvg =
-                    '<circle cx="' + lpx.toFixed(2) + '" cy="' + lpy.toFixed(2) + '" r="2.4" fill="#d97706"/>';
-            }
 
             var html =
                 '<div class="sc-hero">' +
