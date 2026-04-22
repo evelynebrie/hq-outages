@@ -2001,13 +2001,23 @@ cat(';
             document.getElementById("detailModal").classList.remove("active");
             document.getElementById("modalOverlay").classList.remove("active");
         }
+        // Tracks whether the FAQ modal was opened from the welcome modal, so
+        // closing the FAQ (via ×, overlay click, Esc) returns the user to the
+        // welcome modal instead of dismissing everything and starting the app.
+        var faqOpenedFromWelcome = false;
         function openFaqModal() {
             document.getElementById("faqModal").classList.add("active");
             document.getElementById("modalOverlay").classList.add("active");
         }
         function closeFaqModal() {
             document.getElementById("faqModal").classList.remove("active");
-            document.getElementById("modalOverlay").classList.remove("active");
+            if (faqOpenedFromWelcome) {
+                faqOpenedFromWelcome = false;
+                document.getElementById("welcomeModal").classList.add("active");
+                // Leave the overlay active so the welcome modal stays modal.
+            } else {
+                document.getElementById("modalOverlay").classList.remove("active");
+            }
         }
         function closeWelcomeModal() {
             document.getElementById("welcomeModal").classList.remove("active");
@@ -2017,12 +2027,19 @@ cat(';
             }
         }
         function openFaqFromWelcome() {
+            faqOpenedFromWelcome = true;
             document.getElementById("welcomeModal").classList.remove("active");
             openFaqModal();
         }
         function closeAllModals() {
+            // If the FAQ is open on top of the welcome modal, clicking the
+            // overlay should only close the FAQ and return the user to the
+            // welcome modal — don\'t cascade and dismiss everything.
+            if (document.getElementById("faqModal").classList.contains("active")) {
+                closeFaqModal();
+                return;
+            }
             closeDetailModal();
-            closeFaqModal();
             closeWelcomeModal();
         }
 
