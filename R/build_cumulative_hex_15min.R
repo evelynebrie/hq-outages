@@ -1223,6 +1223,74 @@ cat('<!DOCTYPE html>
             line-height: 1.55;
         }
 
+        /* Welcome modal */
+        #welcomeModal {
+            position: fixed;
+            top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            background: white;
+            padding: 32px 36px;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            max-height: 85vh;
+            overflow-y: auto;
+            z-index: 10000;
+            display: none;
+            max-width: 560px;
+            width: 90%;
+            text-align: center;
+            box-sizing: border-box;
+        }
+        #welcomeModal.active { display: block; }
+        #welcomeModal h2 {
+            margin: 0 0 18px;
+            color: #111827;
+            font-size: 24px;
+            font-weight: 700;
+        }
+        #welcomeModal p {
+            margin: 0 0 14px;
+            color: #374151;
+            font-size: 14px;
+            line-height: 1.6;
+            text-align: left;
+        }
+        .welcome-actions {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            margin: 22px 0 18px;
+        }
+        .btn-secondary, .btn-primary {
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-family: inherit;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.15s;
+            border: 2px solid #111827;
+        }
+        .btn-secondary { background: white; color: #111827; }
+        .btn-secondary:hover { background: #f3f4f6; }
+        .btn-primary { background: #111827; color: white; }
+        .btn-primary:hover { background: #374151; border-color: #374151; }
+        .welcome-logos {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 32px;
+            padding-top: 18px;
+            border-top: 1px solid #e5e7eb;
+            flex-wrap: wrap;
+        }
+        .welcome-logos img {
+            max-height: 42px;
+            max-width: 140px;
+            object-fit: contain;
+            opacity: 0.9;
+        }
+
         .date-row {
             margin: 8px 0;
             border-bottom: 1px solid #f3f4f6;
@@ -1282,7 +1350,22 @@ cat('<!DOCTYPE html>
     <div id="map"></div>
     <button class="info-btn" onclick="openFaqModal()" title="À propos de la carte" aria-label="Informations">i</button>
 
-    <div id="modalOverlay" onclick="closeAllModals()"></div>
+    <div id="modalOverlay" class="active" onclick="closeAllModals()"></div>
+    <div id="welcomeModal" class="active">
+        <button onclick="closeWelcomeModal()" class="close-btn">✕</button>
+        <h2>Où sont les pannes?</h2>
+        <p>Cet outil vous permet de localiser les pannes de courant ayant eu lieu au Québec depuis le 1<sup>er</sup> janvier 2026. L&apos;objectif de cette carte est de promouvoir la transparence de l&apos;information au sujet des pannes de courant au Québec.</p>
+        <p>Chaque occurrence de panne représente une panne de 15 minutes. À ce jour, <strong id="welcomeCount">…</strong> occurrences ont été dénombrées au Québec depuis le début de l&apos;année.</p>
+        <div class="welcome-actions">
+            <button class="btn-secondary" onclick="openFaqFromWelcome()">À propos de ce projet</button>
+            <button class="btn-primary" onclick="closeWelcomeModal()">Commencer</button>
+        </div>
+        <div class="welcome-logos">
+            <img src="logos/ivado-rgb_logo-full-degrade.png" alt="IVADO">
+            <img src="logos/udem-logo.svg" alt="Université de Montréal">
+            <img src="logos/MAPI.png" alt="MAPI">
+        </div>
+    </div>
     <div id="detailModal">
         <button onclick="closeDetailModal()" class="close-btn">✕</button>
         <div id="modalContent"></div>
@@ -1410,6 +1493,8 @@ cat('";
                 });
                 var totalOccSpan = document.getElementById("totalOccurrences");
                 if (totalOccSpan) totalOccSpan.innerHTML = "<span class=\\"info-value\\">" + totalOcc.toLocaleString("fr-CA") + "</span>";
+                var welcomeCountEl = document.getElementById("welcomeCount");
+                if (welcomeCountEl) welcomeCountEl.textContent = totalOcc.toLocaleString("fr-CA");
                 var hexCountSpan = document.getElementById("totalHexCount");
                 if (hexCountSpan) hexCountSpan.innerHTML = "<span class=\\"info-value\\">" + allData.total.features.length.toLocaleString("fr-CA") + "</span>";
                 dataLoaded.total = true;
@@ -1715,9 +1800,21 @@ cat(';
             document.getElementById("faqModal").classList.remove("active");
             document.getElementById("modalOverlay").classList.remove("active");
         }
+        function closeWelcomeModal() {
+            document.getElementById("welcomeModal").classList.remove("active");
+            if (!document.getElementById("faqModal").classList.contains("active") &&
+                !document.getElementById("detailModal").classList.contains("active")) {
+                document.getElementById("modalOverlay").classList.remove("active");
+            }
+        }
+        function openFaqFromWelcome() {
+            document.getElementById("welcomeModal").classList.remove("active");
+            openFaqModal();
+        }
         function closeAllModals() {
             closeDetailModal();
             closeFaqModal();
+            closeWelcomeModal();
         }
 
         var legend = L.control({position: "bottomright"});

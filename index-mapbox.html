@@ -270,6 +270,63 @@
             line-height: 1.55;
         }
 
+        /* Welcome modal */
+        .welcome-modal { max-width: 560px; padding: 32px 36px; text-align: center; }
+        .welcome-modal h2 {
+            margin: 0 0 18px;
+            color: #111827;
+            font-size: 24px;
+            font-weight: 700;
+        }
+        .welcome-modal p {
+            margin: 0 0 14px;
+            color: #374151;
+            font-size: 14px;
+            line-height: 1.6;
+            text-align: left;
+        }
+        .welcome-actions {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            margin: 22px 0 18px;
+        }
+        .btn-secondary, .btn-primary {
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-family: inherit;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.15s;
+            border: 2px solid #111827;
+        }
+        .btn-secondary {
+            background: white;
+            color: #111827;
+        }
+        .btn-secondary:hover { background: #f3f4f6; }
+        .btn-primary {
+            background: #111827;
+            color: white;
+        }
+        .btn-primary:hover { background: #374151; border-color: #374151; }
+        .welcome-logos {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 32px;
+            padding-top: 18px;
+            border-top: 1px solid #e5e7eb;
+            flex-wrap: wrap;
+        }
+        .welcome-logos img {
+            max-height: 42px;
+            max-width: 140px;
+            object-fit: contain;
+            opacity: 0.9;
+        }
+
         /* Loading overlay */
         .map-loader {
             position: absolute;
@@ -415,7 +472,22 @@
 
     <button class="info-btn" onclick="openFaqModal()" title="À propos de la carte" aria-label="Informations">i</button>
 
-    <div id="modalOverlay" class="modal-overlay"></div>
+    <div id="modalOverlay" class="modal-overlay active"></div>
+    <div id="welcomeModal" class="detail-modal welcome-modal active">
+        <span class="close-modal" onclick="closeWelcomeModal()">×</span>
+        <h2>Où sont les pannes?</h2>
+        <p>Cet outil vous permet de localiser les pannes de courant ayant eu lieu au Québec depuis le 1<sup>er</sup> janvier 2026. L'objectif de cette carte est de promouvoir la transparence de l'information au sujet des pannes de courant au Québec.</p>
+        <p>Chaque occurrence de panne représente une panne de 15 minutes. À ce jour, <strong id="welcomeCount">…</strong> occurrences ont été dénombrées au Québec depuis le début de l'année.</p>
+        <div class="welcome-actions">
+            <button class="btn-secondary" onclick="openFaqFromWelcome()">À propos de ce projet</button>
+            <button class="btn-primary" onclick="closeWelcomeModal()">Commencer</button>
+        </div>
+        <div class="welcome-logos">
+            <img src="logos/ivado-rgb_logo-full-degrade.png" alt="IVADO">
+            <img src="logos/udem-logo.svg" alt="Université de Montréal">
+            <img src="logos/MAPI.png" alt="MAPI">
+        </div>
+    </div>
     <div id="detailModal" class="detail-modal">
         <span class="close-modal" onclick="closeDetailModal()">×</span>
         <div id="modalContent"></div>
@@ -542,6 +614,8 @@
                 totalOccEl.className = 'info-value';
                 totalOccEl.textContent = totalOcc.toLocaleString('fr-CA');
             }
+            var welcomeCountEl = document.getElementById('welcomeCount');
+            if (welcomeCountEl) welcomeCountEl.textContent = totalOcc.toLocaleString('fr-CA');
 
             // Hex count
             var hexCountEl = document.getElementById('totalHexCount');
@@ -906,9 +980,21 @@
             document.getElementById('faqModal').classList.remove('active');
             document.getElementById('modalOverlay').classList.remove('active');
         }
+        function closeWelcomeModal() {
+            document.getElementById('welcomeModal').classList.remove('active');
+            if (!document.getElementById('faqModal').classList.contains('active') &&
+                !document.getElementById('detailModal').classList.contains('active')) {
+                document.getElementById('modalOverlay').classList.remove('active');
+            }
+        }
+        function openFaqFromWelcome() {
+            document.getElementById('welcomeModal').classList.remove('active');
+            openFaqModal();
+        }
         document.getElementById('modalOverlay').onclick = function() {
             closeDetailModal();
             closeFaqModal();
+            closeWelcomeModal();
         };
 
         // Initialize map

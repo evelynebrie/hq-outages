@@ -498,6 +498,14 @@ jobs:
             echo "Summary report not available"
           fi
 
+      - name: Copy logos into public/ for deployment
+        run: |
+          if [ -d "logos" ]; then
+            mkdir -p public/logos
+            cp -r logos/* public/logos/
+            echo "Copied logos: $(ls public/logos/)"
+          fi
+
       - name: Deploy to PUBLIC repo (gh-pages) - HTML and GeoJSON only
         uses: peaceiris/actions-gh-pages@v3
         with:

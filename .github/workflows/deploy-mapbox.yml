@@ -51,6 +51,13 @@ jobs:
             echo "✅ Also copied landing page"
           fi
 
+          # Copy logos folder so welcome modal images resolve
+          if [ -d "logos" ]; then
+            mkdir -p mapbox-deploy/logos
+            cp -r logos/* mapbox-deploy/logos/
+            echo "✅ Copied logos: $(ls mapbox-deploy/logos/)"
+          fi
+
           echo "✅ Mapbox HTML ready for deployment"
 
       # Wait a bit to avoid race condition with main workflow deployment
