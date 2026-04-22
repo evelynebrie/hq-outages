@@ -437,7 +437,7 @@
             </div>
         </div>
 
-        <div class="time-section">
+        <div class="time-section" id="timeSection" style="display: none;">
             <label>Heure :</label>
             <select id="hourSelect" onchange="onHourChange()">
                 <option value="all">Journée complète</option>
@@ -761,6 +761,10 @@
             document.querySelectorAll('.day[data-date]').forEach(function(el) {
                 el.classList.toggle('selected', currentView === 'day' && el.dataset.date === currentDate);
             });
+            var timeSection = document.getElementById('timeSection');
+            if (timeSection) {
+                timeSection.style.display = currentView === 'day' ? 'block' : 'none';
+            }
         }
 
         function filterDayByHour(dailyData, hour) {
