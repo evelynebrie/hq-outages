@@ -1114,10 +1114,42 @@ cat('<!DOCTYPE html>
         .legend-info-wrap {
             position: relative;
             display: flex;
-            justify-content: flex-end;
-            margin-top: 10px;
-            padding-top: 8px;
-            border-top: 1px solid #e5e7eb;
+            align-items: flex-start;
+            gap: 10px;
+            margin-top: 14px;
+        }
+        .legend-detail-text {
+            margin: 0;
+            flex: 1;
+            font-size: 11.5px;
+            color: #6b7280;
+            line-height: 1.45;
+        }
+        .legend-detail-text strong { color: #374151; font-weight: 600; }
+
+        /* Gradient legend (horizontal scale) */
+        .scale-labels {
+            display: flex;
+            justify-content: space-between;
+            font-size: 12px;
+            color: #374151;
+            font-weight: 600;
+            margin: 0 0 6px;
+        }
+        .gradient-bar {
+            display: flex;
+            height: 14px;
+            border-radius: 3px;
+            overflow: hidden;
+            margin: 0 0 6px;
+        }
+        .gradient-bar > div { flex: 1; }
+        .range-labels {
+            display: flex;
+            justify-content: space-between;
+            font-size: 10.5px;
+            color: #9ca3af;
+            font-variant-numeric: tabular-nums;
         }
         .legend-info-btn {
             width: 22px; height: 22px;
@@ -1915,23 +1947,33 @@ cat(';
             var container = document.getElementById("legendItems");
             if (!container || !quartileBreaks) return;
             var q = quartileBreaks;
-            var labels = ["Minimal", "Faible", "Modéré", "Élevé", "Intense"];
-            var html = "";
+            // Horizontal gradient scale (Option B).
+            var bars = "";
             for (var i = 0; i < 5; i++) {
-                html += "<div class=\\"legend-item\\"><i style=\\"background:" + QUARTILE_COLORS[i] + "\\"></i> " + labels[i] + "</div>";
+                bars += "<div style=\\"background:" + QUARTILE_COLORS[i] + ";\\"></div>";
             }
-            var sentence = "Un hexagone est classé comme ayant un impact minimal lorsqu&apos;il compte entre " +
+            var minLabel = q.min + (q.min === 1 ? " occurrence" : " occurrences");
+            var p1 = "Un hexagone est classé comme ayant subi un impact minimal lorsqu&apos;il compte entre " +
                 q.min + " et " + q.q1 + " occurrences de pannes (mesurées aux 15 minutes), faible entre " +
                 (q.q1 + 1) + " et " + q.q2 + ", modéré entre " +
                 (q.q2 + 1) + " et " + q.q3 + ", élevé entre " +
                 (q.q3 + 1) + " et " + q.q4 + " et intense entre " +
-                (q.q4 + 1) + " et " + q.max + ". Chaque niveau regroupe 20% des hexagones. Ces valeurs sont mises à jour automatiquement pour refléter une proportion égale d&apos;observations dans chaque niveau d&apos;impact.";
-            html +=
+                (q.q4 + 1) + " et " + q.max + ".";
+            var p2 = "Chaque niveau regroupe 20% des hexagones.";
+            var p3 = "Ces valeurs sont mises à jour automatiquement pour refléter une proportion égale d&apos;observations dans chaque niveau d&apos;impact.";
+            container.innerHTML =
+                "<div class=\\"scale-labels\\"><span>Minimal</span><span>Intense</span></div>" +
+                "<div class=\\"gradient-bar\\">" + bars + "</div>" +
+                "<div class=\\"range-labels\\"><span>" + minLabel + "</span><span>" + q.max + "+</span></div>" +
                 "<div class=\\"legend-info-wrap\\">" +
-                "<div id=\\"legendInfoPopover\\" class=\\"legend-info-popover\\">" + sentence + "</div>" +
-                "<button type=\\"button\\" class=\\"legend-info-btn\\" aria-label=\\"Comment sont calculés les seuils\\" onclick=\\"toggleLegendInfo(event)\\">i</button>" +
+                    "<div id=\\"legendInfoPopover\\" class=\\"legend-info-popover\\">" +
+                        "<p>" + p1 + "</p>" +
+                        "<p>" + p2 + "</p>" +
+                        "<p>" + p3 + "</p>" +
+                    "</div>" +
+                    "<p class=\\"legend-detail-text\\">Chaque niveau regroupe <strong>20%</strong> des hexagones, réparti du quintile inférieur (minimal) au supérieur (intense).</p>" +
+                    "<button type=\\"button\\" class=\\"legend-info-btn\\" aria-label=\\"Comment sont calculés les seuils\\" onclick=\\"toggleLegendInfo(event)\\">i</button>" +
                 "</div>";
-            container.innerHTML = html;
         }
 
         function toggleLegendInfo(evt) {
