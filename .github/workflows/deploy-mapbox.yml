@@ -50,9 +50,12 @@ jobs:
           echo "📦 Preparing Mapbox deployment..."
 
           mkdir -p mapbox-deploy
-          cp index-mapbox.html mapbox-deploy/
+          # Mapbox is the default site at ousontlespannes.ca/, so ship it as
+          # index.html. Also keep the /index-mapbox.html alias for back-compat.
+          cp index-mapbox.html mapbox-deploy/index.html
+          cp index-mapbox.html mapbox-deploy/index-mapbox.html
 
-          # Optional: Copy the landing page if you want to use it
+          # Copy the landing page if present
           if [ -f "index-landing.html" ]; then
             cp index-landing.html mapbox-deploy/
             echo "✅ Also copied landing page"
@@ -65,7 +68,13 @@ jobs:
             echo "✅ Copied logos: $(ls mapbox-deploy/logos/)"
           fi
 
+          # CNAME file so the custom domain binding is preserved on gh-pages.
+          # (keep_files:true protects existing files, but this run also
+          # overwrites index.html, so we must include the CNAME too.)
+          echo "ousontlespannes.ca" > mapbox-deploy/CNAME
+
           echo "✅ Mapbox HTML ready for deployment"
+          ls -lh mapbox-deploy/
 
       # Wait a bit to avoid race condition with main workflow deployment
       - name: Wait for main deployment to settle

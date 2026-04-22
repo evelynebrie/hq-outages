@@ -506,17 +506,36 @@ jobs:
             echo "Copied logos: $(ls public/logos/)"
           fi
 
-      - name: Copy latest index-mapbox.html into public/ for deployment
+      - name: Make Mapbox the default (index.html) and keep Leaflet at /index-leaflet.html
         run: |
-          # Main workflow's public/ cache can contain a stale index-mapbox.html.
-          # Since we deploy with keep_files: false, we must ship the fresh copy
-          # from the repo so the Mapbox visualization stays in sync with main.
-          if [ -f "index-mapbox.html" ]; then
-            cp index-mapbox.html public/index-mapbox.html
-            echo "Copied latest index-mapbox.html ($(du -h public/index-mapbox.html | cut -f1)) into public/"
-          else
-            echo "index-mapbox.html not found at repo root — skipping"
+          # The R script emits the Leaflet visualization as public/index.html.
+          # We want the Mapbox version to be the default at ousontlespannes.ca/,
+          # so we rename the Leaflet to index-leaflet.html and put the Mapbox
+          # HTML in place as index.html. Both versions remain accessible:
+          #   /                     → Mapbox (default)
+          #   /index-leaflet.html   → Leaflet
+          #   /index-mapbox.html    → Mapbox (backwards-compatible alias)
+
+          if [ -f "public/index.html" ]; then
+            mv public/index.html public/index-leaflet.html
+            echo "Moved Leaflet to public/index-leaflet.html"
           fi
+
+          if [ -f "index-mapbox.html" ]; then
+            cp index-mapbox.html public/index.html
+            cp index-mapbox.html public/index-mapbox.html
+            echo "Installed Mapbox as public/index.html ($(du -h public/index.html | cut -f1))"
+          else
+            echo "index-mapbox.html not found at repo root — Leaflet stays as default"
+            if [ -f "public/index-leaflet.html" ]; then
+              mv public/index-leaflet.html public/index.html
+            fi
+          fi
+
+      - name: Write CNAME file for custom domain
+        run: |
+          echo "ousontlespannes.ca" > public/CNAME
+          echo "Wrote public/CNAME so the custom domain survives keep_files:false redeploys"
 
       - name: Deploy to PUBLIC repo (gh-pages) - HTML and GeoJSON only
         uses: peaceiris/actions-gh-pages@v3
