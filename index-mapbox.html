@@ -961,6 +961,7 @@
         });
 
         var allData = { daily: {}, total: null, current: null };
+        var geocoder = null;
         var currentFeatures = null;
         var quartileBreaks = null;
         var QUARTILE_COLORS = ['#fee0d2', '#fcbba1', '#fc9272', '#ef3b2c', '#a50f15'];
@@ -1656,6 +1657,7 @@
         function closeDetailModal() {
             document.getElementById('detailModal').classList.remove('active');
             document.getElementById('modalOverlay').classList.remove('active');
+            if (geocoder) { try { geocoder.clear(); } catch (e) {} }
         }
         // Tracks whether the FAQ modal was opened from the welcome modal, so
         // closing the FAQ (via ×, overlay click, or Esc) returns the user to
@@ -1824,7 +1826,7 @@
                 return out;
             }
 
-            var geocoder = new MapboxGeocoder({
+            geocoder = new MapboxGeocoder({
                 accessToken: mapboxgl.accessToken,
                 mapboxgl: mapboxgl,
                 marker: true,
@@ -1850,6 +1852,7 @@
 
             map.on('click', 'hex-layer', function(e) {
                 if (e.features.length > 0) {
+                    if (geocoder) { try { geocoder.clear(); } catch (err) {} }
                     var props = e.features[0].properties;
                     var isCurrent = currentView === 'current';
                     var count = isCurrent
