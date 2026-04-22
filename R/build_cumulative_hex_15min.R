@@ -1449,7 +1449,7 @@ cat(';
             if (!container || !quartileBreaks) return;
             var q = quartileBreaks;
             var labels = ["Faible", "Modéré", "Élevé", "Très élevé"];
-            var html = "<div class=\\"legend-item\\"><i style=\\"background:#ef4444;border:2px solid #dc2626\\"></i> En cours</div>";
+            var html = "";
             for (var i = 0; i < 4; i++) {
                 html += "<div class=\\"legend-item\\"><i style=\\"background:" + QUARTILE_COLORS[i] + "\\"></i> " + labels[i] + "</div>";
             }
