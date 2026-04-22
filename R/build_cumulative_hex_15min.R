@@ -1577,8 +1577,8 @@ cat(';
             }
             
             html += "<p><strong>Total occurrences:</strong> " + props.total_occurrences + "</p>";
-            html += "<p><strong>Jours affectes:</strong> " + uniqueDates.length + "</p>";
-            html += "<p style=\\"margin-top: 15px;\\"><strong>Historique (recent en premier):</strong></p>";
+            html += "<p><strong>Jours affectés:</strong> " + uniqueDates.length + "</p>";
+            html += "<p style=\\"margin-top: 15px;\\"><strong>Historique (récent en premier):</strong></p>";
             html += "<div style=\\"max-height: 400px; overflow-y: auto;\\">";
             
             for (var j = 0; j < uniqueDates.length; j++) {
