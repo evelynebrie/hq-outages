@@ -1674,13 +1674,67 @@
                 waitingToStart = false;
             }
 
+            // Local geocoder: if the user types a pure-numeric string (a
+            // hex ID like "752237"), look it up in the loaded hexagon data
+            // and surface it as a result alongside address matches.
+            function hexLocalGeocoder(query) {
+                var q = (query || '').trim();
+                if (!/^[0-9]+$/.test(q)) return [];
+                if (!allData.total || !allData.total.features) return [];
+                var target = parseInt(q, 10);
+                var matches = [];
+                // Exact match first, then prefix matches (up to 5).
+                var exact = null;
+                for (var i = 0; i < allData.total.features.length && matches.length < 5; i++) {
+                    var f = allData.total.features[i];
+                    var hid = f.properties.hex_id;
+                    if (hid == null) continue;
+                    if (hid === target) { exact = f; continue; }
+                    if (String(hid).indexOf(q) === 0) matches.push(f);
+                }
+                var out = [];
+                function buildResult(feat) {
+                    var lat = feat.properties.centroid_lat;
+                    var lon = feat.properties.centroid_lon;
+                    if (typeof lat !== 'number' || typeof lon !== 'number') return null;
+                    return {
+                        id: 'hex-' + feat.properties.hex_id,
+                        type: 'Feature',
+                        place_name: 'Hexagone #' + feat.properties.hex_id,
+                        place_type: ['hexagon'],
+                        center: [lon, lat],
+                        geometry: { type: 'Point', coordinates: [lon, lat] },
+                        properties: { hex_id: feat.properties.hex_id },
+                        text: 'Hexagone #' + feat.properties.hex_id
+                    };
+                }
+                if (exact) { var r = buildResult(exact); if (r) out.push(r); }
+                for (var j = 0; j < matches.length; j++) {
+                    var r2 = buildResult(matches[j]); if (r2) out.push(r2);
+                }
+                return out;
+            }
+
             var geocoder = new MapboxGeocoder({
                 accessToken: mapboxgl.accessToken,
                 mapboxgl: mapboxgl,
                 marker: true,
-                placeholder: 'Rechercher une adresse...',
+                placeholder: 'Adresse ou # d\'hexagone...',
                 countries: 'ca',
-                language: 'fr'
+                language: 'fr',
+                localGeocoder: hexLocalGeocoder,
+                // Prefer local hex results above address matches when the
+                // query is purely numeric.
+                externalGeocoder: null
+            });
+            // When the user picks a hex result, open the detail modal so
+            // they see the occurrence history for that hexagon.
+            geocoder.on('result', function(e) {
+                var r = e.result;
+                if (r && r.place_type && r.place_type[0] === 'hexagon' && r.properties && r.properties.hex_id != null) {
+                    // Small delay so the map flyTo animation isn't interrupted.
+                    setTimeout(function() { showDetails(r.properties.hex_id); }, 450);
+                }
             });
             document.getElementById('geocoderContainer').appendChild(geocoder.onAdd(map));
             map.addControl(new mapboxgl.NavigationControl(), 'bottom-left');
