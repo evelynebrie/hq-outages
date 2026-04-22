@@ -1623,7 +1623,7 @@ cat('<!DOCTYPE html>
         <h2>Où sont les pannes?</h2>
         <p>Cette plateforme vous permet d&apos;explorer la distribution spatiale et temporelle des pannes d&apos;électricité au Québec depuis le 1<sup>er</sup> janvier 2026.</p>
         <p>Les données sont extraites du portail Info-Pannes d&apos;Hydro-Québec toutes les 15 minutes et géolocalisées sur une grille hexagonale de 1&nbsp;km². Chaque occurrence de panne représente une interruption de 15 minutes&nbsp;: plus le compteur est élevé, plus les résidents de votre secteur ont été privés de courant.</p>
-        <p>L&apos;objectif de cet outil est d&apos;améliorer la transparence et l&apos;accessibilité des données relatives aux interruptions de service électrique à travers le Québec.</p>
+        <p>L&apos;objectif de cet outil est d&apos;améliorer la transparence et l&apos;accessibilité des données relatives aux interruptions de service électrique au Québec.</p>
         <div class="welcome-actions">
             <button class="btn-secondary" onclick="openFaqFromWelcome()">À propos de ce projet</button>
             <button class="btn-primary" id="welcomeStartBtn" onclick="startFromWelcome()">Accéder à l&apos;outil</button>
