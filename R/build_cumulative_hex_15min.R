@@ -1445,7 +1445,7 @@ cat('<!DOCTYPE html>
             <button class="btn-primary" id="welcomeStartBtn" onclick="startFromWelcome()">Accéder à l&apos;outil</button>
         </div>
         <div id="visitorPill" class="visitor-pill">
-            Vous êtes le <span class="num" id="visitorCount">&mdash;</span> visiteur depuis le lancement
+            Vous êtes le <span class="num"><span id="visitorCount">&mdash;</span><sup>e</sup></span> visiteur depuis le lancement
         </div>
         <div class="welcome-logos">
             <img src="logos/ivado-rgb_logo-full-degrade.png" alt="IVADO">
