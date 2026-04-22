@@ -952,6 +952,8 @@ cat('<!DOCTYPE html>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
+    <script data-goatcounter="https://ebudem.goatcounter.com/count"
+            async src="//gc.zgo.at/count.js"></script>
     <style>
         * { box-sizing: border-box; }
         body { margin: 0; font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
@@ -1331,6 +1333,33 @@ cat('<!DOCTYPE html>
             object-fit: contain;
             opacity: 0.9;
         }
+        .visitor-pill {
+            display: none;
+            align-items: center;
+            gap: 7px;
+            background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+            border: 1px solid #fcd34d;
+            color: #78350f;
+            padding: 6px 14px;
+            border-radius: 999px;
+            font-size: 12.5px;
+            font-weight: 500;
+            margin: 0 auto 16px;
+        }
+        .visitor-pill.visible { display: inline-flex; }
+        .visitor-pill::before {
+            content: "";
+            width: 7px; height: 7px;
+            background: #f59e0b;
+            border-radius: 50%;
+            box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.25);
+            flex-shrink: 0;
+        }
+        .visitor-pill .num {
+            color: #78350f;
+            font-weight: 700;
+            font-variant-numeric: tabular-nums;
+        }
 
         .date-row {
             margin: 8px 0;
@@ -1400,6 +1429,9 @@ cat('<!DOCTYPE html>
         <div class="welcome-actions">
             <button class="btn-secondary" onclick="openFaqFromWelcome()">À propos de ce projet</button>
             <button class="btn-primary" onclick="closeWelcomeModal()">Commencer</button>
+        </div>
+        <div id="visitorPill" class="visitor-pill">
+            Vous êtes le <span class="num" id="visitorCount">&mdash;</span> visiteur depuis le lancement
         </div>
         <div class="welcome-logos">
             <img src="logos/ivado-rgb_logo-full-degrade.png" alt="IVADO">
@@ -1880,6 +1912,21 @@ cat(';
             closeFaqModal();
             closeWelcomeModal();
         }
+
+        // Fetch total visitor count from GoatCounter and show the pill.
+        // If the request fails, the pill stays hidden.
+        (function loadVisitorCount() {
+            fetch("https://ebudem.goatcounter.com/counter/TOTAL.json")
+                .then(function(r) { return r.ok ? r.json() : null; })
+                .then(function(data) {
+                    if (!data || !data.count) return;
+                    var n = parseInt(String(data.count).replace(/\s/g, ""), 10);
+                    if (isNaN(n) || n <= 0) return;
+                    document.getElementById("visitorCount").textContent = n.toLocaleString("fr-CA");
+                    document.getElementById("visitorPill").classList.add("visible");
+                })
+                .catch(function() { /* silent */ });
+        })();
 
         var legend = L.control({position: "bottomright"});
         legend.onAdd = function() {
