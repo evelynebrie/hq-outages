@@ -2252,7 +2252,7 @@ cat(';
         legend.onAdd = function() {
             var div = L.DomUtil.create("div", "info legend");
             div.id = "legend";
-            div.innerHTML = "<h4>Impact relatif des pannes</h4>" +
+            div.innerHTML = "<h4>Intensité des pannes</h4>" +
                 "<div id=\\"legendItems\\"><div style=\\"font-size:12px;color:#999;\\">Chargement...</div></div>";
             return div;
         };
