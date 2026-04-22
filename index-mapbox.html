@@ -1981,8 +1981,7 @@
                 var lpx = (lastPeak.day / (totalDays - 1)) * 240;
                 var lpy = peakY(lastPeak.hours);
                 lastDotSvg =
-                    '<circle cx="' + lpx.toFixed(2) + '" cy="' + lpy.toFixed(2) + '" r="2.4" fill="#d97706"/>' +
-                    '<circle cx="' + lpx.toFixed(2) + '" cy="' + lpy.toFixed(2) + '" r="4.2" fill="#fbbf24" opacity="0.4"/>';
+                    '<circle cx="' + lpx.toFixed(2) + '" cy="' + lpy.toFixed(2) + '" r="2.4" fill="#d97706"/>';
             }
 
             var html =
@@ -1997,8 +1996,7 @@
                     '<div><div class="sc-stat-label">Pire mois</div><div class="sc-stat-value">' + worstMonthLabel + '</div></div>' +
                 '</div>' +
                 '<div class="sc-chart">' +
-                    '<div class="sc-chart-title">Mes pannes</div>' +
-                    '<div class="sc-chart-sub">' + subtitle + '</div>' +
+                    '<div class="sc-chart-title">Pannes dans mon secteur cette année</div>' +
                     '<div class="sc-chart-wrap">' +
                         '<div class="sc-yaxis"><span>' + yMax.toFixed(yMax % 1 === 0 ? 0 : 1) + ' h</span><span></span><span></span><span>0</span></div>' +
                         '<div class="sc-chart-body">' +
