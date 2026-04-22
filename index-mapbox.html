@@ -186,6 +186,26 @@
         .time-section label { display: block; margin-bottom: 6px; font-size: 12px; color: #6b7280; font-weight: 500; }
         .time-section select { width: 100%; padding: 8px 10px; border: 1px solid #d4d4d4; border-radius: 6px; font-size: 13px; font-family: inherit; background: white; box-sizing: border-box; }
 
+        /* Geocoder embedded in controls box */
+        .geocoder-container .mapboxgl-ctrl-geocoder {
+            width: 100%;
+            max-width: 100%;
+            min-width: 0;
+            box-shadow: none;
+            border: 1px solid #d4d4d4;
+            border-radius: 6px;
+            font-size: 13px;
+        }
+        .geocoder-container .mapboxgl-ctrl-geocoder--input {
+            height: 36px;
+            padding: 6px 6px 6px 34px;
+            font-family: inherit;
+            font-size: 13px;
+        }
+        .geocoder-container .mapboxgl-ctrl-geocoder--icon-search {
+            top: 9px; left: 8px;
+        }
+
         /* Detail modal */
         .detail-link { color:#1e88e5; cursor:pointer; text-decoration:underline; font-size:12px; }
         .detail-link:hover { color:#1565c0; }
@@ -319,7 +339,9 @@
     </div>
 
     <div class="controls">
-        <h4>Affichage</h4>
+        <div id="geocoderContainer" class="geocoder-container"></div>
+
+        <h4 style="margin-top:14px;">Affichage</h4>
 
         <button class="summary-btn active" id="summaryBtn" onclick="setView('all')">
             <strong>Résumé complet</strong>
@@ -905,11 +927,12 @@
             var geocoder = new MapboxGeocoder({
                 accessToken: mapboxgl.accessToken,
                 mapboxgl: mapboxgl,
+                marker: true,
                 placeholder: 'Rechercher une adresse...',
                 countries: 'ca',
                 language: 'fr'
             });
-            map.addControl(geocoder);
+            document.getElementById('geocoderContainer').appendChild(geocoder.onAdd(map));
             map.addControl(new mapboxgl.NavigationControl(), 'bottom-left');
 
             map.on('click', 'hex-layer', function(e) {
