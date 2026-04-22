@@ -1210,9 +1210,18 @@
                 html += '<p><span class="current-badge">PANNE EN COURS</span></p>';
             }
 
-            var totalHours = (props.total_occurrences * 0.25).toLocaleString('fr-CA', { maximumFractionDigits: 1 });
+            var totalMin = props.total_occurrences * 15;
+            var h = Math.floor(totalMin / 60);
+            var m = totalMin % 60;
+            var totalTime;
+            if (h === 0) {
+                totalTime = m + ' min';
+            } else {
+                totalTime = h + ' ' + (h === 1 ? 'heure' : 'heures');
+                if (m > 0) totalTime += ' ' + m + ' min';
+            }
             html += '<p><strong>Nombre d\'occurrences de 15 min.:</strong> ' + props.total_occurrences + '</p>';
-            html += '<p><strong>Temps total de pannes:</strong> ' + totalHours + ' heures</p>';
+            html += '<p><strong>Temps total de pannes:</strong> ' + totalTime + '</p>';
             html += '<p><strong>Jours affectés:</strong> ' + uniqueDates.length + '</p>';
             html += '<p style="margin-top: 15px;"><strong>Historique :</strong></p>';
             html += '<div style="max-height: 400px; overflow-y: auto;">';
