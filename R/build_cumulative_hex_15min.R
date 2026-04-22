@@ -1363,7 +1363,6 @@ cat('<!DOCTYPE html>
         <div class="welcome-logos">
             <img src="logos/ivado-rgb_logo-full-degrade.png" alt="IVADO">
             <img src="logos/udem-logo.svg" alt="Université de Montréal">
-            <img src="logos/MAPI.png" alt="MAPI">
         </div>
     </div>
     <div id="detailModal">
