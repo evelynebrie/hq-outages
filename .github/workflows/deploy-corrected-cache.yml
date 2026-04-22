@@ -65,7 +65,18 @@ jobs:
           echo "Running R/build_cumulative_hex_15min.R in QUICK_DEPLOY mode..."
           Rscript R/build_cumulative_hex_15min.R
 
+      # DEFENSIVE: save public/ as artifact immediately, regardless of later failures
+      - name: Upload public/ as recovery artifact (always)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: public-regenerated-recovery
+          path: public/
+          retention-days: 30
+          if-no-files-found: warn
+
       - name: Generate summary statistics
+        if: success()
         run: |
           if [ -f "R/generate_summaries.R" ]; then
             Rscript R/generate_summaries.R || echo "summaries step failed, continuing"

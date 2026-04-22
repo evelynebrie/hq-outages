@@ -76,6 +76,16 @@ if (QUICK_DEPLOY) {
   cat(sprintf("  ✓ Loaded cache with %d hexagons and %d processed files\n",
               length(cumulative_hex_data), length(processed_files)))
 
+  # Derive most_recent_datetime from processed_files (HTML generation needs it;
+  # the block that normally defines it (step 3.5) is skipped in QUICK_DEPLOY mode).
+  qd_ts <- regmatches(processed_files,
+                      regexpr("[0-9]{8}[Tt][0-9]{6}", processed_files))
+  qd_max_ts <- max(qd_ts)
+  most_recent_datetime <- sprintf("%s-%s-%s %s:%s:%s",
+    substr(qd_max_ts, 1, 4), substr(qd_max_ts, 5, 6), substr(qd_max_ts, 7, 8),
+    substr(qd_max_ts, 10, 11), substr(qd_max_ts, 12, 13), substr(qd_max_ts, 14, 15))
+  cat(sprintf("  ✓ Most recent datetime (from cache): %s\n", most_recent_datetime))
+
   # Use processed files as the file list
   files <- processed_files
   files_to_process <- character()  # Nothing new to process
