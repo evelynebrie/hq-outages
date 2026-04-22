@@ -17,7 +17,7 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 360  # 6 hours - maximum for public repos. Needed for first run processing thousands of files.
+    timeout-minutes: 30  # Normal runs complete in 5-7 min. Fast-fail stuck runners so queue doesn't block for hours.
 
     steps:
       - uses: actions/checkout@v3
