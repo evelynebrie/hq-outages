@@ -559,7 +559,7 @@
             </div>
         </div>
         <div style="margin-top: 12px; padding-top: 10px; border-top: 1px solid #e5e7eb; font-size:11px; color:#9ca3af; line-height:1.6;">
-            <div>Généré: <span id="genDate">&mdash;</span></div>
+            <div>Généré le <span id="genDate">&mdash;</span></div>
             <div>Hexagones d'1&nbsp;km &middot; <span id="daysCount">&mdash;</span>&nbsp;jours analysés</div>
             <div><strong>1 occurrence = panne de 15 minutes</strong></div>
         </div>
@@ -852,8 +852,10 @@
             var pad = function(n) { return n < 10 ? '0' + n : n; };
             var genDateEl = document.getElementById('genDate');
             if (genDateEl) {
-                genDateEl.textContent = now.getFullYear() + '-' + pad(now.getMonth() + 1) + '-' +
+                // Reuse formatFrDateTime by feeding it an ISO-like string.
+                var isoNow = now.getFullYear() + '-' + pad(now.getMonth() + 1) + '-' +
                     pad(now.getDate()) + ' ' + pad(now.getHours()) + ':' + pad(now.getMinutes());
+                genDateEl.textContent = formatFrDateTime(isoNow);
             }
         }
 

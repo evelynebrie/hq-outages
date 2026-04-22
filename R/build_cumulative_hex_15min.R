@@ -934,6 +934,15 @@ cat("\n[7] Generating HTML visualization...\n")
 num_days <- length(unique_dates)  # Use unique_dates from cumulative cache
 hex_size_km <- sprintf("%.1f", HEX_SIZE / 1000)
 current_date <- format(Sys.time(), "%Y-%m-%d %H:%M", tz = "America/Toronto")  # Montreal timezone
+# French-formatted version for display: "22 avril 2026 à 14h52"
+FR_MONTHS_R <- c("janvier","f\u00e9vrier","mars","avril","mai","juin","juillet","ao\u00fbt","septembre","octobre","novembre","d\u00e9cembre")
+.now_parts <- as.POSIXlt(Sys.time(), tz = "America/Toronto")
+current_date_fr <- sprintf("%d %s %d \u00e0 %02dh%02d",
+                            .now_parts$mday,
+                            FR_MONTHS_R[.now_parts$mon + 1],
+                            .now_parts$year + 1900,
+                            .now_parts$hour,
+                            .now_parts$min)
 
 # Build dates JSON array
 dates_json <- toJSON(unique_dates)
@@ -2087,9 +2096,9 @@ cat(';
                 "<div class=\\"info-row\\"><span class=\\"info-label\\">Nombre total d&apos;occurrences<br>en 2026:</span> <span id=\\"totalOccurrences\\" class=\\"loading\\">chargement...</span></div>" +
                 "<div class=\\"info-row\\"><span class=\\"info-label\\">Nombre d&apos;hexagones impactés<br>en 2026:</span> <span id=\\"totalHexCount\\" class=\\"loading\\">chargement...</span></div>" +
                 "<div style=\\"margin-top: 10px; padding-top: 10px; border-top: 1px solid #e5e7eb;font-size:11px;color:#9ca3af;line-height:1.6;\\">" +
-                    "<div>Généré: ', file = html_file, sep = "")
+                    "<div>Généré le ', file = html_file, sep = "")
 
-cat(current_date, file = html_file, sep = "")
+cat(current_date_fr, file = html_file, sep = "")
 
 cat('</div>" +
                     "<div>Taille hexagones: ', file = html_file, sep = "")
