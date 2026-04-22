@@ -82,16 +82,109 @@
             position: absolute;
             top: 10px;
             left: 10px;
-            background:white;
-            padding:15px;
-            border-radius:12px;
+            background: white;
+            padding: 18px;
+            border-radius: 12px;
             box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-            min-width:200px;
+            width: 300px;
             z-index: 1;
+            box-sizing: border-box;
         }
-        .controls h4 { margin:0 0 10px; font-size:14px; color:#333; }
-        .controls label { display:block; margin:8px 0 4px; font-size:12px; color:#666; font-weight:500; }
-        .controls select { width:100%; padding:6px; border:1px solid #ddd; border-radius:4px; font-size:13px; }
+        .controls h4 { margin: 0 0 12px; font-size: 14px; color: #111827; }
+
+        /* Résumé complet button */
+        .summary-btn {
+            position: relative;
+            display: flex; flex-direction: column; width: 100%;
+            padding: 12px 14px;
+            border: 2px solid #e5e7eb; background: white;
+            border-radius: 8px; cursor: pointer; text-align: left; font-family: inherit;
+            margin-bottom: 8px; transition: all 0.15s;
+            box-sizing: border-box;
+        }
+        .summary-btn strong { font-size: 13px; color: #111827; }
+        .summary-btn small { font-size: 11px; color: #4b5563; margin-top: 2px; }
+        .summary-btn:hover { border-color: #9ca3af; }
+        .summary-btn.active { border-color: #111827; }
+        .summary-btn.active::after,
+        .current-btn.active::after {
+            content: '✓';
+            position: absolute;
+            top: -8px; right: -8px;
+            width: 22px; height: 22px;
+            background: #111827; color: white;
+            border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 13px; font-weight: bold;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+        }
+
+        /* Pannes en cours — yellow */
+        .current-btn {
+            position: relative;
+            display: flex; flex-direction: column; width: 100%;
+            padding: 12px 14px;
+            border: 1.5px solid #fcd34d;
+            background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+            border-radius: 8px; cursor: pointer; text-align: left; font-family: inherit;
+            margin-bottom: 8px; transition: all 0.2s;
+            box-sizing: border-box;
+        }
+        .current-btn strong { font-size: 13px; color: #78350f; display: flex; align-items: center; gap: 8px; }
+        .current-btn strong::before {
+            content: '';
+            width: 8px; height: 8px; background: #f59e0b;
+            border-radius: 50%;
+            box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.25);
+            animation: pulse-dot 2s infinite;
+        }
+        .current-btn small { font-size: 11px; color: #92400e; margin-top: 3px; margin-left: 16px; }
+        .current-btn:hover {
+            border-color: #f59e0b;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 10px rgba(245, 158, 11, 0.15);
+        }
+        .current-btn.active {
+            border-color: #d97706;
+            background: linear-gradient(135deg, #fde68a 0%, #fcd34d 100%);
+        }
+        @keyframes pulse-dot {
+            0%, 100% { box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.25); }
+            50%      { box-shadow: 0 0 0 6px rgba(245, 158, 11, 0.08); }
+        }
+
+        .or-divider { text-align: center; font-size: 11px; color: #9ca3af; margin: 12px 0; }
+
+        /* Calendar */
+        .calendar { border: 1px solid #e5e7eb; border-radius: 8px; padding: 10px; }
+        .month-nav { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+        .month-nav button { background: none; border: none; font-size: 16px; cursor: pointer; color: #374151; padding: 2px 8px; border-radius: 4px; font-family: inherit; }
+        .month-nav button:hover { background: #f3f4f6; }
+        .month-nav button:disabled { color: #d1d5db; cursor: default; background: none; }
+        .month-label { font-size: 13px; font-weight: 600; text-transform: capitalize; }
+
+        .days-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+        .day-header { font-size: 10px; color: #9ca3af; text-align: center; padding: 4px 0; font-weight: 600; }
+        .day { border: none; background: transparent; padding: 6px 0; font-size: 11px; cursor: pointer; border-radius: 4px; font-family: inherit; color: inherit; }
+        .day.day-blank { visibility: hidden; cursor: default; }
+        .day:hover:not(:disabled):not(.day-blank) { outline: 2px solid #111827; outline-offset: -2px; }
+        .day:disabled { color: #d1d5db; cursor: default; background: #f9fafb; }
+        .day.selected { outline: 2px solid #111827; outline-offset: -2px; font-weight: bold; }
+
+        /* Day intensity classes (quintile palette) */
+        .day.i-0 { background: #f9fafb; color: #9ca3af; }
+        .day.i-1 { background: #fee0d2; }
+        .day.i-2 { background: #fcbba1; }
+        .day.i-3 { background: #fc9272; }
+        .day.i-4 { background: #ef3b2c; color: white; }
+        .day.i-5 { background: #a50f15; color: white; }
+
+        .legend-mini { display: flex; align-items: center; gap: 5px; margin-top: 8px; font-size: 10px; color: #6b7280; }
+        .legend-mini .sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; }
+
+        .time-section { margin-top: 12px; padding-top: 12px; border-top: 1px solid #f3f4f6; }
+        .time-section label { display: block; margin-bottom: 6px; font-size: 12px; color: #6b7280; font-weight: 500; }
+        .time-section select { width: 100%; padding: 8px 10px; border: 1px solid #d4d4d4; border-radius: 6px; font-size: 13px; font-family: inherit; background: white; box-sizing: border-box; }
 
         /* Detail modal */
         .detail-link { color:#1e88e5; cursor:pointer; text-decoration:underline; font-size:12px; }
@@ -226,23 +319,76 @@
     </div>
 
     <div class="controls">
-        <h4>Filtres</h4>
-        <label>Date:</label>
-        <select id="dateSelect" onchange="updateMap()">
-            <option value="all">Résumé complet (défaut)</option>
-        </select>
-        <label>Heure:</label>
-        <select id="hourSelect" onchange="updateMap()">
-            <option value="all">Toutes</option>
-            <option value="0">0:00</option><option value="1">1:00</option><option value="2">2:00</option>
-            <option value="3">3:00</option><option value="4">4:00</option><option value="5">5:00</option>
-            <option value="6">6:00</option><option value="7">7:00</option><option value="8">8:00</option>
-            <option value="9">9:00</option><option value="10">10:00</option><option value="11">11:00</option>
-            <option value="12">12:00</option><option value="13">13:00</option><option value="14">14:00</option>
-            <option value="15">15:00</option><option value="16">16:00</option><option value="17">17:00</option>
-            <option value="18">18:00</option><option value="19">19:00</option><option value="20">20:00</option>
-            <option value="21">21:00</option><option value="22">22:00</option><option value="23">23:00</option>
-        </select>
+        <h4>Affichage</h4>
+
+        <button class="summary-btn active" id="summaryBtn" onclick="setView('all')">
+            <strong>Résumé complet</strong>
+            <small>Depuis le 1er janvier 2026</small>
+        </button>
+
+        <button class="current-btn" id="currentBtn" onclick="setView('current')">
+            <strong>Pannes en cours</strong>
+            <small>Lecture la plus récente</small>
+        </button>
+
+        <div class="or-divider">— ou choisir un jour —</div>
+
+        <div class="calendar">
+            <div class="month-nav">
+                <button id="prevMonth" onclick="navigateMonth(-1)" aria-label="Mois précédent">‹</button>
+                <span class="month-label" id="monthLabel">—</span>
+                <button id="nextMonth" onclick="navigateMonth(1)" aria-label="Mois suivant">›</button>
+            </div>
+            <div class="days-grid" id="daysGrid">
+                <div class="day-header">L</div>
+                <div class="day-header">M</div>
+                <div class="day-header">M</div>
+                <div class="day-header">J</div>
+                <div class="day-header">V</div>
+                <div class="day-header">S</div>
+                <div class="day-header">D</div>
+            </div>
+            <div class="legend-mini">
+                <span>Intensité :</span>
+                <span class="sw i-0"></span>
+                <span class="sw i-1"></span>
+                <span class="sw i-2"></span>
+                <span class="sw i-3"></span>
+                <span class="sw i-4"></span>
+                <span class="sw i-5"></span>
+            </div>
+        </div>
+
+        <div class="time-section">
+            <label>Heure :</label>
+            <select id="hourSelect" onchange="onHourChange()">
+                <option value="all">Journée complète</option>
+                <option value="0">0h00 – 0h59</option>
+                <option value="1">1h00 – 1h59</option>
+                <option value="2">2h00 – 2h59</option>
+                <option value="3">3h00 – 3h59</option>
+                <option value="4">4h00 – 4h59</option>
+                <option value="5">5h00 – 5h59</option>
+                <option value="6">6h00 – 6h59</option>
+                <option value="7">7h00 – 7h59</option>
+                <option value="8">8h00 – 8h59</option>
+                <option value="9">9h00 – 9h59</option>
+                <option value="10">10h00 – 10h59</option>
+                <option value="11">11h00 – 11h59</option>
+                <option value="12">12h00 – 12h59</option>
+                <option value="13">13h00 – 13h59</option>
+                <option value="14">14h00 – 14h59</option>
+                <option value="15">15h00 – 15h59</option>
+                <option value="16">16h00 – 16h59</option>
+                <option value="17">17h00 – 17h59</option>
+                <option value="18">18h00 – 18h59</option>
+                <option value="19">19h00 – 19h59</option>
+                <option value="20">20h00 – 20h59</option>
+                <option value="21">21h00 – 21h59</option>
+                <option value="22">22h00 – 22h59</option>
+                <option value="23">23h00 – 23h59</option>
+            </select>
+        </div>
     </div>
 
     <button class="info-btn" onclick="openFaqModal()" title="À propos de la carte" aria-label="Informations">i</button>
@@ -270,9 +416,15 @@
 
         var map = new mapboxgl.Map({
             container: 'map',
-            style: 'mapbox://styles/mapbox/light-v11',
+            style: 'mapbox://styles/mapbox/standard',
             center: [-71.2, 46.8],
-            zoom: 7.5
+            zoom: 7.5,
+            config: {
+                basemap: {
+                    lightPreset: 'dusk',
+                    showPointOfInterestLabels: false
+                }
+            }
         });
 
         var allData = { daily: {}, total: null, current: null };
@@ -452,8 +604,7 @@
             updateStatsPanel();
             updateCurrentBadge();
 
-            // Populate date selector
-            var dateSelect = document.getElementById('dateSelect');
+            // Gather all available dates
             var dateSet = new Set();
             allData.total.features.forEach(function(f) {
                 if (!f.properties.all_datetimes) return;
@@ -462,14 +613,18 @@
                     if (d) dateSet.add(d);
                 });
             });
-            var dates = Array.from(dateSet).sort();
-            dates.forEach(function(d) {
-                var opt = document.createElement('option');
-                opt.value = d; opt.textContent = d;
-                dateSelect.appendChild(opt);
-            });
+            availableDates = Array.from(dateSet).sort();
 
-            return dates;
+            // Initialize calendar on the most recent month with data
+            if (availableDates.length > 0) {
+                var last = availableDates[availableDates.length - 1];
+                var parts = last.split('-');
+                calendarMonth = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, 1);
+                computeDayIntensities();
+                renderCalendar();
+            }
+
+            return availableDates;
         }
 
         // Parallel load of per-day files (in background, non-blocking).
@@ -485,41 +640,81 @@
             console.log('All daily files loaded');
         }
 
-        function filterDataByDateTime(date, hour) {
-            if (date === 'all') return allData.total;
-            var dailyData = allData.daily[date];
-            if (!dailyData) return null;
-            if (hour === 'all') return dailyData;
+        // ---------- View state ----------
+        var currentView = 'all';    // 'all' | 'current' | 'day'
+        var currentDate = null;     // date string 'YYYY-MM-DD' when view === 'day'
+        var currentHour = 'all';    // 'all' or '0'..'23'
+        var calendarMonth = null;   // Date obj, first of month currently shown
+        var availableDates = [];    // sorted array of dates present in allData.total
+        var dayIntensityBuckets = {}; // { 'YYYY-MM-DD': 0..5 }
 
+        function setView(view, date) {
+            currentView = view;
+            if (view === 'day' && date) currentDate = date;
+            updateSelectionUI();
+            updateMap();
+        }
+
+        function onHourChange() {
+            currentHour = document.getElementById('hourSelect').value;
+            if (currentView === 'day') updateMap();
+        }
+
+        function updateSelectionUI() {
+            document.getElementById('summaryBtn').classList.toggle('active', currentView === 'all');
+            document.getElementById('currentBtn').classList.toggle('active', currentView === 'current');
+            document.querySelectorAll('.day[data-date]').forEach(function(el) {
+                el.classList.toggle('selected', currentView === 'day' && el.dataset.date === currentDate);
+            });
+        }
+
+        function filterDayByHour(dailyData, hour) {
+            if (hour === 'all') return dailyData;
             var filtered = { type: 'FeatureCollection', features: [] };
             dailyData.features.forEach(function(f) {
                 if (!f.properties.all_datetimes) return;
                 var dts = f.properties.all_datetimes.split(',').map(function(s) { return s.trim(); });
-                var matchingDts = dts.filter(function(dt) {
-                    var dtHour = parseInt(dt.split(' ')[1].split(':')[0]);
-                    return dtHour === parseInt(hour);
+                var match = dts.filter(function(dt) {
+                    var h = parseInt(dt.split(' ')[1].split(':')[0]);
+                    return h === parseInt(hour);
                 });
-                if (matchingDts.length === 0) return;
-                var copy = Object.assign({}, f, { properties: Object.assign({}, f.properties, { filtered_hours_count: matchingDts.length }) });
+                if (match.length === 0) return;
+                var copy = Object.assign({}, f, {
+                    properties: Object.assign({}, f.properties, { filtered_hours_count: match.length })
+                });
                 filtered.features.push(copy);
             });
             return filtered;
         }
 
         function updateMap() {
-            var date = document.getElementById('dateSelect').value;
-            var hour = document.getElementById('hourSelect').value;
-            var data = filterDataByDateTime(date, hour);
+            var data = null;
+            if (currentView === 'all') {
+                data = allData.total;
+            } else if (currentView === 'current') {
+                data = allData.current;
+            } else if (currentView === 'day' && currentDate) {
+                var day = allData.daily[currentDate];
+                if (day) data = filterDayByHour(day, currentHour);
+            }
             if (!data) return;
 
             currentFeatures = data;
-            var isFiltered = date !== 'all';
-            var useFixedColor = isFiltered;
 
+            // Style per view
             data.features.forEach(function(f) {
-                var hoursCount = isFiltered ? (f.properties.filtered_hours_count || 0) : f.properties.total_occurrences;
-                f.properties.display_color = useFixedColor ? '#a50f15' : getColor(hoursCount);
-                f.properties.display_hours = hoursCount;
+                if (currentView === 'all') {
+                    f.properties.display_color = getColor(f.properties.total_occurrences);
+                    f.properties.display_hours = f.properties.total_occurrences;
+                } else if (currentView === 'current') {
+                    f.properties.display_color = '#fde68a';
+                    f.properties.display_hours = f.properties.total_occurrences || 0;
+                } else {
+                    f.properties.display_color = '#a50f15';
+                    f.properties.display_hours = (currentHour === 'all')
+                        ? (f.properties.occurrences_today || f.properties.total_occurrences || 0)
+                        : (f.properties.filtered_hours_count || 0);
+                }
             });
 
             if (map.getSource('hex-data')) {
@@ -528,14 +723,118 @@
                 map.addSource('hex-data', { type: 'geojson', data: data });
                 map.addLayer({
                     id: 'hex-layer', type: 'fill', source: 'hex-data',
-                    paint: { 'fill-color': ['get', 'display_color'], 'fill-opacity': useFixedColor ? 0.8 : 0.75 }
+                    paint: { 'fill-color': ['get', 'display_color'], 'fill-opacity': 0.75 }
                 });
                 map.addLayer({
                     id: 'hex-outline', type: 'line', source: 'hex-data',
                     paint: { 'line-color': '#fff', 'line-width': 0.5 }
                 });
             }
-            map.setPaintProperty('hex-layer', 'fill-opacity', useFixedColor ? 0.8 : 0.75);
+
+            // Outline / opacity per view
+            if (currentView === 'current') {
+                map.setPaintProperty('hex-outline', 'line-color', '#b45309');
+                map.setPaintProperty('hex-outline', 'line-width', 1.5);
+                map.setPaintProperty('hex-layer', 'fill-opacity', 0.85);
+            } else {
+                map.setPaintProperty('hex-outline', 'line-color', '#fff');
+                map.setPaintProperty('hex-outline', 'line-width', 0.5);
+                map.setPaintProperty('hex-layer', 'fill-opacity', currentView === 'all' ? 0.75 : 0.8);
+            }
+        }
+
+        // ---------- Calendar ----------
+        function computeDayIntensities() {
+            // Count distinct 'YYYY-MM-DD' dates each hex was observed on, tally per day.
+            var countsPerDay = {};
+            allData.total.features.forEach(function(f) {
+                if (!f.properties.all_datetimes) return;
+                var seen = {};
+                f.properties.all_datetimes.split(',').forEach(function(dt) {
+                    var d = dt.trim().split(' ')[0];
+                    if (!seen[d]) { seen[d] = true; countsPerDay[d] = (countsPerDay[d] || 0) + 1; }
+                });
+            });
+
+            // Quintile-bucket the daily counts (1..5); days with 0 → 0
+            var values = Object.values(countsPerDay).filter(function(v) { return v > 0; }).sort(function(a,b){ return a-b; });
+            if (values.length === 0) { dayIntensityBuckets = {}; return; }
+            function pct(arr, p) {
+                var idx = (arr.length - 1) * p;
+                var lo = Math.floor(idx), hi = Math.ceil(idx);
+                return lo === hi ? arr[lo] : arr[lo] + (arr[hi] - arr[lo]) * (idx - lo);
+            }
+            var b1 = pct(values, 0.20), b2 = pct(values, 0.40), b3 = pct(values, 0.60), b4 = pct(values, 0.80);
+            Object.keys(countsPerDay).forEach(function(d) {
+                var c = countsPerDay[d];
+                var bucket = 1;
+                if (c > b4) bucket = 5;
+                else if (c > b3) bucket = 4;
+                else if (c > b2) bucket = 3;
+                else if (c > b1) bucket = 2;
+                dayIntensityBuckets[d] = bucket;
+            });
+        }
+
+        function firstOfMonth(d) { return new Date(d.getFullYear(), d.getMonth(), 1); }
+        function addMonth(d, delta) { return new Date(d.getFullYear(), d.getMonth() + delta, 1); }
+        function pad2(n) { return n < 10 ? '0' + n : '' + n; }
+        function dateStr(y, m, d) { return y + '-' + pad2(m + 1) + '-' + pad2(d); }
+
+        function navigateMonth(delta) {
+            calendarMonth = addMonth(calendarMonth, delta);
+            renderCalendar();
+        }
+
+        function renderCalendar() {
+            if (!calendarMonth || availableDates.length === 0) return;
+
+            // Update month label (French)
+            var MONTHS = ['janvier','février','mars','avril','mai','juin','juillet','août','septembre','octobre','novembre','décembre'];
+            var label = MONTHS[calendarMonth.getMonth()] + ' ' + calendarMonth.getFullYear();
+            document.getElementById('monthLabel').textContent = label;
+
+            // Disable prev/next based on available range
+            var minD = availableDates[0];
+            var maxD = availableDates[availableDates.length - 1];
+            var firstShown = dateStr(calendarMonth.getFullYear(), calendarMonth.getMonth(), 1);
+            var lastShown = dateStr(calendarMonth.getFullYear(), calendarMonth.getMonth(),
+                new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 0).getDate());
+            document.getElementById('prevMonth').disabled = firstShown <= minD;
+            document.getElementById('nextMonth').disabled = lastShown >= maxD;
+
+            var grid = document.getElementById('daysGrid');
+            // Remove old day cells but keep the 7 headers
+            grid.querySelectorAll('.day').forEach(function(el) { el.remove(); });
+
+            var year = calendarMonth.getFullYear();
+            var month = calendarMonth.getMonth();
+            var firstDayOfWeek = (new Date(year, month, 1).getDay() + 6) % 7; // Mon=0
+            var daysInMonth = new Date(year, month + 1, 0).getDate();
+
+            for (var i = 0; i < firstDayOfWeek; i++) {
+                var blank = document.createElement('div');
+                blank.className = 'day day-blank';
+                grid.appendChild(blank);
+            }
+            for (var d = 1; d <= daysInMonth; d++) {
+                var ds = dateStr(year, month, d);
+                var btn = document.createElement('button');
+                btn.className = 'day';
+                btn.textContent = d;
+                btn.dataset.date = ds;
+                if (!allData.daily[ds] && !dayIntensityBuckets[ds]) {
+                    // No data at all for this date — disable
+                    if (ds < minD || ds > maxD) { btn.disabled = true; }
+                    else { btn.classList.add('i-0'); }
+                } else {
+                    var bucket = dayIntensityBuckets[ds] || 0;
+                    btn.classList.add('i-' + bucket);
+                }
+                if (ds === currentDate) btn.classList.add('selected');
+                btn.onclick = (function(date) { return function() { setView('day', date); }; })(ds);
+                grid.appendChild(btn);
+            }
         }
 
         function showDetails(hexId) {
