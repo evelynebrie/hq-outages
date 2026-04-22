@@ -956,6 +956,7 @@ cat('<!DOCTYPE html>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Où sont les pannes?</title>
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 32 32\'><circle cx=\'16\' cy=\'16\' r=\'7\' fill=\'%23f59e0b\' opacity=\'0.3\'><animate attributeName=\'r\' values=\'7;15;7\' dur=\'1.6s\' repeatCount=\'indefinite\'/><animate attributeName=\'opacity\' values=\'0.6;0;0.6\' dur=\'1.6s\' repeatCount=\'indefinite\'/></circle><circle cx=\'16\' cy=\'16\' r=\'7\' fill=\'%23f59e0b\'/></svg>">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <link rel="stylesheet" href="https://unpkg.com/leaflet-control-geocoder@2.4.0/dist/Control.Geocoder.css" />
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -1196,6 +1197,56 @@ cat('<!DOCTYPE html>
             letter-spacing: 0.02em;
         }
         
+        /* Hex click popup — Option C (clean key/value) */
+        .leaflet-popup-content-wrapper { border-radius: 10px; }
+        .leaflet-popup-content { margin: 14px 16px; max-width: 260px; font-size: 13px; }
+        .hex-pop-title {
+            font-family: "SF Mono", Menlo, monospace;
+            font-weight: 700; font-size: 14px;
+            color: #111827; margin: 0 0 10px;
+            display: flex; align-items: center; gap: 8px;
+        }
+        .hex-pop-title .current-badge {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            padding: 2px 8px; font-size: 10px;
+        }
+        .hex-pop-kv { margin: 0 0 12px; }
+        .hex-pop-row {
+            display: flex; justify-content: space-between;
+            align-items: baseline;
+            padding: 5px 0;
+            border-bottom: 1px solid #f3f4f6;
+        }
+        .hex-pop-row:last-child { border-bottom: none; }
+        .hex-pop-label {
+            font-size: 11px; color: #6b7280;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+        .hex-pop-value {
+            font-size: 13px; font-weight: 700; color: #111827;
+            font-variant-numeric: tabular-nums;
+        }
+        .hex-pop-value.accent { color: #78350f; }
+        .hex-pop-coord {
+            font-size: 10.5px; color: #9ca3af;
+            font-variant-numeric: tabular-nums;
+            text-align: right;
+            font-weight: 500;
+        }
+        .hex-pop-cta {
+            display: block; width: 100%;
+            background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+            color: #78350f;
+            border: 1px solid #fcd34d;
+            padding: 7px 0; border-radius: 6px;
+            font-family: inherit; font-size: 12.5px; font-weight: 700;
+            cursor: pointer; text-align: center; text-decoration: none;
+            box-sizing: border-box;
+        }
+        .hex-pop-cta:hover { filter: brightness(0.97); }
+
         /* Modal styling */
         .detail-link {
             color: #2563eb;
@@ -1462,6 +1513,15 @@ cat('<!DOCTYPE html>
             color: #78350f;
             font-weight: 700;
             font-variant-numeric: tabular-nums;
+            margin: 0 1px;
+        }
+        .visitor-pill .num sup {
+            font-size: 0.72em;
+            vertical-align: baseline;
+            position: relative;
+            top: -0.45em;
+            margin-left: 1px;
+            font-weight: 700;
         }
 
         /* Inline spinner shown inside the welcome button while data loads */
@@ -1622,7 +1682,7 @@ cat('<!DOCTYPE html>
         <button onclick="closeWelcomeModal()" class="close-btn">✕</button>
         <h2>Où sont les pannes?</h2>
         <p>Cette plateforme vous permet d&apos;explorer la distribution spatiale et temporelle des pannes d&apos;électricité au Québec depuis le 1<sup>er</sup> janvier 2026.</p>
-        <p>Les données sont extraites du portail Info-Pannes d&apos;Hydro-Québec toutes les 15 minutes et géolocalisées sur une grille hexagonale de 1&nbsp;km². Chaque occurrence de panne représente une interruption de 15 minutes&nbsp;: plus le compteur est élevé, plus les résidents de votre secteur ont été privés de courant.</p>
+        <p>Les données sont extraites du portail Info-Pannes d&apos;Hydro-Québec toutes les 15 minutes et géolocalisées sur une grille hexagonale de 1&nbsp;km². Chaque occurrence de panne représente une <strong>interruption de 15 minutes</strong>: plus le compteur est élevé, plus les résidents de votre secteur ont été privés de courant.</p>
         <p>L&apos;objectif de cet outil est d&apos;améliorer la transparence et l&apos;accessibilité des données relatives aux interruptions de service électrique au Québec.</p>
         <div class="welcome-actions">
             <button class="btn-secondary" onclick="openFaqFromWelcome()">À propos de ce projet</button>
@@ -2049,14 +2109,42 @@ cat(';
                 onEachFeature: function(f, layer) {
                     var props = f.properties;
                     var count = props.total_occurrences || props.occurrences_today || 1;
-                    var popupContent = "<b>Hexagone #" + props.hex_id + "</b>";
-                    if (isCurrent) {
-                        popupContent += " <span class=\\"current-badge\\">EN COURS</span>";
+                    var popTotalMin = count * 15;
+                    var popH = Math.floor(popTotalMin / 60);
+                    var popM = popTotalMin % 60;
+                    var popDuration;
+                    if (popH === 0) {
+                        popDuration = popM + " min";
+                    } else if (popM === 0) {
+                        popDuration = popH + " h";
+                    } else {
+                        popDuration = popH + " h " + popM + " min";
                     }
-                    popupContent += "<br><b>Occurrences totales:</b> " + count + "<br>" +
-                        "<b>Jours affectés:</b> " + (props.days_affected || 1) + "<br>" +
-                        "<b>Centroïde:</b> " + props.centroid_lat.toFixed(6) + ", " + props.centroid_lon.toFixed(6) + "<br>" +
-                        "<a class=\\"detail-link\\" onclick=\\"showDetails(" + props.hex_id + ")\\">Voir historique</a>";
+
+                    var popupContent = "<div class=\\"hex-pop-title\\">#" + props.hex_id;
+                    if (isCurrent) {
+                        popupContent += "<span class=\\"current-badge\\">EN COURS</span>";
+                    }
+                    popupContent += "</div>" +
+                        "<div class=\\"hex-pop-kv\\">" +
+                            "<div class=\\"hex-pop-row\\">" +
+                                "<span class=\\"hex-pop-label\\">Durée totale</span>" +
+                                "<span class=\\"hex-pop-value accent\\">" + popDuration + "</span>" +
+                            "</div>" +
+                            "<div class=\\"hex-pop-row\\">" +
+                                "<span class=\\"hex-pop-label\\">Occurrences</span>" +
+                                "<span class=\\"hex-pop-value\\">" + count + "</span>" +
+                            "</div>" +
+                            "<div class=\\"hex-pop-row\\">" +
+                                "<span class=\\"hex-pop-label\\">Jours affectés</span>" +
+                                "<span class=\\"hex-pop-value\\">" + (props.days_affected || 1) + "</span>" +
+                            "</div>" +
+                            "<div class=\\"hex-pop-row\\">" +
+                                "<span class=\\"hex-pop-label\\">Centroïde</span>" +
+                                "<span class=\\"hex-pop-coord\\">" + props.centroid_lat.toFixed(4) + ", " + props.centroid_lon.toFixed(4) + "</span>" +
+                            "</div>" +
+                        "</div>" +
+                        "<a class=\\"hex-pop-cta\\" onclick=\\"showDetails(" + props.hex_id + ")\\">Voir l\'historique détaillé</a>";
                     layer.bindPopup(popupContent);
                 }
             }).addTo(map);
