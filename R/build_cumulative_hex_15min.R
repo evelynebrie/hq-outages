@@ -1495,8 +1495,9 @@ cat('<!DOCTYPE html>
     <div id="welcomeModal" class="active">
         <button onclick="closeWelcomeModal()" class="close-btn">✕</button>
         <h2>Où sont les pannes?</h2>
-        <p>Cet outil vous permet de localiser les pannes de courant ayant eu lieu au Québec depuis le 1<sup>er</sup> janvier 2026.</p>
-        <p>L&apos;objectif de cette carte est de promouvoir la transparence de l&apos;information au sujet des pannes de courant au Québec. Chaque occurrence de panne représente une panne de 15 minutes.</p>
+        <p>Cette plateforme vous permet d&apos;explorer la distribution spatiale et temporelle des pannes d&apos;électricité au Québec depuis le 1<sup>er</sup> janvier 2026.</p>
+        <p>Les données sont extraites du portail Info-Pannes d&apos;Hydro-Québec toutes les 15 minutes et géolocalisées sur une grille hexagonale de 1&nbsp;km². Chaque occurrence de panne représente une interruption de 15 minutes&nbsp;: plus le compteur est élevé, plus votre secteur a connu de pannes prolongées.</p>
+        <p>L&apos;objectif de cet outil est d&apos;améliorer la transparence et l&apos;accessibilité des données relatives aux interruptions de service électrique à travers le territoire québécois.</p>
         <div class="welcome-actions">
             <button class="btn-secondary" onclick="openFaqFromWelcome()">À propos de ce projet</button>
             <button class="btn-primary" id="welcomeStartBtn" onclick="startFromWelcome()">Accéder à l&apos;outil</button>
