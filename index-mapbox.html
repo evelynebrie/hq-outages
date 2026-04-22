@@ -1083,16 +1083,16 @@
     <div id="shareModal" class="detail-modal">
         <span class="close-modal" onclick="closeShareModal()">×</span>
         <div class="share-modal-inner">
-            <p class="share-hint">Voici un résumé partageable de votre secteur. Téléchargez l'image pour Instagram, ou partagez le lien directement sur d'autres réseaux.</p>
+            <p class="share-hint">Voici un résumé partageable des pannes ayant impacté votre secteur.</p>
             <div id="shareCard" class="share-card"></div>
             <div class="share-btns">
-                <button onclick="shareVia('twitter')" title="Partager sur X"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg> X</button>
+                <button onclick="shareInstagram()" title="Partager sur Instagram"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="20" rx="5" ry="5"/><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/><line x1="17.5" y1="6.5" x2="17.51" y2="6.5"/></svg> Instagram</button>
                 <button onclick="shareVia('bluesky')" title="Partager sur Bluesky"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M5.8 3.4C8.2 5.2 10.8 8.8 12 10.7c1.2-1.9 3.8-5.5 6.2-7.3 1.7-1.3 4.5-2.3 4.5 0.9 0 0.6-0.4 5.2-0.6 5.9-0.6 2.5-3.1 3.1-5.3 2.7 3.9 0.7 4.9 2.9 2.7 5.1-4 4.2-5.8-1-6.3-2.3-0.1-0.2-0.1-0.4-0.2-0.4-0.1 0-0.1 0.1-0.2 0.4-0.5 1.3-2.3 6.5-6.3 2.3-2.2-2.2-1.2-4.4 2.7-5.1-2.2 0.4-4.7-0.2-5.3-2.7-0.2-0.7-0.6-5.3-0.6-5.9 0-3.2 2.8-2.2 4.5-0.9z"/></svg> Bluesky</button>
                 <button onclick="shareVia('facebook')" title="Partager sur Facebook"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M24 12.07C24 5.41 18.63 0 12 0S0 5.4 0 12.07C0 18.1 4.39 23.1 10.13 24v-8.44H7.08v-3.49h3.04V9.41c0-3.02 1.79-4.7 4.54-4.7 1.31 0 2.68.24 2.68.24v2.97h-1.5c-1.49 0-1.96.93-1.96 1.89v2.26h3.32l-.53 3.5h-2.79V24C19.61 23.1 24 18.1 24 12.07"/></svg> Facebook</button>
                 <button onclick="shareVia('whatsapp')" title="Partager sur WhatsApp"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M17.5 14.4c-.3-.15-1.77-.87-2.04-.97-.27-.1-.47-.15-.67.15-.2.3-.77.97-.94 1.17-.17.2-.35.22-.65.07-.3-.15-1.26-.46-2.4-1.48-.89-.79-1.49-1.77-1.66-2.07-.17-.3-.02-.46.13-.61.13-.13.3-.35.45-.52.15-.17.2-.3.3-.5.1-.2.05-.37-.02-.52s-.67-1.62-.92-2.22c-.24-.58-.49-.5-.67-.51H7.9c-.17 0-.45.06-.69.3s-.92.9-.92 2.19c0 1.3.94 2.55 1.07 2.72.13.17 1.85 2.83 4.48 3.97.63.27 1.12.43 1.5.55.63.2 1.2.17 1.65.1.5-.07 1.55-.63 1.77-1.25.22-.61.22-1.13.15-1.25-.07-.12-.25-.17-.55-.32zM12.04 21.78h-.01a9.87 9.87 0 0 1-5.03-1.38l-.36-.21-3.74.98 1-3.65-.24-.37a9.86 9.86 0 0 1-1.51-5.26c0-5.45 4.43-9.88 9.89-9.88 2.64 0 5.12 1.03 6.99 2.9a9.82 9.82 0 0 1 2.89 6.99c0 5.45-4.44 9.88-9.88 9.88zm8.41-18.29A11.8 11.8 0 0 0 12.04.21C5.48.21.13 5.56.13 12.12c0 2.1.55 4.14 1.59 5.95L.03 24l6.08-1.59a11.87 11.87 0 0 0 5.93 1.5h.01c6.56 0 11.9-5.35 11.9-11.9 0-3.18-1.23-6.17-3.48-8.42z"/></svg> WhatsApp</button>
                 <button onclick="shareVia('email')" title="Partager par courriel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 5L2 7"/></svg> Courriel</button>
                 <button onclick="shareVia('copy')" title="Copier le lien"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> <span id="copyLinkLabel">Copier</span></button>
-                <button class="download" onclick="downloadShareCard()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Télécharger l'image (pour Instagram)</button>
+                <button class="download" onclick="downloadShareCard()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Télécharger l'image</button>
             </div>
         </div>
     </div>
@@ -2080,6 +2080,48 @@
             }).catch(function(err) {
                 console.error('html2canvas error:', err);
                 alert('Erreur lors de la génération de l\'image.');
+            });
+        }
+
+        // Instagram has no web share URL. On mobile we can trigger the native
+        // share sheet (which includes Instagram) via Web Share API with a File.
+        // On desktop or unsupported browsers we fall back to downloading the
+        // image and opening Instagram.com so the user can upload manually.
+        function shareInstagram() {
+            if (typeof html2canvas === 'undefined') return;
+            var card = document.getElementById('shareCard');
+            if (!card) return;
+            var s = currentShareState || {};
+            var msg = s.hexId
+                ? 'Mon secteur (#' + s.hexId + ') est le ' + s.rank + 'e pire au Québec pour les pannes. ousontlespannes.ca'
+                : 'ousontlespannes.ca';
+            var id = s.hexId || 'secteur';
+
+            html2canvas(card, { scale: 2, backgroundColor: '#ffffff', useCORS: true }).then(function(canvas) {
+                canvas.toBlob(function(blob) {
+                    if (!blob) return;
+                    var file = new File([blob], 'ousontlespannes-' + id + '.png', { type: 'image/png' });
+                    var shareData = { text: msg, files: [file] };
+
+                    if (navigator.canShare && navigator.canShare(shareData) && navigator.share) {
+                        navigator.share(shareData).catch(function() { fallback(blob); });
+                    } else {
+                        fallback(blob);
+                    }
+                }, 'image/png');
+
+                function fallback(blob) {
+                    // Download PNG and open Instagram so the user can upload it.
+                    var url = URL.createObjectURL(blob);
+                    var link = document.createElement('a');
+                    link.download = 'ousontlespannes-' + id + '.png';
+                    link.href = url;
+                    link.click();
+                    setTimeout(function() { URL.revokeObjectURL(url); }, 2000);
+                    window.open('https://www.instagram.com/', '_blank', 'noopener');
+                }
+            }).catch(function(err) {
+                console.error('html2canvas error:', err);
             });
         }
         // Tracks whether the FAQ modal was opened from the welcome modal, so
