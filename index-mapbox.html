@@ -149,6 +149,8 @@
             z-index: 1500;
         }
         .legend-info-popover.open { display: block; }
+        .legend-info-popover p { margin: 0 0 10px; }
+        .legend-info-popover p:last-child { margin-bottom: 0; }
 
         /* Filter controls */
         .controls {
@@ -704,15 +706,21 @@
             container.innerHTML = html;
 
             if (footer) {
-                var sentence = "Un hexagone est classé comme ayant un impact minimal lorsqu'il compte entre " +
+                var p1 = "Un hexagone est classé comme ayant subi un impact minimal lorsqu'il compte entre " +
                     q.min + " et " + q.q1 + " occurrences de pannes (mesurées aux 15 minutes), faible entre " +
                     (q.q1 + 1) + " et " + q.q2 + ", modéré entre " +
                     (q.q2 + 1) + " et " + q.q3 + ", élevé entre " +
                     (q.q3 + 1) + " et " + q.q4 + " et intense entre " +
-                    (q.q4 + 1) + " et " + q.max + ". Chaque niveau regroupe 20% des hexagones. Ces valeurs sont mises à jour automatiquement pour refléter une proportion égale d'observations dans chaque niveau d'impact.";
+                    (q.q4 + 1) + " et " + q.max + ".";
+                var p2 = "Chaque niveau regroupe 20% des hexagones.";
+                var p3 = "Ces valeurs sont mises à jour automatiquement pour refléter une proportion égale d'observations dans chaque niveau d'impact.";
                 footer.innerHTML =
                     '<div class="legend-info-wrap">' +
-                    '<div id="legendInfoPopover" class="legend-info-popover">' + sentence + '</div>' +
+                    '<div id="legendInfoPopover" class="legend-info-popover">' +
+                        '<p>' + p1 + '</p>' +
+                        '<p>' + p2 + '</p>' +
+                        '<p>' + p3 + '</p>' +
+                    '</div>' +
                     '<button type="button" class="legend-info-btn" aria-label="Comment sont calculés les seuils" onclick="toggleLegendInfo(event)">i</button>' +
                     '</div>';
             }
