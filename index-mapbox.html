@@ -709,7 +709,7 @@
             </div>
         </div>
         <div id="hourlyChartBlock" class="hourly-chart" style="display:none;">
-            <div class="hourly-chart-title">Occurrences aujourd'hui par heure</div>
+            <div class="hourly-chart-title">Hexagones en panne aujourd'hui</div>
             <div class="hourly-chart-sub" id="hourlyChartSub">&mdash;</div>
             <div class="hourly-chart-wrap">
                 <div class="hourly-yaxis" id="hourlyYAxis">
@@ -1187,48 +1187,44 @@
             return Math.ceil(v / 1000) * 1000;
         }
 
-        // Aggregate all hexagons' 15-min readings on `todayDate` into 24
-        // hourly buckets, then draw the line+area chart inside Statistiques.
+        // Plot one point per 15-min scrape: each point = number of hexes
+        // that reported an outage at that exact timestamp. X axis spans
+        // 0h → 24h; the line ends at the last scraped reading.
         function renderHourlyChart(todayDate) {
             var block = document.getElementById('hourlyChartBlock');
             if (!block) return;
             var todayData = allData.daily[todayDate];
             if (!todayData || !todayData.features) return;
 
-            var hourly = new Array(24).fill(0);
+            // Count hexes per exact HH:MM timestamp.
+            var counts = {};
             todayData.features.forEach(function(f) {
-                var datetimes = f.properties.datetimes_today || f.properties.all_datetimes || '';
+                var datetimes = f.properties.datetimes_today || '';
                 datetimes.split(',').forEach(function(dt) {
                     var s = dt.trim();
                     if (!s) return;
-                    var m = s.match(/[T\s](\d{2}):/);
-                    if (m) {
-                        var hour = parseInt(m[1], 10);
-                        if (hour >= 0 && hour < 24) hourly[hour]++;
-                    }
+                    var m = s.match(/(\d{2}):(\d{2})/);
+                    if (!m) return;
+                    var key = m[1] + ':' + m[2];
+                    counts[key] = (counts[key] || 0) + 1;
                 });
             });
 
-            var maxHour = Math.max.apply(null, hourly);
-            if (maxHour === 0) { block.style.display = 'none'; return; }
+            var points = Object.keys(counts).map(function(hhmm) {
+                var parts = hhmm.split(':');
+                return {
+                    minutes: parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10),
+                    count: counts[hhmm]
+                };
+            }).sort(function(a, b) { return a.minutes - b.minutes; });
 
-            // Only show hours that are fully complete. At 16:15 the
-            // 16h bucket is only 15 min deep and would look like a drop
-            // — so we cap lastHour at (current Montreal hour - 1).
-            var montrealHourStr = new Date().toLocaleString('en-US', {
-                timeZone: 'America/Toronto', hour: '2-digit', hour12: false
-            });
-            var currentMtlHour = parseInt(montrealHourStr, 10);
-            if (isNaN(currentMtlHour)) currentMtlHour = new Date().getHours();
-            var maxCompleteHour = currentMtlHour - 1;
+            if (points.length === 0) { block.style.display = 'none'; return; }
 
-            var lastHour = -1;
-            for (var h = Math.min(23, maxCompleteHour); h >= 0; h--) {
-                if (hourly[h] > 0) { lastHour = h; break; }
-            }
-            if (lastHour < 0) { block.style.display = 'none'; return; }
+            var maxCount = 0;
+            points.forEach(function(p) { if (p.count > maxCount) maxCount = p.count; });
+            if (maxCount === 0) { block.style.display = 'none'; return; }
 
-            var yMax = niceCeil(maxHour);
+            var yMax = niceCeil(maxCount);
             var yAxis = document.getElementById('hourlyYAxis');
             if (yAxis) {
                 yAxis.innerHTML =
@@ -1238,40 +1234,44 @@
                     '<span>0</span>';
             }
 
-            // viewBox: 0..240 x 0..100 (10px per hour). Point for hour h is
-            // at x = h*10. Line runs 0..lastHour only; the full 24h axis
-            // stays visible so missing hours are obvious.
-            var pts = [];
-            for (var hh = 0; hh <= lastHour; hh++) {
-                var x = hh * 10;
-                var y = 100 - (hourly[hh] / yMax) * 100;
-                pts.push(x + ',' + y.toFixed(2));
-            }
+            // viewBox: 0..240 x 0..100. X = (minutes / 1440) * 240.
+            function xFromMinutes(m) { return (m / 1440) * 240; }
+
+            var pts = points.map(function(p) {
+                var x = xFromMinutes(p.minutes);
+                var y = 100 - (p.count / yMax) * 100;
+                return x.toFixed(2) + ',' + y.toFixed(2);
+            });
             var lineD = 'M ' + pts.join(' L ');
-            var lastX = lastHour * 10;
-            var areaD = lineD + ' L ' + lastX + ',99 L 0,99 Z';
+            var lastPoint = points[points.length - 1];
+            var lastX = xFromMinutes(lastPoint.minutes);
+            var lastY = 100 - (lastPoint.count / yMax) * 100;
+            var areaD = lineD + ' L ' + lastX.toFixed(2) + ',99 L 0,99 Z';
 
             document.getElementById('hourlyLine').setAttribute('d', lineD);
             document.getElementById('hourlyArea').setAttribute('d', areaD);
 
             var nowLine = document.getElementById('hourlyNowLine');
             if (nowLine) {
-                nowLine.setAttribute('x1', lastX);
-                nowLine.setAttribute('x2', lastX);
+                nowLine.setAttribute('x1', lastX.toFixed(2));
+                nowLine.setAttribute('x2', lastX.toFixed(2));
                 nowLine.style.display = 'block';
             }
-            var lastY = 100 - (hourly[lastHour] / yMax) * 100;
             var nowDot = document.getElementById('hourlyNowDot');
             if (nowDot) {
-                nowDot.setAttribute('cx', lastX);
+                nowDot.setAttribute('cx', lastX.toFixed(2));
                 nowDot.setAttribute('cy', lastY.toFixed(2));
                 nowDot.style.display = 'block';
             }
 
+            // Subtitle: "22 avril 2026 · jusqu'à 16h30"
             var sub = document.getElementById('hourlyChartSub');
             if (sub) {
                 var dateFr = formatFrDate(todayDate);
-                sub.innerHTML = dateFr + ' &middot; jusqu\'à ' + lastHour + 'h';
+                var lastH = Math.floor(lastPoint.minutes / 60);
+                var lastM = lastPoint.minutes % 60;
+                var pad2 = function(n) { return n < 10 ? '0' + n : String(n); };
+                sub.innerHTML = dateFr + ' &middot; jusqu\'à ' + lastH + 'h' + pad2(lastM);
             }
 
             block.style.display = 'block';
