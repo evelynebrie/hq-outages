@@ -1448,21 +1448,18 @@ cat(';
             var container = document.getElementById("legendItems");
             if (!container || !quartileBreaks) return;
             var q = quartileBreaks;
-            var labels = [
-                { label: "1er quartile", lo: q.min, hi: q.q1 },
-                { label: "2e quartile",  lo: q.q1 + 1, hi: q.q2 },
-                { label: "3e quartile",  lo: q.q2 + 1, hi: q.q3 },
-                { label: "4e quartile",  lo: q.q3 + 1, hi: q.max }
-            ];
+            var labels = ["Faible", "Modéré", "Élevé", "Très élevé"];
             var html = "<div class=\\"legend-item\\"><i style=\\"background:#ef4444;border:2px solid #dc2626\\"></i> En cours</div>";
             for (var i = 0; i < 4; i++) {
-                var L = labels[i];
-                var range = (L.lo === L.hi)
-                    ? (L.lo + " occurrence" + (L.lo === 1 ? "" : "s") + " de 15 min.")
-                    : (L.lo + " à " + L.hi + " occurrences de 15 min.");
-                html += "<div class=\\"legend-item\\"><i style=\\"background:" + QUARTILE_COLORS[i] + "\\"></i> " + L.label + " (" + range + ")</div>";
+                html += "<div class=\\"legend-item\\"><i style=\\"background:" + QUARTILE_COLORS[i] + "\\"></i> " + labels[i] + "</div>";
             }
-            html += "<div style=\\"font-size:10px;color:#666;margin-top:10px;padding-top:8px;border-top:1px solid #e5e7eb;line-height:1.4;\\">1 quartile = 25% des données</div>";
+            var sentence = "Un hexagone est classé comme faible lorsqu\\u0027il compte entre " +
+                q.min + " et " + q.q1 + " occurrences de pannes (mesurées aux 15 minutes), modéré entre " +
+                (q.q1 + 1) + " et " + q.q2 + ", élevé entre " +
+                (q.q2 + 1) + " et " + q.q3 + " et très élevé entre " +
+                (q.q3 + 1) + " et " + q.max + ".";
+            html += "<div style=\\"font-size:10px;color:#666;margin-top:10px;padding-top:8px;border-top:1px solid #e5e7eb;line-height:1.4;max-width:280px;\\">" + sentence + "</div>";
+            html += "<div style=\\"font-size:10px;color:#666;margin-top:6px;line-height:1.4;\\">Chaque niveau regroupe 25% des hexagones.</div>";
             container.innerHTML = html;
         }
         
@@ -1623,7 +1620,7 @@ cat(';
         legend.onAdd = function() {
             var div = L.DomUtil.create("div", "info legend");
             div.id = "legend";
-            div.innerHTML = "<h4>Quartiles d\\u0027impact des pannes</h4>" +
+            div.innerHTML = "<h4>Impact relatif des pannes</h4>" +
                 "<div id=\\"legendItems\\"><div style=\\"font-size:12px;color:#999;\\">Chargement...</div></div>";
             return div;
         };
