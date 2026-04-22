@@ -77,6 +77,28 @@
             box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.25);
         }
 
+        /* Hourly chart inside Statistiques */
+        .hourly-chart { margin-top: 16px; padding-top: 14px; }
+        .hourly-chart-title {
+            font-size: 11px; font-weight: 600; color: #6b7280;
+            text-transform: uppercase; letter-spacing: 0.06em;
+            margin: 0 0 6px;
+        }
+        .hourly-chart-sub { font-size: 11px; color: #9ca3af; margin: 0 0 16px; }
+        .hourly-chart-wrap { display: flex; align-items: stretch; gap: 6px; }
+        .hourly-yaxis {
+            display: flex; flex-direction: column; justify-content: space-between;
+            font-size: 10px; color: #9ca3af; font-variant-numeric: tabular-nums;
+            text-align: right; padding: 2px 0 14px; min-width: 24px;
+        }
+        .hourly-chart-body { flex: 1; min-width: 0; }
+        .hourly-chart-svg { width: 100%; height: 70px; display: block; }
+        .hourly-axis-labels {
+            display: flex; justify-content: space-between;
+            font-size: 10px; color: #9ca3af; margin-top: 2px;
+            font-variant-numeric: tabular-nums;
+        }
+
         /* Yellow badge for Pannes en cours */
         .current-badge {
             background: #f5d05d;
@@ -652,10 +674,44 @@
                 <div class="card-value" id="totalHexCount">&mdash;</div>
             </div>
         </div>
+        <div id="hourlyChartBlock" class="hourly-chart" style="display:none;">
+            <div class="hourly-chart-title">Occurrences aujourd'hui par heure</div>
+            <div class="hourly-chart-sub" id="hourlyChartSub">&mdash;</div>
+            <div class="hourly-chart-wrap">
+                <div class="hourly-yaxis" id="hourlyYAxis">
+                    <span>&mdash;</span>
+                    <span></span>
+                    <span></span>
+                    <span>0</span>
+                </div>
+                <div class="hourly-chart-body">
+                    <svg id="hourlyChartSvg" class="hourly-chart-svg" viewBox="0 0 240 100" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
+                        <defs>
+                            <linearGradient id="hourlyYellowGrad" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="0%" stop-color="#fcd34d" stop-opacity="0.85"/>
+                                <stop offset="100%" stop-color="#fef3c7" stop-opacity="0.35"/>
+                            </linearGradient>
+                        </defs>
+                        <line x1="0" y1="99" x2="240" y2="99" stroke="#e5e7eb" stroke-width="0.5"/>
+                        <line id="hourlyNowLine" x1="0" y1="0" x2="0" y2="100" stroke="#d1d5db" stroke-width="0.5" stroke-dasharray="2 2" style="display:none;"/>
+                        <path id="hourlyArea" fill="url(#hourlyYellowGrad)" opacity="0.85" d=""/>
+                        <path id="hourlyLine" fill="none" stroke="#d97706" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke" d=""/>
+                        <circle id="hourlyNowDot" cx="0" cy="0" r="2.4" fill="#d97706" style="display:none;"/>
+                    </svg>
+                    <div class="hourly-axis-labels">
+                        <span>0h</span>
+                        <span>6h</span>
+                        <span>12h</span>
+                        <span>18h</span>
+                        <span>24h</span>
+                    </div>
+                </div>
+            </div>
+        </div>
         <div style="margin-top: 12px; padding-top: 10px; border-top: 1px solid #e5e7eb; font-size:11px; color:#9ca3af; line-height:1.6;">
             <div>Généré le <span id="genDate">&mdash;</span></div>
             <div>Hexagones d'1&nbsp;km &middot; <span id="daysCount">&mdash;</span>&nbsp;jours analysés</div>
-            <div><strong>1 occurrence = panne de 15 minutes</strong></div>
+            <div><strong>1 occurrence = 1 panne de 15 minutes</strong></div>
         </div>
     </div>
 
@@ -1050,7 +1106,24 @@
         // Parallel load of per-day files (in background, non-blocking).
         async function loadDailyDataInBackground(dates) {
             setLoaderText('Chargement des données quotidiennes...');
-            var promises = dates.map(function(date) {
+
+            // Load today (most recent date) first so the hourly chart can
+            // render ASAP without waiting for the full historical backfill.
+            var sortedDates = dates.slice().sort();
+            var todayDate = sortedDates[sortedDates.length - 1];
+            if (todayDate) {
+                try {
+                    var r = await fetch('daily/daily_' + todayDate + '.geojson');
+                    if (r.ok) {
+                        var data = await r.json();
+                        allData.daily[todayDate] = data;
+                        renderHourlyChart(todayDate);
+                    }
+                } catch (e) { /* silent */ }
+            }
+
+            var remaining = dates.filter(function(d) { return d !== todayDate; });
+            var promises = remaining.map(function(date) {
                 return fetch('daily/daily_' + date + '.geojson')
                     .then(function(r) { return r.ok ? r.json() : null; })
                     .then(function(data) { if (data) allData.daily[date] = data; })
@@ -1058,6 +1131,100 @@
             });
             await Promise.all(promises);
             console.log('All daily files loaded');
+        }
+
+        // Round up to a "nice" Y-axis ceiling.
+        function niceCeil(v) {
+            if (v <= 10) return 10;
+            if (v <= 25) return 25;
+            if (v <= 50) return 50;
+            if (v <= 100) return 100;
+            if (v <= 250) return 250;
+            if (v <= 500) return 500;
+            if (v <= 1000) return 1000;
+            if (v <= 2500) return 2500;
+            if (v <= 5000) return 5000;
+            return Math.ceil(v / 1000) * 1000;
+        }
+
+        // Aggregate all hexagons' 15-min readings on `todayDate` into 24
+        // hourly buckets, then draw the line+area chart inside Statistiques.
+        function renderHourlyChart(todayDate) {
+            var block = document.getElementById('hourlyChartBlock');
+            if (!block) return;
+            var todayData = allData.daily[todayDate];
+            if (!todayData || !todayData.features) return;
+
+            var hourly = new Array(24).fill(0);
+            todayData.features.forEach(function(f) {
+                var datetimes = f.properties.datetimes_today || f.properties.all_datetimes || '';
+                datetimes.split(',').forEach(function(dt) {
+                    var s = dt.trim();
+                    if (!s) return;
+                    var m = s.match(/[T\s](\d{2}):/);
+                    if (m) {
+                        var hour = parseInt(m[1], 10);
+                        if (hour >= 0 && hour < 24) hourly[hour]++;
+                    }
+                });
+            });
+
+            var maxHour = Math.max.apply(null, hourly);
+            if (maxHour === 0) { block.style.display = 'none'; return; }
+
+            var lastHour = -1;
+            for (var h = 23; h >= 0; h--) {
+                if (hourly[h] > 0) { lastHour = h; break; }
+            }
+            if (lastHour < 0) { block.style.display = 'none'; return; }
+
+            var yMax = niceCeil(maxHour);
+            var yAxis = document.getElementById('hourlyYAxis');
+            if (yAxis) {
+                yAxis.innerHTML =
+                    '<span>' + yMax.toLocaleString('fr-CA') + '</span>' +
+                    '<span>' + Math.round(yMax * 2 / 3).toLocaleString('fr-CA') + '</span>' +
+                    '<span>' + Math.round(yMax / 3).toLocaleString('fr-CA') + '</span>' +
+                    '<span>0</span>';
+            }
+
+            // viewBox: 0..240 x 0..100 (10px per hour). Point for hour h is
+            // at x = h*10. Line runs 0..lastHour only; the full 24h axis
+            // stays visible so missing hours are obvious.
+            var pts = [];
+            for (var hh = 0; hh <= lastHour; hh++) {
+                var x = hh * 10;
+                var y = 100 - (hourly[hh] / yMax) * 100;
+                pts.push(x + ',' + y.toFixed(2));
+            }
+            var lineD = 'M ' + pts.join(' L ');
+            var lastX = lastHour * 10;
+            var areaD = lineD + ' L ' + lastX + ',99 L 0,99 Z';
+
+            document.getElementById('hourlyLine').setAttribute('d', lineD);
+            document.getElementById('hourlyArea').setAttribute('d', areaD);
+
+            var nowLine = document.getElementById('hourlyNowLine');
+            if (nowLine) {
+                nowLine.setAttribute('x1', lastX);
+                nowLine.setAttribute('x2', lastX);
+                nowLine.style.display = 'block';
+            }
+            var lastY = 100 - (hourly[lastHour] / yMax) * 100;
+            var nowDot = document.getElementById('hourlyNowDot');
+            if (nowDot) {
+                nowDot.setAttribute('cx', lastX);
+                nowDot.setAttribute('cy', lastY.toFixed(2));
+                nowDot.style.display = 'block';
+            }
+
+            var sub = document.getElementById('hourlyChartSub');
+            if (sub) {
+                var dateFr = formatFrDate(todayDate);
+                sub.innerHTML = dateFr + ' &middot; jusqu\'à ' + lastHour + 'h';
+            }
+
+            block.style.display = 'block';
         }
 
         // ---------- View state ----------
