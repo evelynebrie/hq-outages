@@ -1,21 +1,21 @@
 name: Deploy Mapbox Visualization (Separate)
 
 on:
-  # Run after the main workflow completes
-  workflow_run:
-    workflows: ["Process 15-Minute HQ Outage Data with Actions Cache (NEW)"]
-    types:
-      - completed
-
-  # Also allow manual trigger
+  # Manual trigger only. The main workflow now copies the fresh
+  # index-mapbox.html into public/ and deploys it alongside the Leaflet
+  # HTML, so automatic mapbox-only deploys would just race with the
+  # main workflow's gh-pages push. Keep this workflow for ad-hoc
+  # redeploys when only the Mapbox HTML changes.
   workflow_dispatch:
-
-  # Or run on a schedule (every hour)
-  schedule:
-    - cron: '15 * * * *'  # 15 minutes past each hour
 
 permissions:
   contents: write
+
+# Serialize with the main workflow so two workflows never push to
+# gh-pages at the same time (that was the source of the 1m30s failures).
+concurrency:
+  group: hq-outages-processing
+  cancel-in-progress: false
 
 jobs:
   deploy-mapbox:

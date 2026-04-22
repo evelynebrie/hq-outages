@@ -1100,6 +1100,47 @@ cat('<!DOCTYPE html>
             margin-bottom: 6px;
             font-size: 13px;
         }
+        .legend-info-wrap {
+            position: relative;
+            display: flex;
+            justify-content: flex-end;
+            margin-top: 10px;
+            padding-top: 8px;
+            border-top: 1px solid #e5e7eb;
+        }
+        .legend-info-btn {
+            width: 22px; height: 22px;
+            border-radius: 50%;
+            background: #e5e7eb;
+            color: #374151;
+            border: none;
+            cursor: pointer;
+            font-style: italic;
+            font-family: Georgia, "Times New Roman", serif;
+            font-weight: bold;
+            font-size: 13px;
+            display: flex; align-items: center; justify-content: center;
+            padding: 0; line-height: 1;
+            transition: background 0.15s;
+        }
+        .legend-info-btn:hover { background: #d1d5db; }
+        .legend-info-popover {
+            display: none;
+            position: absolute;
+            right: 0;
+            bottom: 30px;
+            width: 280px;
+            background: white;
+            color: #374151;
+            font-size: 11px;
+            line-height: 1.5;
+            padding: 10px 12px;
+            border: 1px solid #e5e7eb;
+            border-radius: 6px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+            z-index: 1500;
+        }
+        .legend-info-popover.open { display: block; }
         
         /* Enhanced badges - bright yellow */
         .current-badge {
@@ -1299,13 +1340,13 @@ cat('<!DOCTYPE html>
         .date-header {
             cursor: pointer;
             font-weight: 600;
-            color: #2563eb;
+            color: #111827;
             padding: 6px;
             border-radius: 6px;
             transition: background 0.2s;
         }
         .date-header:hover {
-            background: #eff6ff;
+            background: #f3f4f6;
         }
         .times-list {
             display: none;
@@ -1632,15 +1673,36 @@ cat(';
             for (var i = 0; i < 5; i++) {
                 html += "<div class=\\"legend-item\\"><i style=\\"background:" + QUARTILE_COLORS[i] + "\\"></i> " + labels[i] + "</div>";
             }
-            var sentence = "Un hexagone est classé comme minimal lorsqu&apos;il compte entre " +
+            var sentence = "Un hexagone est classé comme ayant un impact minimal lorsqu&apos;il compte entre " +
                 q.min + " et " + q.q1 + " occurrences de pannes (mesurées aux 15 minutes), faible entre " +
                 (q.q1 + 1) + " et " + q.q2 + ", modéré entre " +
                 (q.q2 + 1) + " et " + q.q3 + ", élevé entre " +
                 (q.q3 + 1) + " et " + q.q4 + " et intense entre " +
-                (q.q4 + 1) + " et " + q.max + ". Ces valeurs sont mises à jour quotidiennement pour refléter une proportion égale d&apos;observations dans chaque niveau d&apos;impact.";
-            html += "<div style=\\"font-size:10px;color:#666;margin-top:10px;padding-top:8px;border-top:1px solid #e5e7eb;line-height:1.4;max-width:280px;\\">" + sentence + "</div>";
-            html += "<div style=\\"font-size:10px;color:#666;margin-top:6px;line-height:1.4;\\">Chaque niveau regroupe 20% des hexagones.</div>";
+                (q.q4 + 1) + " et " + q.max + ". Chaque niveau regroupe 20% des hexagones. Ces valeurs sont mises à jour automatiquement pour refléter une proportion égale d&apos;observations dans chaque niveau d&apos;impact.";
+            html +=
+                "<div class=\\"legend-info-wrap\\">" +
+                "<div id=\\"legendInfoPopover\\" class=\\"legend-info-popover\\">" + sentence + "</div>" +
+                "<button type=\\"button\\" class=\\"legend-info-btn\\" aria-label=\\"Comment sont calculés les seuils\\" onclick=\\"toggleLegendInfo(event)\\">i</button>" +
+                "</div>";
             container.innerHTML = html;
+        }
+
+        function toggleLegendInfo(evt) {
+            if (evt) evt.stopPropagation();
+            var pop = document.getElementById("legendInfoPopover");
+            if (!pop) return;
+            var willOpen = !pop.classList.contains("open");
+            pop.classList.toggle("open", willOpen);
+            if (willOpen) {
+                setTimeout(function() {
+                    document.addEventListener("click", function h(e) {
+                        if (!e.target.closest(".legend-info-wrap")) {
+                            pop.classList.remove("open");
+                            document.removeEventListener("click", h);
+                        }
+                    });
+                }, 0);
+            }
         }
         
         function updateMap() {

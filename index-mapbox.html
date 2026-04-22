@@ -76,6 +76,40 @@
         .legend i { width:18px; height:18px; float:left; margin-right:8px; opacity:0.85; border-radius: 3px; }
         .legend h4 { margin:0 0 10px; font-size:14px; color:#111827; }
         .legend > div { margin-bottom: 4px; }
+        .legend-info-wrap { position: relative; display: flex; justify-content: flex-end; margin-top: 8px; padding-top: 8px; border-top: 1px solid #e5e7eb; }
+        .legend-info-btn {
+            width: 22px; height: 22px;
+            border-radius: 50%;
+            background: #e5e7eb;
+            color: #374151;
+            border: none;
+            cursor: pointer;
+            font-style: italic;
+            font-family: Georgia, "Times New Roman", serif;
+            font-weight: bold;
+            font-size: 13px;
+            display: flex; align-items: center; justify-content: center;
+            padding: 0; line-height: 1;
+            transition: background 0.15s;
+        }
+        .legend-info-btn:hover { background: #d1d5db; }
+        .legend-info-popover {
+            display: none;
+            position: absolute;
+            right: 0;
+            bottom: 30px;
+            width: 280px;
+            background: white;
+            color: #374151;
+            font-size: 11px;
+            line-height: 1.5;
+            padding: 10px 12px;
+            border: 1px solid #e5e7eb;
+            border-radius: 6px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+            z-index: 1500;
+        }
+        .legend-info-popover.open { display: block; }
 
         /* Filter controls */
         .controls {
@@ -232,8 +266,8 @@
         .detail-modal h3 { margin:0 0 15px; color:#333; }
         .detail-modal p { margin:10px 0; color:#666; }
         .date-row { margin: 8px 0; border-bottom: 1px solid #f3f4f6; padding: 8px 0; }
-        .date-header { cursor: pointer; font-weight: 600; color: #2563eb; padding: 6px; border-radius: 6px; transition: background 0.2s; }
-        .date-header:hover { background: #eff6ff; }
+        .date-header { cursor: pointer; font-weight: 600; color: #111827; padding: 6px; border-radius: 6px; transition: background 0.2s; }
+        .date-header:hover { background: #f3f4f6; }
         .times-list { display: none; margin-left: 24px; margin-top: 8px; font-size: 13px; color: #6b7280; }
         .times-list div { padding: 4px 0; }
         .close-modal { position:absolute; top:10px; right:15px; font-size:24px; cursor:pointer; color:#999; }
@@ -605,14 +639,17 @@
             container.innerHTML = html;
 
             if (footer) {
-                var sentence = "Un hexagone est classé comme minimal lorsqu'il compte entre " +
+                var sentence = "Un hexagone est classé comme ayant un impact minimal lorsqu'il compte entre " +
                     q.min + " et " + q.q1 + " occurrences de pannes (mesurées aux 15 minutes), faible entre " +
                     (q.q1 + 1) + " et " + q.q2 + ", modéré entre " +
                     (q.q2 + 1) + " et " + q.q3 + ", élevé entre " +
                     (q.q3 + 1) + " et " + q.q4 + " et intense entre " +
-                    (q.q4 + 1) + " et " + q.max + ". Ces valeurs sont mises à jour quotidiennement pour refléter une proportion égale d'observations dans chaque niveau d'impact.";
-                footer.innerHTML = '<div>' + sentence + '</div>' +
-                    '<div style="margin-top:6px;">Chaque niveau regroupe 20% des hexagones.</div>';
+                    (q.q4 + 1) + " et " + q.max + ". Chaque niveau regroupe 20% des hexagones. Ces valeurs sont mises à jour automatiquement pour refléter une proportion égale d'observations dans chaque niveau d'impact.";
+                footer.innerHTML =
+                    '<div class="legend-info-wrap">' +
+                    '<div id="legendInfoPopover" class="legend-info-popover">' + sentence + '</div>' +
+                    '<button type="button" class="legend-info-btn" aria-label="Comment sont calculés les seuils" onclick="toggleLegendInfo(event)">i</button>' +
+                    '</div>';
             }
         }
 
@@ -1065,6 +1102,24 @@
             document.getElementById('faqModal').classList.remove('active');
             document.getElementById('modalOverlay').classList.remove('active');
         }
+        function toggleLegendInfo(evt) {
+            if (evt) evt.stopPropagation();
+            var pop = document.getElementById('legendInfoPopover');
+            if (!pop) return;
+            var willOpen = !pop.classList.contains('open');
+            pop.classList.toggle('open', willOpen);
+            if (willOpen) {
+                setTimeout(function() {
+                    document.addEventListener('click', function h(e) {
+                        if (!e.target.closest('.legend-info-wrap')) {
+                            pop.classList.remove('open');
+                            document.removeEventListener('click', h);
+                        }
+                    });
+                }, 0);
+            }
+        }
+
         function closeWelcomeModal() {
             document.getElementById('welcomeModal').classList.remove('active');
             if (!document.getElementById('faqModal').classList.contains('active') &&
