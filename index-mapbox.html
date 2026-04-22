@@ -591,6 +591,24 @@
             border-color: #374151;
         }
 
+        .back-to-app {
+            display: block;
+            width: 100%;
+            margin-top: 12px;
+            padding: 14px 14px 9px;
+            background: transparent;
+            color: #6b7280;
+            border: none;
+            border-top: 1px solid #f3f4f6;
+            font-family: inherit;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            text-align: center;
+            transition: color 0.15s;
+        }
+        .back-to-app:hover { color: #111827; }
+
         .hex-hero-stat {
             background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
             border: 1px solid #fcd34d;
@@ -1094,6 +1112,7 @@
                 <button onclick="shareVia('copy')" title="Copier le lien"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> <span id="copyLinkLabel">Copier</span></button>
                 <button class="download" onclick="downloadShareCard()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Télécharger l'image</button>
             </div>
+            <button class="back-to-app" onclick="closeShareModal(); closeDetailModal();">&larr; Retour à l'application</button>
         </div>
     </div>
     <div id="faqModal" class="detail-modal faq-modal">
