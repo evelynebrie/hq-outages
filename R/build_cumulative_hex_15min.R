@@ -1472,7 +1472,87 @@ cat('<!DOCTYPE html>
         .times-list div {
             padding: 4px 0;
         }
-        
+
+        /* Hex detail modal — Option 2 layout */
+        .hex-title {
+            margin: 0 0 6px;
+            font-size: 18px;
+            font-weight: 700;
+            color: #111827;
+            font-variant-numeric: tabular-nums;
+        }
+        .hex-current-line { margin: 0 0 8px; }
+        .hex-hero-stat {
+            background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+            border: 1px solid #fcd34d;
+            border-radius: 10px;
+            padding: 16px 20px;
+            margin: 20px 0 16px;
+        }
+        .hex-hero-label {
+            font-size: 11px;
+            color: #92400e;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            margin-bottom: 6px;
+        }
+        .hex-hero-value {
+            font-size: 28px;
+            font-weight: 700;
+            color: #78350f;
+            font-variant-numeric: tabular-nums;
+            line-height: 1;
+        }
+        .hex-hero-sub {
+            font-size: 12.5px;
+            color: #92400e;
+            margin-top: 6px;
+        }
+        .hist-section-title {
+            font-size: 11px;
+            font-weight: 600;
+            color: #9ca3af;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            margin: 18px 0 8px;
+        }
+        .hist-list { max-height: 380px; overflow-y: auto; }
+        .hist-list .date-row { margin: 0; padding: 0; border-bottom: 1px solid #f3f4f6; }
+        .hist-list .date-row:last-child { border-bottom: none; }
+        .hist-list .date-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 9px 4px;
+            font-size: 13px;
+            border-radius: 4px;
+        }
+        .hist-list .hist-row-left .caret { color: #9ca3af; font-size: 10px; margin-right: 6px; }
+        .hist-list .hist-date { font-weight: 600; color: #111827; }
+        .hist-list .hist-row-right {
+            font-size: 12.5px;
+            color: #6b7280;
+            font-variant-numeric: tabular-nums;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .hist-list .hist-row-right strong { color: #111827; font-weight: 700; }
+        .hist-list .hist-bar {
+            display: inline-block;
+            height: 6px;
+            background: #fcd34d;
+            border-radius: 3px;
+        }
+        .hist-list .times-list {
+            display: none;
+            margin-left: 20px;
+            padding: 4px 0 10px;
+            font-size: 12px;
+            color: #6b7280;
+        }
+
         .loading {
             color: #9ca3af;
             font-style: italic;
@@ -1970,7 +2050,7 @@ cat(';
             
             var uniqueDates = Object.keys(byDate).sort().reverse();
 
-            var html = "<h3>Hexagone #" + hexId + "</h3>";
+            var html = "<h3 class=\\"hex-title\\">Hexagone #" + hexId + "</h3>";
 
             var isCurrentlyAffected = false;
             if (allData.current && allData.current.features) {
@@ -1982,7 +2062,7 @@ cat(';
                 }
             }
             if (isCurrentlyAffected) {
-                html += "<p><span class=\\"current-badge\\">PANNE EN COURS</span></p>";
+                html += "<p class=\\"hex-current-line\\"><span class=\\"current-badge\\">PANNE EN COURS</span></p>";
             }
 
             var totalMin = props.total_occurrences * 15;
@@ -1995,19 +2075,37 @@ cat(';
                 totalTime = h + " " + (h === 1 ? "heure" : "heures");
                 if (m > 0) totalTime += " " + m + " min";
             }
-            html += "<p><strong>Nombre d\'occurrences de 15 min.:</strong> " + props.total_occurrences + "</p>";
-            html += "<p><strong>Temps total de pannes:</strong> " + totalTime + "</p>";
-            html += "<p><strong>Jours affectés:</strong> " + uniqueDates.length + "</p>";
-            html += "<p style=\\"margin-top: 15px;\\"><strong>Historique :</strong></p>";
-            html += "<div style=\\"max-height: 400px; overflow-y: auto;\\">";
+            var daysLabel = uniqueDates.length + " jour" + (uniqueDates.length > 1 ? "s" : "");
+            var occLabel = props.total_occurrences + " occurrence" + (props.total_occurrences > 1 ? "s" : "") + " de 15 minutes";
+            html += "<div class=\\"hex-hero-stat\\">" +
+                    "<div class=\\"hex-hero-label\\">Temps total de pannes</div>" +
+                    "<div class=\\"hex-hero-value\\">" + totalTime + "</div>" +
+                    "<div class=\\"hex-hero-sub\\">sur " + daysLabel + " &middot; " + occLabel + "</div>" +
+                "</div>";
+
+            html += "<div class=\\"hist-section-title\\">Historique détaillé</div>";
+            html += "<div class=\\"hist-list\\">";
+
+            var maxDayCount = 0;
+            for (var u = 0; u < uniqueDates.length; u++) {
+                if (byDate[uniqueDates[u]].length > maxDayCount) maxDayCount = byDate[uniqueDates[u]].length;
+            }
 
             for (var j = 0; j < uniqueDates.length; j++) {
                 var dateKey = uniqueDates[j];
                 var times = byDate[dateKey];
+                var barPx = maxDayCount > 0 ? Math.max(6, Math.round(60 * times.length / maxDayCount)) : 6;
                 html += "<div class=\\"date-row\\">";
-                html += "<div class=\\"date-header\\" onclick=\\"toggleTimes(this)\\">";
-                html += "&#9654; " + dateKey + " (" + times.length + " occurrence" + (times.length > 1 ? "s" : "") + ")";
-                html += "</div>";
+                html += "<div class=\\"date-header\\" onclick=\\"toggleTimes(this)\\">" +
+                        "<span class=\\"hist-row-left\\">" +
+                            "<span class=\\"caret\\">&#9654;</span>" +
+                            "<span class=\\"hist-date\\">" + formatFrDate(dateKey) + "</span>" +
+                        "</span>" +
+                        "<span class=\\"hist-row-right\\">" +
+                            "<span class=\\"hist-bar\\" style=\\"width:" + barPx + "px;\\"></span>" +
+                            "<span><strong>" + times.length + "</strong> occ.</span>" +
+                        "</span>" +
+                    "</div>";
                 html += "<div class=\\"times-list\\">";
                 for (var k = 0; k < times.length; k++) {
                     html += "<div>" + times[k] + "</div>";
@@ -2020,6 +2118,18 @@ cat(';
             document.getElementById("modalContent").innerHTML = html;
             document.getElementById("detailModal").classList.add("active");
             document.getElementById("modalOverlay").classList.add("active");
+        }
+
+        var FR_MONTHS_JS = ["janvier","février","mars","avril","mai","juin","juillet","août","septembre","octobre","novembre","décembre"];
+        function formatFrDate(s) {
+            if (!s) return s;
+            var m = s.match(/^(\\d{4})-(\\d{2})-(\\d{2})/);
+            if (!m) return s;
+            var day = parseInt(m[3], 10);
+            var month = FR_MONTHS_JS[parseInt(m[2], 10) - 1];
+            var year = m[1];
+            var dayStr = day === 1 ? "1<sup>er</sup>" : day.toString();
+            return dayStr + " " + month + " " + year;
         }
 
         function toggleTimes(header) {
