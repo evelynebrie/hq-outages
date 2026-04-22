@@ -1,11 +1,15 @@
 name: Deploy Mapbox Visualization (Separate)
 
 on:
-  # Manual trigger only. The main workflow now copies the fresh
-  # index-mapbox.html into public/ and deploys it alongside the Leaflet
-  # HTML, so automatic mapbox-only deploys would just race with the
-  # main workflow's gh-pages push. Keep this workflow for ad-hoc
-  # redeploys when only the Mapbox HTML changes.
+  # Auto-run after the main 15-min processing workflow finishes, so the
+  # Mapbox HTML is always redeployed alongside the fresh data. The
+  # `concurrency` group below serializes the gh-pages push with the main
+  # workflow so they never collide (that was the source of the old
+  # 1m30s race failures).
+  workflow_run:
+    workflows: ["Process 15-Minute HQ Outage Data with Actions Cache (NEW)"]
+    types: [completed]
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -20,6 +24,9 @@ concurrency:
 jobs:
   deploy-mapbox:
     runs-on: ubuntu-latest
+    # For workflow_run triggers, only run if the upstream workflow succeeded.
+    # workflow_dispatch always runs (github.event.workflow_run is null).
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
 
     steps:
       - name: Checkout repository
