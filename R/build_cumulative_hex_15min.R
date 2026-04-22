@@ -1185,7 +1185,9 @@ cat('<!DOCTYPE html>
             z-index: 1500;
         }
         .legend-info-popover.open { display: block; }
-        
+        .legend-info-popover p { margin: 0 0 14px; }
+        .legend-info-popover p:last-child { margin-bottom: 0; }
+
         /* Enhanced badges - bright yellow */
         .current-badge {
             background: #f5d05d;
