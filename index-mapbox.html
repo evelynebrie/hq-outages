@@ -1258,18 +1258,6 @@
         var quartileBreaks = null;
         var QUARTILE_COLORS = ['#fee0d2', '#fcbba1', '#fc9272', '#ef3b2c', '#a50f15'];
 
-        // Mobile-only: viewport-based loading to prevent crashes
-        var REGION_BOUNDS = {
-            'west': [-79.5, 45.0, -76.0, 49.0],
-            'central_west': [-76.0, 45.0, -74.5, 46.5],
-            'central': [-74.5, 45.0, -73.0, 47.0],
-            'central_east': [-73.0, 45.0, -71.5, 47.5],
-            'east': [-71.5, 46.0, -69.0, 49.5],
-            'far_east': [-69.0, 47.5, -64.0, 52.5]
-        };
-        var mobileLoadedRegions = [];
-        var isMobileDevice = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-
         function hideLoader() {
             var el = document.getElementById('mapLoader');
             if (el) el.classList.add('hidden');
@@ -1442,14 +1430,7 @@
         // Parallel load: regional totals + current outages. Map shows as soon as totals ready.
         async function loadCoreData() {
             setLoaderText('Chargement des données...');
-            // Mobile: load center regions only initially to prevent Safari crash
-            var regions = isMobileDevice
-                ? ['central', 'central_east', 'east']
-                : ['west', 'central_west', 'central', 'central_east', 'east', 'far_east'];
-            if (isMobileDevice) {
-                mobileLoadedRegions = regions.slice();
-                console.log('Mobile: loading initial regions', regions);
-            }
+            var regions = ['west', 'central_west', 'central', 'central_east', 'east', 'far_east'];
 
             var totalsPromise = Promise.all(
                 regions.map(function(region) {
@@ -2422,51 +2403,6 @@
             }
         }
 
-        // Mobile-only: load additional region when user pans to it
-        async function loadMobileRegion(regionName) {
-            if (!isMobileDevice) return;
-            if (mobileLoadedRegions.includes(regionName)) return;
-
-            try {
-                console.log('Mobile: loading region', regionName);
-                var response = await fetch('total/total_exposure_' + regionName + '.geojson');
-                var data = await response.json();
-
-                if (data && data.features) {
-                    allData.total.features = allData.total.features.concat(data.features);
-                    mobileLoadedRegions.push(regionName);
-                    console.log('Mobile: loaded ' + data.features.length + ' hexagons from ' + regionName);
-
-                    quartileBreaks = computeQuartiles(allData.total.features);
-                    updateMap();
-                }
-            } catch (e) {
-                console.error('Error loading mobile region:', e);
-            }
-        }
-
-        // Mobile-only: check which regions are visible and load them
-        function checkAndLoadMobileRegions() {
-            if (!isMobileDevice || !map) return;
-
-            var bounds = map.getBounds();
-            var viewport = {
-                west: bounds.getWest(),
-                south: bounds.getSouth(),
-                east: bounds.getEast(),
-                north: bounds.getNorth()
-            };
-
-            for (var regionName in REGION_BOUNDS) {
-                var rb = REGION_BOUNDS[regionName];
-                // Check if region intersects with viewport
-                if (!(viewport.east < rb[0] || viewport.west > rb[2] ||
-                      viewport.north < rb[1] || viewport.south > rb[3])) {
-                    loadMobileRegion(regionName);
-                }
-            }
-        }
-
         // Initialize map
         map.on('load', async function() {
             try {
@@ -2611,17 +2547,6 @@
 
             map.on('mouseenter', 'hex-layer', function() { map.getCanvas().style.cursor = 'pointer'; });
             map.on('mouseleave', 'hex-layer', function() { map.getCanvas().style.cursor = ''; });
-
-            // Mobile-only: load regions as user pans/zooms
-            if (isMobileDevice) {
-                var loadTimeout;
-                function scheduleMobileLoad() {
-                    clearTimeout(loadTimeout);
-                    loadTimeout = setTimeout(checkAndLoadMobileRegions, 800);
-                }
-                map.on('moveend', scheduleMobileLoad);
-                map.on('zoomend', scheduleMobileLoad);
-            }
         });
     </script>
 </body>
