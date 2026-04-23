@@ -2280,7 +2280,7 @@
             }
             var card = document.getElementById('shareCard');
             if (!card) return;
-            html2canvas(card, { scale: 2, backgroundColor: '#ffffff', useCORS: true }).then(function(canvas) {
+            html2canvas(card, { scale: 3, backgroundColor: '#ffffff', useCORS: true }).then(function(canvas) {
                 var link = document.createElement('a');
                 var id = currentShareState ? currentShareState.hexId : 'secteur';
                 link.download = 'ousontlespannes-' + id + '.png';
@@ -2306,7 +2306,7 @@
                 : 'ousontlespannes.ca';
             var id = s.hexId || 'secteur';
 
-            html2canvas(card, { scale: 2, backgroundColor: '#ffffff', useCORS: true }).then(function(canvas) {
+            html2canvas(card, { scale: 3, backgroundColor: '#ffffff', useCORS: true }).then(function(canvas) {
                 canvas.toBlob(function(blob) {
                     if (!blob) return;
                     var file = new File([blob], 'ousontlespannes-' + id + '.png', { type: 'image/png' });
