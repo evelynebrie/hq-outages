@@ -681,6 +681,20 @@
         }
         .close-modal { position:absolute; top:10px; right:15px; font-size:24px; cursor:pointer; color:#999; }
         .close-modal:hover { color:#333; }
+
+        /* Region selector (mobile only) */
+        .region-selector-modal { max-width: 500px; }
+        .region-grid { display: grid; gap: 12px; }
+        .region-btn {
+            display: flex; flex-direction: column; align-items: flex-start;
+            padding: 14px 16px; background: #f9fafb; border: 2px solid #e5e7eb;
+            border-radius: 8px; cursor: pointer; transition: all 0.2s;
+            font-family: inherit; text-align: left; width: 100%;
+        }
+        .region-btn:hover { background: #fff; border-color: #3b82f6; transform: translateY(-1px); box-shadow: 0 2px 8px rgba(59, 130, 246, 0.1); }
+        .region-btn strong { font-size: 14px; color: #111827; margin-bottom: 4px; }
+        .region-btn small { font-size: 12px; color: #6b7280; font-weight: normal; }
+
         .mapboxgl-ctrl-geocoder { max-width: 300px; }
 
         /* Info button (FAQ trigger) */
@@ -1187,6 +1201,36 @@
             <img src="logos/udem-logo.svg" alt="Université de Montréal">
         </div>
     </div>
+    <div id="regionSelectorModal" class="detail-modal region-selector-modal">
+        <h2>Choisir une région</h2>
+        <p style="margin-bottom: 20px; color: #6b7280; font-size: 14px;">Pour optimiser les performances sur mobile, veuillez sélectionner la région que vous souhaitez consulter.</p>
+        <div class="region-grid">
+            <button class="region-btn" onclick="loadMobileRegion('west')">
+                <strong>Abitibi-Témiscamingue / Outaouais ouest</strong>
+                <small>Rouyn-Noranda, Val-d'Or</small>
+            </button>
+            <button class="region-btn" onclick="loadMobileRegion('central_west')">
+                <strong>Outaouais / Laurentides</strong>
+                <small>Gatineau, Mont-Tremblant</small>
+            </button>
+            <button class="region-btn" onclick="loadMobileRegion('central')">
+                <strong>Montréal / Lanaudière</strong>
+                <small>Montréal, Laval, Joliette</small>
+            </button>
+            <button class="region-btn" onclick="loadMobileRegion('central_east')">
+                <strong>Mauricie / Capitale-Nationale ouest</strong>
+                <small>Trois-Rivières, Portneuf</small>
+            </button>
+            <button class="region-btn" onclick="loadMobileRegion('east')">
+                <strong>Capitale-Nationale / Saguenay</strong>
+                <small>Québec, Chicoutimi</small>
+            </button>
+            <button class="region-btn" onclick="loadMobileRegion('far_east')">
+                <strong>Bas-Saint-Laurent / Gaspésie / Côte-Nord</strong>
+                <small>Rimouski, Gaspé, Sept-Îles</small>
+            </button>
+        </div>
+    </div>
     <div id="detailModal" class="detail-modal">
         <span class="close-modal" onclick="closeDetailModal()">×</span>
         <div id="modalContent"></div>
@@ -1430,7 +1474,12 @@
         // Parallel load: regional totals + current outages. Map shows as soon as totals ready.
         async function loadCoreData() {
             setLoaderText('Chargement des données...');
-            var regions = ['west', 'central_west', 'central', 'central_east', 'east', 'far_east'];
+            // Mobile: load only selected region. Desktop: load all regions
+            var regions = (isMobileDevice && selectedMobileRegion)
+                ? [selectedMobileRegion]
+                : ['west', 'central_west', 'central', 'central_east', 'east', 'far_east'];
+
+            console.log('Loading regions:', regions);
 
             var totalsPromise = Promise.all(
                 regions.map(function(region) {
@@ -2390,17 +2439,40 @@
                 closeWelcomeModal();
             }
         }
+        var isMobileDevice = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+        var selectedMobileRegion = null;
+
         function startFromWelcome() {
             if (dataLoaded) {
                 closeWelcomeModal();
                 return;
             }
+
+            // Mobile: show region selector instead of loading everything
+            if (isMobileDevice && !selectedMobileRegion) {
+                document.getElementById('welcomeModal').classList.remove('active');
+                document.getElementById('regionSelectorModal').classList.add('active');
+                return;
+            }
+
             var btn = document.getElementById('welcomeStartBtn');
             if (btn && !waitingToStart) {
                 waitingToStart = true;
                 btn.disabled = true;
                 btn.innerHTML = '<span class="btn-spinner"></span>Chargement&hellip;';
             }
+        }
+
+        function loadMobileRegion(regionName) {
+            selectedMobileRegion = regionName;
+            document.getElementById('regionSelectorModal').classList.remove('active');
+
+            var btn = document.getElementById('welcomeStartBtn');
+            if (btn) {
+                btn.disabled = true;
+                btn.innerHTML = '<span class="btn-spinner"></span>Chargement&hellip;';
+            }
+            waitingToStart = true;
         }
 
         // Initialize map
