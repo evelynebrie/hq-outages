@@ -1441,17 +1441,27 @@
 
         // Mobile viewport-based loading: get regions visible in current map viewport
         function getVisibleRegions() {
-            var bounds = map.getBounds();
-            var viewportBounds = [bounds.getWest(), bounds.getSouth(), bounds.getEast(), bounds.getNorth()];
-            var visible = [];
-            for (var region in REGION_BOUNDS) {
-                var rb = REGION_BOUNDS[region];
-                if (!(viewportBounds[2] < rb[0] || viewportBounds[0] > rb[2] ||
-                      viewportBounds[3] < rb[1] || viewportBounds[1] > rb[3])) {
-                    visible.push(region);
+            try {
+                if (!map || !map.getBounds) {
+                    // Map not ready, return default regions for mobile
+                    console.log('Map not ready, using default regions');
+                    return ['east', 'central_east'];
                 }
+                var bounds = map.getBounds();
+                var viewportBounds = [bounds.getWest(), bounds.getSouth(), bounds.getEast(), bounds.getNorth()];
+                var visible = [];
+                for (var region in REGION_BOUNDS) {
+                    var rb = REGION_BOUNDS[region];
+                    if (!(viewportBounds[2] < rb[0] || viewportBounds[0] > rb[2] ||
+                          viewportBounds[3] < rb[1] || viewportBounds[1] > rb[3])) {
+                        visible.push(region);
+                    }
+                }
+                return visible.length > 0 ? visible : ['east', 'central_east'];
+            } catch (e) {
+                console.error('Error getting visible regions:', e);
+                return ['east', 'central_east'];
             }
-            return visible;
         }
 
         // Load specific regions and merge into allData.total
@@ -1497,8 +1507,18 @@
 
         // Load regions visible in viewport
         async function loadVisibleRegions() {
-            var visible = getVisibleRegions();
-            await loadRegions(visible);
+            try {
+                var visible = getVisibleRegions();
+                if (visible.length === 0) {
+                    console.warn('No visible regions detected, loading default');
+                    visible = ['east', 'central_east'];
+                }
+                await loadRegions(visible);
+            } catch (e) {
+                console.error('Error in loadVisibleRegions:', e);
+                // Fallback: load safe default regions
+                await loadRegions(['east', 'central_east']);
+            }
         }
 
         // Parallel load: regional totals + current outages. Desktop loads all, mobile uses viewport.
@@ -1541,13 +1561,15 @@
 
             // Gather all available dates
             var dateSet = new Set();
-            allData.total.features.forEach(function(f) {
-                if (!f.properties.all_datetimes) return;
-                f.properties.all_datetimes.split(',').forEach(function(dt) {
-                    var d = dt.trim().split(' ')[0];
-                    if (d) dateSet.add(d);
+            if (allData.total && allData.total.features) {
+                allData.total.features.forEach(function(f) {
+                    if (!f.properties.all_datetimes) return;
+                    f.properties.all_datetimes.split(',').forEach(function(dt) {
+                        var d = dt.trim().split(' ')[0];
+                        if (d) dateSet.add(d);
+                    });
                 });
-            });
+            }
             availableDates = Array.from(dateSet).sort();
 
             // Initialize calendar on the most recent month with data
