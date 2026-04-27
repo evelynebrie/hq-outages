@@ -1359,7 +1359,7 @@
             container.innerHTML =
                 '<div class="scale-labels"><span>Faible</span><span>Élevée</span></div>' +
                 '<div class="gradient-bar">' + barHtml + '</div>' +
-                '<div class="range-labels"><span>' + minLabel + '</span><span>' + q.max + '+</span></div>';
+                '<div class="range-labels"><span>' + minLabel + '</span><span>' + (q.q4 + 1) + '+</span></div>';
 
             if (footer) {
                 var p1 = "Les hexagones sont classés en 5 niveaux d'intensité par quintiles, chacun représentant 20&nbsp;% du total. Les seuils, exprimés en nombre d'occurrences de 15 minutes, sont les suivants&nbsp;: impact faible (" +
