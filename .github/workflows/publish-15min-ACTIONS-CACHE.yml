@@ -17,7 +17,6 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 30  # Normal runs complete in 5-7 min. Fast-fail stuck runners so queue doesn't block for hours.
 
     steps:
       - uses: actions/checkout@v3
