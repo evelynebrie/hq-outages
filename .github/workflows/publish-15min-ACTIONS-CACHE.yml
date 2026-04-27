@@ -34,12 +34,16 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libgdal-dev libgeos-dev libproj-dev libudunits2-dev jq curl
 
+      - name: Get R version
+        id: r-version
+        run: echo "version=$(R --version | head -n1 | awk '{print $3}')" >> $GITHUB_OUTPUT
+
       - name: Cache R packages
         uses: actions/cache@v3
         with:
           path: ${{ env.R_LIBS_USER }}
-          key: ${{ runner.os }}-r-packages-15min-v1
-          restore-keys: ${{ runner.os }}-r-
+          key: ${{ runner.os }}-r-${{ steps.r-version.outputs.version }}-packages-15min-v2
+          restore-keys: ${{ runner.os }}-r-${{ steps.r-version.outputs.version }}-packages-15min-
 
       - name: Install R packages
         run: |
