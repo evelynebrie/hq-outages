@@ -112,21 +112,14 @@
             letter-spacing: 0.02em;
         }
 
-        /* Legend */
+        /* Legend — embedded as a sub-section inside the Statistiques panel */
         .legend {
-            position: absolute;
-            bottom: 30px;
-            right: 10px;
-            min-width: 240px;
-            max-width: 320px;
+            margin-top: 18px;
+            padding-top: 16px;
+            border-top: 1px solid #e5e7eb;
             font-size: 13px;
             line-height: 22px;
             color: #374151;
-            background: white;
-            padding: 18px 22px;
-            border-radius: 12px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-            z-index: 1;
         }
         .legend i { width:20px; height:20px; float:left; margin-right:10px; opacity:0.9; border-radius: 3px; }
         .legend h4 { margin:0; font-size:15px; color:#111827; }
@@ -943,7 +936,7 @@
         @media (max-width: 640px) {
             /* Map takes the viewport — stats and legend are hidden on phones
                to keep the focus on the map and filter sheet. */
-            .info, .legend { display: none !important; }
+            .info { display: none !important; }
 
             /* Affichage panel becomes a bottom drawer. Starts collapsed (only
                header visible) and expands on tap. Scrolls internally. */
@@ -1094,12 +1087,12 @@
             <div>Hexagones d'1&nbsp;km &middot; <span id="daysCount">&mdash;</span>&nbsp;jours analysés</div>
             <div><strong>1 occurrence = 1 panne de 15 minutes</strong></div>
         </div>
-    </div>
 
-    <div class="legend" id="legend">
-        <h4 class="panel-title">Intensité des pannes</h4>
-        <div id="legendItems"><div style="font-size:12px;color:#999;">Chargement...</div></div>
-        <div id="legendFooter" style="font-size:11px;color:#666;margin-top:14px;line-height:1.4;"></div>
+        <div class="legend" id="legend">
+            <h4 class="panel-title">Intensité des pannes</h4>
+            <div id="legendItems"><div style="font-size:12px;color:#999;">Chargement...</div></div>
+            <div id="legendFooter" style="font-size:11px;color:#666;margin-top:14px;line-height:1.4;"></div>
+        </div>
     </div>
 
     <div class="controls">
