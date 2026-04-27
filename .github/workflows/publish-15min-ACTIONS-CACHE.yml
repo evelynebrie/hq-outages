@@ -31,7 +31,7 @@ jobs:
         timeout-minutes: 10  # normally 2-3 min; catches apt hangs on slow disks
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgdal-dev libgeos-dev libproj-dev libudunits2-dev jq curl
+          sudo apt-get install -y libgdal-dev libgeos-dev libproj-dev libudunits2-dev libuv1-dev jq curl
 
       - name: Get R version
         id: r-version
