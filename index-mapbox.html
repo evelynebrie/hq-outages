@@ -675,19 +675,6 @@
         .close-modal { position:absolute; top:10px; right:15px; font-size:24px; cursor:pointer; color:#999; }
         .close-modal:hover { color:#333; }
 
-        /* Region selector (mobile only) */
-        .region-selector-modal { max-width: 500px; }
-        .region-grid { display: grid; gap: 12px; }
-        .region-btn {
-            display: flex; flex-direction: column; align-items: flex-start;
-            padding: 14px 16px; background: #f9fafb; border: 2px solid #e5e7eb;
-            border-radius: 8px; cursor: pointer; transition: all 0.2s;
-            font-family: inherit; text-align: left; width: 100%;
-        }
-        .region-btn:hover { background: #fff; border-color: #3b82f6; transform: translateY(-1px); box-shadow: 0 2px 8px rgba(59, 130, 246, 0.1); }
-        .region-btn strong { font-size: 14px; color: #111827; margin-bottom: 4px; }
-        .region-btn small { font-size: 12px; color: #6b7280; font-weight: normal; }
-
         .mapboxgl-ctrl-geocoder { max-width: 300px; }
 
         /* Info button (FAQ trigger) */
@@ -1194,36 +1181,6 @@
             <img src="logos/udem-logo.svg" alt="Université de Montréal">
         </div>
     </div>
-    <div id="regionSelectorModal" class="detail-modal region-selector-modal">
-        <h2>Choisir une région</h2>
-        <p style="margin-bottom: 20px; color: #6b7280; font-size: 14px;">Pour optimiser les performances sur mobile, veuillez sélectionner la région que vous souhaitez consulter.</p>
-        <div class="region-grid">
-            <button class="region-btn" onclick="loadMobileRegion('west')">
-                <strong>Abitibi-Témiscamingue / Outaouais ouest</strong>
-                <small>Rouyn-Noranda, Val-d'Or</small>
-            </button>
-            <button class="region-btn" onclick="loadMobileRegion('central_west')">
-                <strong>Outaouais / Laurentides</strong>
-                <small>Gatineau, Mont-Tremblant</small>
-            </button>
-            <button class="region-btn" onclick="loadMobileRegion('central')">
-                <strong>Montréal / Lanaudière</strong>
-                <small>Montréal, Laval, Joliette</small>
-            </button>
-            <button class="region-btn" onclick="loadMobileRegion('central_east')">
-                <strong>Mauricie / Capitale-Nationale ouest</strong>
-                <small>Trois-Rivières, Portneuf</small>
-            </button>
-            <button class="region-btn" onclick="loadMobileRegion('east')">
-                <strong>Capitale-Nationale / Saguenay</strong>
-                <small>Québec, Chicoutimi</small>
-            </button>
-            <button class="region-btn" onclick="loadMobileRegion('far_east')">
-                <strong>Bas-Saint-Laurent / Gaspésie / Côte-Nord</strong>
-                <small>Rimouski, Gaspé, Sept-Îles</small>
-            </button>
-        </div>
-    </div>
     <div id="detailModal" class="detail-modal">
         <span class="close-modal" onclick="closeDetailModal()">×</span>
         <div id="modalContent"></div>
@@ -1294,6 +1251,11 @@
         var currentFeatures = null;
         var quartileBreaks = null;
         var QUARTILE_COLORS = ['#fee0d2', '#fcbba1', '#fc9272', '#ef3b2c', '#a50f15'];
+
+        // Mobile path: same data, same UI, but loaded with a memory-safe
+        // strategy so iOS Safari / Chrome don't OOM on the ~110 MB of
+        // regional GeoJSON + ~145 MB of dailies. Desktop is unchanged.
+        var isMobileDevice = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
 
         function hideLoader() {
             var el = document.getElementById('mapLoader');
@@ -1467,18 +1429,36 @@
         // Parallel load: regional totals + current outages. Map shows as soon as totals ready.
         async function loadCoreData() {
             setLoaderText('Chargement des données...');
-            // Mobile: load only selected region. Desktop: load all regions
-            var regions = (isMobileDevice && selectedMobileRegion)
-                ? [selectedMobileRegion]
-                : ['west', 'central_west', 'central', 'central_east', 'east', 'far_east'];
+            var regions = ['west', 'central_west', 'central', 'central_east', 'east', 'far_east'];
 
             console.log('Loading regions:', regions);
 
-            var totalsPromise = Promise.all(
-                regions.map(function(region) {
-                    return fetch('total/total_exposure_' + region + '.geojson').then(function(r) { return r.json(); });
-                })
-            );
+            // Mobile fetches regions one at a time and discards each raw
+            // response object before parsing the next, so peak memory is
+            // bounded by the largest single region (~46 MB) instead of
+            // all six in flight. Desktop keeps the parallel path.
+            var totalsPromise;
+            if (isMobileDevice) {
+                totalsPromise = (async function() {
+                    var out = [];
+                    for (var i = 0; i < regions.length; i++) {
+                        setLoaderText('Chargement (' + (i + 1) + '/' + regions.length + ')...');
+                        var resp = await fetch('total/total_exposure_' + regions[i] + '.geojson');
+                        if (!resp.ok) throw new Error('Failed to load region ' + regions[i] + ' (' + resp.status + ')');
+                        out.push(await resp.json());
+                        // Yield so the GC can reclaim transient buffers
+                        // before the next file lands.
+                        await new Promise(function(res) { setTimeout(res, 0); });
+                    }
+                    return out;
+                })();
+            } else {
+                totalsPromise = Promise.all(
+                    regions.map(function(region) {
+                        return fetch('total/total_exposure_' + region + '.geojson').then(function(r) { return r.json(); });
+                    })
+                );
+            }
             var currentPromise = fetch('current.geojson').then(function(r) {
                 return r.ok ? r.json() : { type: 'FeatureCollection', features: [] };
             }).catch(function() { return { type: 'FeatureCollection', features: [] }; });
@@ -1552,6 +1532,11 @@
                 } catch (e) { /* silent */ }
             }
 
+            // On mobile, stop here: past-day files are fetched on demand
+            // when the user picks them in the calendar (see ensureDailyLoaded).
+            // The end-state is identical to desktop, just paid lazily.
+            if (isMobileDevice) return;
+
             var remaining = dates.filter(function(d) { return d !== todayDate; });
             var promises = remaining.map(function(date) {
                 return fetch('daily/daily_' + date + '.geojson')
@@ -1561,6 +1546,20 @@
             });
             await Promise.all(promises);
             console.log('All daily files loaded');
+        }
+
+        // Fetch a single daily file on demand and cache it. Used by the
+        // mobile path when the user clicks a date that hasn't been loaded
+        // yet. Safe to call repeatedly — a hit on the cache is a no-op.
+        function ensureDailyLoaded(date, callback) {
+            if (allData.daily[date]) { if (callback) callback(); return; }
+            fetch('daily/daily_' + date + '.geojson')
+                .then(function(r) { return r.ok ? r.json() : null; })
+                .then(function(data) {
+                    if (data) allData.daily[date] = data;
+                    if (callback) callback();
+                })
+                .catch(function() { if (callback) callback(); });
         }
 
         // Round up to a "nice" Y-axis ceiling.
@@ -1678,7 +1677,16 @@
 
         function setView(view, date) {
             currentView = view;
-            if (view === 'day' && date) currentDate = date;
+            if (view === 'day' && date) {
+                currentDate = date;
+                // Mobile only: fetch the daily file if it isn't cached
+                // yet, then re-render. Desktop has them all preloaded.
+                if (isMobileDevice && !allData.daily[date]) {
+                    ensureDailyLoaded(date, function() {
+                        if (currentView === 'day' && currentDate === date) updateMap();
+                    });
+                }
+            }
             updateSelectionUI();
             updateMap();
         }
@@ -2432,19 +2440,9 @@
                 closeWelcomeModal();
             }
         }
-        var isMobileDevice = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-        var selectedMobileRegion = null;
-
         function startFromWelcome() {
             if (dataLoaded) {
                 closeWelcomeModal();
-                return;
-            }
-
-            // Mobile: show region selector instead of loading everything
-            if (isMobileDevice && !selectedMobileRegion) {
-                document.getElementById('welcomeModal').classList.remove('active');
-                document.getElementById('regionSelectorModal').classList.add('active');
                 return;
             }
 
@@ -2454,18 +2452,6 @@
                 btn.disabled = true;
                 btn.innerHTML = '<span class="btn-spinner"></span>Chargement&hellip;';
             }
-        }
-
-        function loadMobileRegion(regionName) {
-            selectedMobileRegion = regionName;
-            document.getElementById('regionSelectorModal').classList.remove('active');
-
-            var btn = document.getElementById('welcomeStartBtn');
-            if (btn) {
-                btn.disabled = true;
-                btn.innerHTML = '<span class="btn-spinner"></span>Chargement&hellip;';
-            }
-            waitingToStart = true;
         }
 
         // Initialize map
