@@ -1433,32 +1433,11 @@
 
             console.log('Loading regions:', regions);
 
-            // Mobile fetches regions one at a time and discards each raw
-            // response object before parsing the next, so peak memory is
-            // bounded by the largest single region (~46 MB) instead of
-            // all six in flight. Desktop keeps the parallel path.
-            var totalsPromise;
-            if (isMobileDevice) {
-                totalsPromise = (async function() {
-                    var out = [];
-                    for (var i = 0; i < regions.length; i++) {
-                        setLoaderText('Chargement (' + (i + 1) + '/' + regions.length + ')...');
-                        var resp = await fetch('total/total_exposure_' + regions[i] + '.geojson');
-                        if (!resp.ok) throw new Error('Failed to load region ' + regions[i] + ' (' + resp.status + ')');
-                        out.push(await resp.json());
-                        // Yield so the GC can reclaim transient buffers
-                        // before the next file lands.
-                        await new Promise(function(res) { setTimeout(res, 0); });
-                    }
-                    return out;
-                })();
-            } else {
-                totalsPromise = Promise.all(
-                    regions.map(function(region) {
-                        return fetch('total/total_exposure_' + region + '.geojson').then(function(r) { return r.json(); });
-                    })
-                );
-            }
+            var totalsPromise = Promise.all(
+                regions.map(function(region) {
+                    return fetch('total/total_exposure_' + region + '.geojson').then(function(r) { return r.json(); });
+                })
+            );
             var currentPromise = fetch('current.geojson').then(function(r) {
                 return r.ok ? r.json() : { type: 'FeatureCollection', features: [] };
             }).catch(function() { return { type: 'FeatureCollection', features: [] }; });
