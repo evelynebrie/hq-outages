@@ -1427,11 +1427,14 @@
         }
 
         // Parallel load: regional totals + current outages. Map shows as soon as totals ready.
+        var coreDataPromise = null;
         async function loadCoreData() {
+            // Mapbox can fire 'load' twice on some mobile browsers; guard
+            // against re-entry so we don't pull 220 MB of GeoJSON twice.
+            if (coreDataPromise) return coreDataPromise;
+            coreDataPromise = (async function() {
             setLoaderText('Chargement des données...');
             var regions = ['west', 'central_west', 'central', 'central_east', 'east', 'far_east'];
-
-            console.log('Loading regions:', regions);
 
             var totalsPromise = Promise.all(
                 regions.map(function(region) {
@@ -1490,6 +1493,8 @@
             }
 
             return availableDates;
+            })();
+            return coreDataPromise;
         }
 
         // Parallel load of per-day files (in background, non-blocking).
@@ -1833,10 +1838,20 @@
         function renderCalendar() {
             if (!calendarMonth || availableDates.length === 0) return;
 
+            // The calendar UI sometimes isn't in the DOM yet when this
+            // first runs (mobile prerender / preview contexts). Bail
+            // quietly if so — it'll re-render on the next tick when
+            // setView/navigateMonth fires.
+            var monthLabelEl = document.getElementById('monthLabel');
+            var prevMonthEl  = document.getElementById('prevMonth');
+            var nextMonthEl  = document.getElementById('nextMonth');
+            var grid         = document.getElementById('daysGrid');
+            if (!monthLabelEl || !prevMonthEl || !nextMonthEl || !grid) return;
+
             // Update month label (French)
             var MONTHS = ['janvier','février','mars','avril','mai','juin','juillet','août','septembre','octobre','novembre','décembre'];
             var label = MONTHS[calendarMonth.getMonth()] + ' ' + calendarMonth.getFullYear();
-            document.getElementById('monthLabel').textContent = label;
+            monthLabelEl.textContent = label;
 
             // Disable prev/next based on available range
             var minD = availableDates[0];
@@ -1844,10 +1859,9 @@
             var firstShown = dateStr(calendarMonth.getFullYear(), calendarMonth.getMonth(), 1);
             var lastShown = dateStr(calendarMonth.getFullYear(), calendarMonth.getMonth(),
                 new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 0).getDate());
-            document.getElementById('prevMonth').disabled = firstShown <= minD;
-            document.getElementById('nextMonth').disabled = lastShown >= maxD;
+            prevMonthEl.disabled = firstShown <= minD;
+            nextMonthEl.disabled = lastShown >= maxD;
 
-            var grid = document.getElementById('daysGrid');
             // Remove old day cells but keep the 7 headers
             grid.querySelectorAll('.day').forEach(function(el) { el.remove(); });
 
@@ -2516,7 +2530,8 @@
                     setTimeout(function() { showDetails(r.properties.hex_id); }, 450);
                 }
             });
-            document.getElementById('geocoderContainer').appendChild(geocoder.onAdd(map));
+            var geocoderContainer = document.getElementById('geocoderContainer');
+            if (geocoderContainer) geocoderContainer.appendChild(geocoder.onAdd(map));
             map.addControl(new mapboxgl.NavigationControl(), 'bottom-left');
 
             map.on('click', 'hex-layer', function(e) {
