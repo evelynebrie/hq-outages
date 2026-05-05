@@ -2434,17 +2434,14 @@
             }
         }
         function startFromWelcome() {
-            if (dataLoaded) {
-                closeWelcomeModal();
-                return;
-            }
-
-            var btn = document.getElementById('welcomeStartBtn');
-            if (btn && !waitingToStart) {
-                waitingToStart = true;
-                btn.disabled = true;
-                btn.innerHTML = '<span class="btn-spinner"></span>Chargement&hellip;';
-            }
+            // Close the modal immediately. If data isn't ready yet, the
+            // map's own loader (#mapLoader spinner) takes over and the UI
+            // populates as data arrives. This avoids gating the user
+            // behind a modal that can hang for many seconds on mobile,
+            // and behaves identically to the old "fast" path on browser
+            // (where data is usually already loaded by the time the user
+            // clicks anyway).
+            closeWelcomeModal();
         }
 
         // Initialize map
