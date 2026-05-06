@@ -1489,10 +1489,10 @@
             setLoaderText('Chargement des données...');
             var regions = ['west', 'central_west', 'central', 'central_east', 'east', 'far_east'];
 
-            // Mobile only: track total progress across regions + dailies so
-            // the spinner shows a single 0-100% that ends only when EVERYTHING
-            // is loaded. Regions count for 50% (they're the bulk of the byte
-            // weight); dailies count for 50% (handled in loadDailyDataInBackground).
+            // Mobile only: percentage progress across the 6 regional files,
+            // 0 % → 100 %. The map is fully usable once these are done.
+            // Daily files continue silently in the background (they only
+            // affect calendar intensity colors / hourly chart, not the map).
             // Browser keeps the original silent parallel fetch.
             var loadedRegions = 0;
             if (isMobileDevice) {
@@ -1505,7 +1505,7 @@
                         .then(function(data) {
                             if (isMobileDevice) {
                                 loadedRegions++;
-                                var pct = Math.round((loadedRegions / regions.length) * 50);
+                                var pct = Math.round((loadedRegions / regions.length) * 100);
                                 setLoaderText('Chargement des données… ' + pct + ' %');
                             }
                             return data;
@@ -1570,27 +1570,12 @@
 
         // Parallel load of per-day files (in background, non-blocking).
         async function loadDailyDataInBackground(dates) {
-            // Load today (most recent date) first so the hourly chart can
-            // render ASAP without waiting for the full historical backfill.
+            // The map is already up at this point — these files only feed
+            // the hourly chart and the calendar's per-day intensity colors,
+            // so they load silently. The spinner has been hidden by the
+            // caller; setLoaderText updates would not be visible anyway.
             var sortedDates = dates.slice().sort();
             var todayDate = sortedDates[sortedDates.length - 1];
-            var totalDaily = sortedDates.length;
-            var loadedDaily = 0;
-
-            // Mobile only: each daily contributes to the second 50% of the
-            // total progress bar (regions = first 50%). Browser keeps the
-            // original silent behaviour.
-            function bumpDailyProgress() {
-                if (!isMobileDevice) return;
-                loadedDaily++;
-                var pct = 50 + Math.round((loadedDaily / totalDaily) * 50);
-                setLoaderText('Chargement des données… ' + pct + ' %');
-            }
-
-            if (!isMobileDevice) {
-                setLoaderText('Chargement des données quotidiennes...');
-            }
-
             if (todayDate) {
                 try {
                     var r = await fetch('daily/daily_' + todayDate + '.geojson');
@@ -1600,7 +1585,6 @@
                         renderHourlyChart(todayDate);
                     }
                 } catch (e) { /* silent */ }
-                bumpDailyProgress();
             }
 
             var remaining = dates.filter(function(d) { return d !== todayDate; });
@@ -1608,8 +1592,7 @@
                 return fetch('daily/daily_' + date + '.geojson')
                     .then(function(r) { return r.ok ? r.json() : null; })
                     .then(function(data) { if (data) allData.daily[date] = data; })
-                    .catch(function() {})
-                    .then(bumpDailyProgress);
+                    .catch(function() {});
             });
             await Promise.all(promises);
             console.log('All daily files loaded');
@@ -2532,16 +2515,10 @@
             try {
                 var dates = await loadCoreData();
                 updateMap();
+                hideLoader();
                 onDataLoaded();
-                var dailyPromise = loadDailyDataInBackground(dates);
-                if (isMobileDevice) {
-                    // Mobile: keep the spinner visible until 100 % means
-                    // EVERYTHING (regions + dailies) is actually loaded.
-                    dailyPromise.then(hideLoader);
-                } else {
-                    // Browser: hide spinner immediately, dailies finish silently.
-                    hideLoader();
-                }
+                // Kick off per-day loads in the background so date filters work soon
+                loadDailyDataInBackground(dates);
             } catch (e) {
                 console.error('Error loading data:', e);
                 setLoaderText('Erreur de chargement');
