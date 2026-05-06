@@ -1310,11 +1310,6 @@
         // regional GeoJSON + ~145 MB of dailies. Desktop is unchanged.
         var isMobileDevice = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
 
-        // Mobile only: register pmtiles protocol with Mapbox and add a
-        // vector source pointing at total/quebec.pmtiles. The hex layer
-        // renders from this source so the user sees Quebec almost
-        // immediately, without a 145 MB main-thread JSON.parse blocking
-        // the UI thread. Browser does not call this and never loads pmtiles.
         function hideLoader() {
             var el = document.getElementById('mapLoader');
             if (el) el.classList.add('hidden');
@@ -1497,10 +1492,7 @@
             // Mobile fetches the 6 regional files SEQUENTIALLY so peak
             // memory stays bounded by one in-flight parse (~30-60 MB)
             // instead of all six at once (~400-500 MB which OOMs Safari).
-            // The map already shows from the pmtiles source by this point,
-            // so this work is purely background JS-side enrichment for
-            // stats / calendar / click history. Browser keeps the parallel
-            // fetch.
+            // Browser keeps the parallel fetch.
             var loadedRegions = 0;
             if (isMobileDevice) {
                 setLoaderText('Chargement des données… 0 %');
