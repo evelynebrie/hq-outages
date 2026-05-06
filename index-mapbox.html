@@ -10,7 +10,6 @@
     <script src="https://api.mapbox.com/mapbox-gl-js/plugins/mapbox-gl-geocoder/v5.0.0/mapbox-gl-geocoder.min.js"></script>
     <link rel="stylesheet" href="https://api.mapbox.com/mapbox-gl-js/plugins/mapbox-gl-geocoder/v5.0.0/mapbox-gl-geocoder.css" type="text/css">
     <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
-    <script src="https://unpkg.com/pmtiles@3.0.6/dist/pmtiles.js"></script>
     <script data-goatcounter="https://ebudem.goatcounter.com/count"
             async src="//gc.zgo.at/count.js"></script>
     <style>
@@ -1068,9 +1067,6 @@
 <body>
     <div id="map"></div>
 
-    <!-- Mobile-only on-screen debug log (visible until pmtiles works). -->
-    <div id="mobileDebug" style="display:none;position:fixed;left:0;right:0;bottom:0;max-height:35vh;overflow-y:auto;background:rgba(0,0,0,0.85);color:#fff;font:11px/1.35 ui-monospace,Menlo,monospace;padding:8px 10px 14px;z-index:9999;white-space:pre-wrap;word-break:break-word;"></div>
-
     <div id="mapLoader" class="map-loader">
         <div class="spinner"></div>
         <div class="map-loader-text">Chargement des données...</div>
@@ -1319,104 +1315,6 @@
         // renders from this source so the user sees Quebec almost
         // immediately, without a 145 MB main-thread JSON.parse blocking
         // the UI thread. Browser does not call this and never loads pmtiles.
-        // Mobile-only on-screen debug log so we can read diagnostic
-        // output without connecting to Safari Web Inspector.
-        function dbg(msg) {
-            console.log(msg);
-            if (!isMobileDevice) return;
-            var el = document.getElementById('mobileDebug');
-            if (!el) return;
-            el.style.display = 'block';
-            var ts = new Date().toISOString().substr(11, 8);
-            el.textContent += '[' + ts + '] ' + msg + '\n';
-            el.scrollTop = el.scrollHeight;
-        }
-
-        function initMobileVectorTiles() {
-            dbg('[pmtiles] init called. typeof pmtiles=' + (typeof pmtiles));
-            if (typeof pmtiles === 'undefined') {
-                dbg('[pmtiles] plugin NOT loaded — bail out');
-                return;
-            }
-            try {
-                dbg('[pmtiles] globals=' + Object.keys(pmtiles).join(','));
-            } catch (e) { dbg('[pmtiles] globals enumeration failed: ' + e.message); }
-            try {
-                var protocol = new pmtiles.Protocol();
-                dbg('[pmtiles] Protocol() ok');
-                mapboxgl.addProtocol('pmtiles', protocol.tile);
-                dbg('[pmtiles] addProtocol ok');
-            } catch (e) {
-                dbg('[pmtiles] protocol/addProtocol FAILED: ' + e.message);
-                return;
-            }
-
-            map.on('sourcedata', function(e) {
-                if (e.sourceId === 'hex-pmtiles') {
-                    dbg('[pmtiles] sourcedata isLoaded=' + e.isSourceLoaded);
-                }
-            });
-            map.on('error', function(e) {
-                var msg = '[pmtiles] map error';
-                if (e && e.error) msg += ': ' + (e.error.message || e.error);
-                if (e && e.sourceId) msg += ' (source=' + e.sourceId + ')';
-                dbg(msg);
-            });
-
-            var pmtilesUrl = 'pmtiles://' + window.location.origin + '/total/quebec.pmtiles';
-            dbg('[pmtiles] Source URL=' + pmtilesUrl);
-            try {
-                map.addSource('hex-pmtiles', { type: 'vector', url: pmtilesUrl });
-                dbg('[pmtiles] addSource ok');
-            } catch (e) {
-                dbg('[pmtiles] addSource FAILED: ' + e.message);
-                return;
-            }
-            // Provisional gradient based on total_occurrences. Once the
-            // sequential GeoJSON parse computes real quartiles, we switch
-            // to those (see updateMobileTilesPaint).
-            map.addLayer({
-                id: 'hex-pmtiles-fill',
-                type: 'fill',
-                source: 'hex-pmtiles',
-                'source-layer': 'hexagons',
-                paint: {
-                    'fill-color': [
-                        'step', ['get', 'total_occurrences'],
-                        '#fee0d2',
-                        4, '#fcbba1',
-                        12, '#fc9272',
-                        30, '#ef3b2c',
-                        100, '#a50f15'
-                    ],
-                    'fill-opacity': 0.75
-                }
-            });
-            map.addLayer({
-                id: 'hex-pmtiles-line',
-                type: 'line',
-                source: 'hex-pmtiles',
-                'source-layer': 'hexagons',
-                paint: { 'line-color': '#fff', 'line-width': 0.4 }
-            });
-        }
-
-        // Once quartileBreaks is computed from the sequential JS parse,
-        // switch the pmtiles layer's paint to use the same thresholds as
-        // the GeoJSON-based desktop layer for visual parity.
-        function updateMobileTilesPaint() {
-            if (!isMobileDevice || !quartileBreaks || !map.getLayer('hex-pmtiles-fill')) return;
-            var q = quartileBreaks;
-            map.setPaintProperty('hex-pmtiles-fill', 'fill-color', [
-                'step', ['get', 'total_occurrences'],
-                QUARTILE_COLORS[0],
-                q.q1 + 1, QUARTILE_COLORS[1],
-                q.q2 + 1, QUARTILE_COLORS[2],
-                q.q3 + 1, QUARTILE_COLORS[3],
-                q.q4 + 1, QUARTILE_COLORS[4]
-            ]);
-        }
-
         function hideLoader() {
             var el = document.getElementById('mapLoader');
             if (el) el.classList.add('hidden');
@@ -1650,8 +1548,6 @@
             updateLegend();
             updateStatsPanel();
             updateCurrentBadge();
-            // Mobile only: refresh pmtiles layer paint to match desktop quartiles.
-            updateMobileTilesPaint();
 
             // Gather all available dates
             var dateSet = new Set();
@@ -1912,35 +1808,12 @@
             return filtered;
         }
 
-        function setMobileTilesVisible(visible) {
-            if (!isMobileDevice) return;
-            var v = visible ? 'visible' : 'none';
-            if (map.getLayer('hex-pmtiles-fill')) map.setLayoutProperty('hex-pmtiles-fill', 'visibility', v);
-            if (map.getLayer('hex-pmtiles-line')) map.setLayoutProperty('hex-pmtiles-line', 'visibility', v);
-        }
-
         function updateMap() {
             if (currentView === 'none') {
                 if (map.getLayer('hex-layer')) map.setLayoutProperty('hex-layer', 'visibility', 'none');
                 if (map.getLayer('hex-outline')) map.setLayoutProperty('hex-outline', 'visibility', 'none');
-                setMobileTilesVisible(false);
                 return;
             }
-
-            // Mobile only: in 'all' view, render from pmtiles vector tiles
-            // (no GeoJSON setData on mobile — it would re-trigger the OOM
-            // we're trying to avoid). 'current' and 'day' views use the
-            // standard GeoJSON path below since those datasets are small.
-            if (isMobileDevice && currentView === 'all') {
-                setMobileTilesVisible(true);
-                if (map.getLayer('hex-layer')) map.setLayoutProperty('hex-layer', 'visibility', 'none');
-                if (map.getLayer('hex-outline')) map.setLayoutProperty('hex-outline', 'visibility', 'none');
-                return;
-            }
-            // For other mobile views, the pmtiles layer is hidden so the
-            // GeoJSON-based hex-layer below can take over.
-            setMobileTilesVisible(false);
-
             if (map.getLayer('hex-layer')) map.setLayoutProperty('hex-layer', 'visibility', 'visible');
             if (map.getLayer('hex-outline')) map.setLayoutProperty('hex-outline', 'visibility', 'visible');
 
@@ -2663,15 +2536,6 @@
         // Initialize map
         map.on('load', async function() {
             try {
-                // Mobile fast-path: load hexes via vector tiles (pmtiles).
-                // The map paints in ~1-2 sec without OOM-risk main-thread
-                // GeoJSON parsing. JS-side data (stats, calendar, click
-                // history) is then populated from sequential GeoJSON fetches
-                // that bound peak memory. Browser is unaffected by this.
-                if (isMobileDevice) {
-                    initMobileVectorTiles();
-                }
-
                 var dates = await loadCoreData();
                 updateMap();
 
@@ -2830,14 +2694,6 @@
             map.on('click', 'hex-layer', onHexClick);
             map.on('mouseenter', 'hex-layer', hexHoverEnter);
             map.on('mouseleave', 'hex-layer', hexHoverLeave);
-
-            // Mobile only: bind the same handlers to the pmtiles layer that
-            // renders the 'all' view so popups still work over the vector tiles.
-            if (isMobileDevice && map.getLayer('hex-pmtiles-fill')) {
-                map.on('click', 'hex-pmtiles-fill', onHexClick);
-                map.on('mouseenter', 'hex-pmtiles-fill', hexHoverEnter);
-                map.on('mouseleave', 'hex-pmtiles-fill', hexHoverLeave);
-            }
         });
     </script>
 </body>

@@ -490,47 +490,6 @@ jobs:
             echo "   Cache is saved in Actions cache for next run!"
           fi
 
-      - name: Install tippecanoe (vector tile generator for mobile)
-        run: |
-          if ! command -v tippecanoe >/dev/null 2>&1; then
-            echo "Installing tippecanoe…"
-            sudo apt-get update -qq
-            sudo apt-get install -y tippecanoe
-          else
-            echo "tippecanoe already installed: $(tippecanoe -v)"
-          fi
-
-      - name: Generate quebec.pmtiles for mobile fast-path
-        run: |
-          set -e
-          mkdir -p public/total
-          GEOJSON_FILES=$(ls public/total/total_exposure_*.geojson 2>/dev/null | grep -v _slim || true)
-          if [ -z "$GEOJSON_FILES" ]; then
-            echo "⚠️  No regional GeoJSON files found, skipping pmtiles generation"
-            exit 0
-          fi
-
-          echo "Building public/total/quebec.pmtiles from:"
-          echo "$GEOJSON_FILES"
-
-          tippecanoe \
-            -o public/total/quebec.pmtiles \
-            --force \
-            --layer=hexagons \
-            --minimum-zoom=4 \
-            --maximum-zoom=12 \
-            --drop-densest-as-needed \
-            --extend-zooms-if-still-dropping \
-            --no-tile-size-limit \
-            --no-feature-limit \
-            --exclude=all_datetimes \
-            --exclude=first_occurrence \
-            --exclude=last_occurrence \
-            $GEOJSON_FILES
-
-          ls -lh public/total/quebec.pmtiles
-          echo "✅ quebec.pmtiles generated"
-
       - name: Display summary statistics
         run: |
           echo "📊 Summary Statistics:"
