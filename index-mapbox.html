@@ -2515,6 +2515,33 @@
             try {
                 var dates = await loadCoreData();
                 updateMap();
+
+                // Mobile only: after addSource returns, Mapbox still needs
+                // a couple of seconds in its worker thread to process the
+                // 114k hexes before they actually paint. Wait for that
+                // before hiding the spinner — otherwise 100% is reached
+                // but the map is still empty for 2-3 sec.
+                if (isMobileDevice) {
+                    await new Promise(function(resolve) {
+                        if (map.isSourceLoaded && map.isSourceLoaded('hex-data')) {
+                            resolve();
+                            return;
+                        }
+                        var handler = function(e) {
+                            if (e.sourceId === 'hex-data' && e.isSourceLoaded) {
+                                map.off('sourcedata', handler);
+                                resolve();
+                            }
+                        };
+                        map.on('sourcedata', handler);
+                        // Safety: never hold the spinner more than 8 sec.
+                        setTimeout(function() {
+                            map.off('sourcedata', handler);
+                            resolve();
+                        }, 8000);
+                    });
+                }
+
                 hideLoader();
                 onDataLoaded();
                 // Kick off per-day loads in the background so date filters work soon
