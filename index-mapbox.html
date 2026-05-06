@@ -1317,21 +1317,44 @@
         // immediately, without a 145 MB main-thread JSON.parse blocking
         // the UI thread. Browser does not call this and never loads pmtiles.
         function initMobileVectorTiles() {
+            console.log('[pmtiles] initMobileVectorTiles called. typeof pmtiles =', typeof pmtiles);
             if (typeof pmtiles === 'undefined') {
-                console.warn('pmtiles plugin not loaded — falling back to GeoJSON path');
+                console.warn('[pmtiles] plugin not loaded — falling back to GeoJSON path');
                 return;
             }
+            console.log('[pmtiles] pmtiles globals:', Object.keys(pmtiles));
             try {
                 var protocol = new pmtiles.Protocol();
+                console.log('[pmtiles] Protocol instance created, registering with mapboxgl');
                 mapboxgl.addProtocol('pmtiles', protocol.tile);
+                console.log('[pmtiles] addProtocol succeeded');
             } catch (e) {
-                console.warn('pmtiles protocol registration failed:', e);
+                console.warn('[pmtiles] protocol registration failed:', e);
                 return;
             }
+
+            // Diagnostic: catch source load events and errors so we can see
+            // whether pmtiles is succeeding at fetching the file/tiles.
+            map.on('sourcedata', function(e) {
+                if (e.sourceId === 'hex-pmtiles') {
+                    console.log('[pmtiles] sourcedata: isSourceLoaded=' + e.isSourceLoaded + ', tile=' + (e.tile ? 'yes' : 'no'));
+                }
+            });
+            map.on('error', function(e) {
+                if (e.error || (e.sourceId && e.sourceId.indexOf('pmtiles') >= 0)) {
+                    console.warn('[pmtiles] map error:', e);
+                }
+            });
+
+            // pmtiles convention is `pmtiles://<absolute-url>` — use the
+            // current origin so the file resolves consistently.
+            var pmtilesUrl = 'pmtiles://' + window.location.origin + '/total/quebec.pmtiles';
+            console.log('[pmtiles] Source URL:', pmtilesUrl);
             map.addSource('hex-pmtiles', {
                 type: 'vector',
-                url: 'pmtiles://total/quebec.pmtiles'
+                url: pmtilesUrl
             });
+            console.log('[pmtiles] Source hex-pmtiles added');
             // Provisional gradient based on total_occurrences. Once the
             // sequential GeoJSON parse computes real quartiles, we switch
             // to those (see updateMobileTilesPaint).
