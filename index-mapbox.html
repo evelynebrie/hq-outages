@@ -1489,22 +1489,24 @@
             setLoaderText('Chargement des données...');
             var regions = ['west', 'central_west', 'central', 'central_east', 'east', 'far_east'];
 
-            // Mobile fetches the slim files (~62 MB total, no `all_datetimes`)
-            // for fast first paint. Browser keeps the full files. Slim falls
-            // back to full if the slim file isn't deployed yet.
+            // Mobile only: count regions as they finish loading and update
+            // the spinner text so the user can see progress (X/6). Browser
+            // keeps the original silent parallel fetch.
+            var loadedCount = 0;
+            if (isMobileDevice) {
+                setLoaderText('Chargement des données… 0/' + regions.length);
+            }
             var totalsPromise = Promise.all(
                 regions.map(function(region) {
-                    var slimUrl = 'total/total_exposure_' + region + '_slim.geojson';
-                    var fullUrl = 'total/total_exposure_' + region + '.geojson';
-                    if (isMobileDevice) {
-                        return fetch(slimUrl).then(function(r) {
-                            if (r.ok) return r.json();
-                            return fetch(fullUrl).then(function(r2) { return r2.json(); });
-                        }).catch(function() {
-                            return fetch(fullUrl).then(function(r2) { return r2.json(); });
+                    return fetch('total/total_exposure_' + region + '.geojson')
+                        .then(function(r) { return r.json(); })
+                        .then(function(data) {
+                            if (isMobileDevice) {
+                                loadedCount++;
+                                setLoaderText('Chargement des données… ' + loadedCount + '/' + regions.length);
+                            }
+                            return data;
                         });
-                    }
-                    return fetch(fullUrl).then(function(r) { return r.json(); });
                 })
             );
             var currentPromise = fetch('current.geojson').then(function(r) {
@@ -1558,72 +1560,9 @@
                 }
             }
 
-            // Mobile: kick off a background load of the full files so the
-            // click-through history, calendar intensity, and "Lecture la
-            // plus récente" populate as soon as those bytes arrive. The
-            // map is already up by this point; this is purely enrichment.
-            if (isMobileDevice) {
-                loadFullTotalsInBackground(regions);
-            }
-
             return availableDates;
             })();
             return coreDataPromise;
-        }
-
-        // Mobile only. Fetch the full regional files (with all_datetimes)
-        // after the slim-based map is up, then merge all_datetimes into the
-        // existing features by hex_id and re-run anything that depends on
-        // the timestamp history (calendar intensity, stats panel "last
-        // reading", available dates set).
-        var fullDataLoaded = false;
-        var fullDataLoadingPromise = null;
-        function loadFullTotalsInBackground(regions) {
-            if (fullDataLoadingPromise) return fullDataLoadingPromise;
-            fullDataLoadingPromise = Promise.all(
-                regions.map(function(region) {
-                    return fetch('total/total_exposure_' + region + '.geojson')
-                        .then(function(r) { return r.ok ? r.json() : null; })
-                        .catch(function() { return null; });
-                })
-            ).then(function(fullRegional) {
-                var byId = {};
-                fullRegional.forEach(function(d) {
-                    if (!d || !d.features) return;
-                    d.features.forEach(function(f) { byId[f.properties.hex_id] = f.properties; });
-                });
-                allData.total.features.forEach(function(f) {
-                    var fp = byId[f.properties.hex_id];
-                    if (!fp) return;
-                    if (fp.all_datetimes)     f.properties.all_datetimes     = fp.all_datetimes;
-                    if (fp.first_occurrence)  f.properties.first_occurrence  = fp.first_occurrence;
-                    if (fp.last_occurrence)   f.properties.last_occurrence   = fp.last_occurrence;
-                });
-
-                // Re-derive everything that needs all_datetimes.
-                var dateSet = new Set();
-                allData.total.features.forEach(function(f) {
-                    if (!f.properties.all_datetimes) return;
-                    f.properties.all_datetimes.split(',').forEach(function(dt) {
-                        var d = dt.trim().split(' ')[0];
-                        if (d) dateSet.add(d);
-                    });
-                });
-                availableDates = Array.from(dateSet).sort();
-                if (availableDates.length > 0 && !calendarMonth) {
-                    var last = availableDates[availableDates.length - 1];
-                    var parts = last.split('-');
-                    calendarMonth = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, 1);
-                }
-                computeDayIntensities();
-                renderCalendar();
-                updateStatsPanel();
-                fullDataLoaded = true;
-                console.log('Full totals merged in background');
-            }).catch(function(err) {
-                console.warn('Background full-data load failed:', err);
-            });
-            return fullDataLoadingPromise;
         }
 
         // Parallel load of per-day files (in background, non-blocking).
@@ -2077,31 +2016,6 @@
             html += '<button class="share-trigger" onclick="openShareModal(' + hexId + ')">Partager ces statistiques</button>';
 
             html += '<div class="hist-section-title">Historique détaillé</div>';
-
-            // On mobile, the slim file used for fast first paint doesn't
-            // carry all_datetimes. If the background full-data load isn't
-            // done yet, show a loading placeholder and re-render the modal
-            // when the data arrives.
-            if (uniqueDates.length === 0 && isMobileDevice && !fullDataLoaded) {
-                html += '<p style="font-size:13px;color:#6b7280;padding:12px 0;display:flex;align-items:center;gap:10px;">' +
-                        '<span class="btn-spinner" style="border-color:#e5e7eb;border-top-color:#9ca3af;margin:0;"></span>' +
-                        '<span>L\'historique détaillé est encore en chargement, veuillez patienter…</span></p>';
-                document.getElementById('modalContent').innerHTML = html;
-                document.getElementById('detailModal').classList.add('active');
-                document.getElementById('modalOverlay').classList.add('active');
-                if (fullDataLoadingPromise) {
-                    fullDataLoadingPromise.then(function() {
-                        // Only re-render if the same hex is still open.
-                        if (document.getElementById('detailModal').classList.contains('active') &&
-                            document.querySelector('.hex-title') &&
-                            document.querySelector('.hex-title').textContent.indexOf('#' + hexId) >= 0) {
-                            showDetails(hexId);
-                        }
-                    });
-                }
-                return;
-            }
-
             html += '<div class="hist-list">';
 
             var maxDayCount = 0;
