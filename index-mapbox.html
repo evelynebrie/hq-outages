@@ -1572,8 +1572,7 @@
         async function loadDailyDataInBackground(dates) {
             // The map is already up at this point — these files only feed
             // the hourly chart and the calendar's per-day intensity colors,
-            // so they load silently. The spinner has been hidden by the
-            // caller; setLoaderText updates would not be visible anyway.
+            // so they load silently.
             var sortedDates = dates.slice().sort();
             var todayDate = sortedDates[sortedDates.length - 1];
             if (todayDate) {
@@ -1586,6 +1585,12 @@
                     }
                 } catch (e) { /* silent */ }
             }
+
+            // On mobile, stop here. Pulling 76 parallel daily fetches
+            // (~145 MB in flight) on top of the just-parsed regional data
+            // OOMs the tab on phones. Past dates are fetched on demand via
+            // ensureDailyLoaded() when the user picks them in the calendar.
+            if (isMobileDevice) return;
 
             var remaining = dates.filter(function(d) { return d !== todayDate; });
             var promises = remaining.map(function(date) {
