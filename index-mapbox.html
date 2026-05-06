@@ -1025,7 +1025,9 @@
                 padding: 18px 16px 24px;
                 box-sizing: border-box;
             }
-            /* Welcome modal: full-screen with logos, same as before. */
+            /* Welcome modal: full-screen with logos, same as before.
+               IMPORTANT: only set `display: flex` when `.active` is
+               present, otherwise removing the class won't hide it. */
             .welcome-modal {
                 width: 100vw !important;
                 height: 100vh !important;
@@ -1033,10 +1035,10 @@
                 max-height: 100vh !important;
                 border-radius: 0 !important;
                 padding: 26px 22px 24px !important;
-                display: flex;
                 flex-direction: column;
             }
             .welcome-modal.active { display: flex !important; }
+            .welcome-modal:not(.active) { display: none !important; }
             .welcome-modal .welcome-logos { margin-top: auto; }
 
             /* Share modal inherits detail-modal but has its own max-width — override */
