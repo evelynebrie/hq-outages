@@ -1490,11 +1490,11 @@
             var regions = ['west', 'central_west', 'central', 'central_east', 'east', 'far_east'];
 
             // Mobile only: count regions as they finish loading and update
-            // the spinner text so the user can see progress (X/6). Browser
-            // keeps the original silent parallel fetch.
+            // the spinner text with a percentage so the user can see progress.
+            // Browser keeps the original silent parallel fetch.
             var loadedCount = 0;
             if (isMobileDevice) {
-                setLoaderText('Chargement des données… 0/' + regions.length);
+                setLoaderText('Chargement des données… 0 %');
             }
             var totalsPromise = Promise.all(
                 regions.map(function(region) {
@@ -1503,7 +1503,8 @@
                         .then(function(data) {
                             if (isMobileDevice) {
                                 loadedCount++;
-                                setLoaderText('Chargement des données… ' + loadedCount + '/' + regions.length);
+                                var pct = Math.round((loadedCount / regions.length) * 100);
+                                setLoaderText('Chargement des données… ' + pct + ' %');
                             }
                             return data;
                         });
