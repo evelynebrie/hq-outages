@@ -1314,11 +1314,17 @@
     <script>
         mapboxgl.accessToken = 'pk.eyJ1IjoiZXZlbHluZWJyaWUiLCJhIjoiY2themE5OGF2MDdxazJybG9oNzUyaXoxNSJ9.njPe2lcTp82DKjDeGkHaQA';
 
+        // Mobile only: force pixelRatio to 1 (vs default 2-3 on retina)
+        // so Mapbox renders ~75 % fewer pixels. This drastically reduces
+        // GPU/memory pressure when the full-screen map paints 114k hexes,
+        // and prevents the OOM crash. Browser uses native pixel ratio.
+        var __isMobileForMap = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
         var map = new mapboxgl.Map({
             container: 'map',
             style: 'mapbox://styles/mapbox/outdoors-v12',
             center: [-71.2, 46.8],
-            zoom: 7.5
+            zoom: 7.5,
+            pixelRatio: __isMobileForMap ? 1 : (window.devicePixelRatio || 1)
         });
 
         var allData = { daily: {}, total: null, current: null };
