@@ -900,7 +900,20 @@ for (i in seq_along(regions)) {
     # field (~57% of the file). Mobile uses this for the map render. The
     # full file is fetched on-demand only when the user clicks a hex to
     # see its detailed history (per-region cache, single slot).
+    # We do keep a `dates` field (unique dates without times) so that the
+    # mobile calendar can show available days and intensity colors without
+    # needing the full file.
     slim_data <- regional_data %>%
+      dplyr::mutate(
+        dates = vapply(
+          strsplit(as.character(all_datetimes), ", ", fixed = TRUE),
+          function(parts) {
+            if (length(parts) == 0) return("")
+            paste(unique(substr(parts, 1, 10)), collapse = ",")
+          },
+          FUN.VALUE = character(1)
+        )
+      ) %>%
       dplyr::select(-dplyr::any_of(c("all_datetimes", "first_occurrence", "last_occurrence")))
     slim_file <- file.path(output_dir, "total", sprintf("total_exposure_%s_slim.geojson", region$name))
     st_write(slim_data, slim_file, delete_dsn = TRUE, quiet = TRUE)

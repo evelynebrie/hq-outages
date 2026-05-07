@@ -1642,14 +1642,23 @@
             updateStatsPanel();
             updateCurrentBadge();
 
-            // Gather all available dates
+            // Gather all available dates. Slim files (mobile) have a
+            // `dates` field with just the dates; full files (browser) have
+            // `all_datetimes` with full timestamps. Either works.
             var dateSet = new Set();
             allData.total.features.forEach(function(f) {
-                if (!f.properties.all_datetimes) return;
-                f.properties.all_datetimes.split(',').forEach(function(dt) {
-                    var d = dt.trim().split(' ')[0];
-                    if (d) dateSet.add(d);
-                });
+                var p = f.properties;
+                if (p.all_datetimes) {
+                    p.all_datetimes.split(',').forEach(function(dt) {
+                        var d = dt.trim().split(' ')[0];
+                        if (d) dateSet.add(d);
+                    });
+                } else if (p.dates) {
+                    p.dates.split(',').forEach(function(d) {
+                        d = d.trim();
+                        if (d) dateSet.add(d);
+                    });
+                }
             });
             availableDates = Array.from(dateSet).sort();
 
@@ -1977,14 +1986,22 @@
         // ---------- Calendar ----------
         function computeDayIntensities() {
             // Count distinct 'YYYY-MM-DD' dates each hex was observed on, tally per day.
+            // Slim files (mobile) carry a `dates` field; full files have `all_datetimes`.
             var countsPerDay = {};
             allData.total.features.forEach(function(f) {
-                if (!f.properties.all_datetimes) return;
+                var p = f.properties;
                 var seen = {};
-                f.properties.all_datetimes.split(',').forEach(function(dt) {
-                    var d = dt.trim().split(' ')[0];
-                    if (!seen[d]) { seen[d] = true; countsPerDay[d] = (countsPerDay[d] || 0) + 1; }
-                });
+                if (p.all_datetimes) {
+                    p.all_datetimes.split(',').forEach(function(dt) {
+                        var d = dt.trim().split(' ')[0];
+                        if (!seen[d]) { seen[d] = true; countsPerDay[d] = (countsPerDay[d] || 0) + 1; }
+                    });
+                } else if (p.dates) {
+                    p.dates.split(',').forEach(function(d) {
+                        d = d.trim();
+                        if (d && !seen[d]) { seen[d] = true; countsPerDay[d] = (countsPerDay[d] || 0) + 1; }
+                    });
+                }
             });
 
             // Quintile-bucket the daily counts (1..5); days with 0 → 0
