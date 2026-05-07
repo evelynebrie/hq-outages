@@ -933,38 +933,45 @@
                 overflow-y: auto;
             }
 
-            /* Map: capped height instead of full-screen. The page extends
-               below it with filters, stats, legend. */
+            /* Map fills the viewport. UI elements float on top. */
+            html, body { overflow: hidden !important; height: 100vh !important; }
             #map {
-                position: relative !important;
-                top: auto !important;
-                bottom: auto !important;
+                position: absolute !important;
+                top: 0 !important;
+                bottom: 0 !important;
+                left: 0 !important;
+                right: 0 !important;
                 width: 100% !important;
-                height: 55vh !important;
-                min-height: 320px;
+                height: 100% !important;
             }
 
-            /* Filters block — sits below the map, collapsible via the +/-
-               affordance on the title. Same .collapsed class behaviour
-               as before. */
+            /* "Filtrer par" — single floating card pinned to the top of
+               the viewport. Collapsed by default (just title + "+" icon).
+               When expanded, shows the full filter UI (search, view
+               buttons, calendar, hour). */
             .controls {
-                position: relative !important;
-                top: auto; left: auto; right: auto; bottom: auto;
+                position: fixed !important;
+                top: 12px !important;
+                left: 12px !important;
+                right: 12px !important;
+                bottom: auto !important;
                 width: auto !important;
                 max-width: none !important;
-                margin: 12px !important;
+                margin: 0 !important;
                 padding: 16px !important;
-                border-radius: 12px !important;
-                box-shadow: 0 4px 12px rgba(0,0,0,0.15) !important;
-                max-height: none !important;
-                overflow: visible !important;
-                z-index: auto !important;
+                border-radius: 14px !important;
+                box-shadow: 0 4px 16px rgba(0,0,0,0.18) !important;
+                max-height: calc(100vh - 24px) !important;
+                overflow-y: auto !important;
+                z-index: 20 !important;
             }
             .controls .panel-title {
                 cursor: pointer;
-                margin-bottom: 0 !important;
-                padding-right: 32px;
+                margin: 0 !important;
+                padding: 0 32px 0 0 !important;
+                border-bottom: none !important;
                 position: relative;
+                font-size: 18px !important;
             }
             .controls .panel-title::after {
                 content: '−';
@@ -980,38 +987,51 @@
                 font-size: 18px; line-height: 1; font-weight: 400;
             }
             .controls.collapsed .panel-title::after { content: '+'; }
-            .controls.collapsed .panel-title {
-                margin-bottom: 0 !important;
-                padding-bottom: 0 !important;
-                border-bottom: none !important;
+            .controls:not(.collapsed) .panel-title {
+                margin-bottom: 14px !important;
+                padding-bottom: 12px !important;
+                border-bottom: 3px solid #f3f4f6 !important;
             }
             .controls.collapsed > *:not(.panel-title) { display: none !important; }
 
-            /* Stats + legend: visible in the page below the filters
-               (not hidden as before). The user lands on a populated
-               page even before all the data has finished loading. */
-            .info {
-                display: block !important;
-                position: relative !important;
-                top: auto !important; right: auto !important;
-                margin: 12px !important;
-                max-width: none !important;
-                min-width: 0 !important;
-                width: auto !important;
-                z-index: auto !important;
-            }
+            /* Hide the big stats panel entirely on mobile. The legend is
+               extracted via JS into #miniLegend (bottom-right of map). */
+            .info { display: none !important; }
 
-            /* Floating info button: pin to bottom-right of viewport. */
+            /* Mini legend pinned to bottom-right of the map. */
+            #miniLegend {
+                position: fixed !important;
+                bottom: 12px !important;
+                right: 12px !important;
+                background: white;
+                border-radius: 12px;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+                padding: 10px 12px;
+                z-index: 15;
+                max-width: calc(100% - 24px);
+            }
+            #miniLegend h4 { display: none; }
+            #miniLegend .scale-labels { font-size: 11px; }
+            #miniLegend .gradient-bar { height: 12px; }
+            #miniLegend .range-labels { font-size: 10px; }
+            #miniLegend .legend-info-wrap { display: none !important; }
+            #miniLegend > div { margin: 0; }
+
+            /* Info "i" button: bottom-left, above the Mapbox nav control. */
             .info-btn {
                 position: fixed !important;
                 bottom: 16px !important;
-                right: 16px !important;
-                left: auto !important;
+                left: 16px !important;
+                right: auto !important;
+                top: auto !important;
                 z-index: 100;
             }
 
-            /* Mapbox nav control inside the (now smaller) map area. */
-            .mapboxgl-ctrl-bottom-left { bottom: 12px !important; }
+            /* Mapbox nav control: bottom-left, just above the info button. */
+            .mapboxgl-ctrl-bottom-left {
+                bottom: 64px !important;
+                left: 0 !important;
+            }
 
             /* --- Full-screen modals (welcome, detail, share, FAQ) --- */
             .detail-modal {
@@ -1066,6 +1086,9 @@
 </head>
 <body>
     <div id="map"></div>
+
+    <!-- Mobile-only mini legend (bottom-right). Populated by updateLegend(). -->
+    <div id="miniLegend" style="display:none;"></div>
 
     <div id="mapLoader" class="map-loader">
         <div class="spinner"></div>
@@ -1391,6 +1414,16 @@
                     '<p class="legend-detail-text">Chaque niveau regroupe <strong>20%</strong> des hexagones, du quintile inférieur (faible) au supérieur (élevé).</p>' +
                     '<button type="button" class="legend-info-btn" aria-label="Comment sont calculés les seuils" onclick="toggleLegendInfo(event)">i</button>' +
                     '</div>';
+            }
+
+            // Mobile: also paint the floating mini legend at the bottom-right.
+            var mini = document.getElementById('miniLegend');
+            if (mini && isMobileDevice) {
+                mini.style.display = 'block';
+                mini.innerHTML =
+                    '<div class="scale-labels"><span>Faible intensité</span><span>Intensité élevée</span></div>' +
+                    '<div class="gradient-bar">' + barHtml + '</div>' +
+                    '<div class="range-labels"><span>' + minLabel + '</span><span>' + (q.q4 + 1) + '+</span></div>';
             }
         }
 
@@ -2475,6 +2508,7 @@
             controls.classList.add('collapsed');
             var title = controls.querySelector('.panel-title');
             if (title) {
+                title.textContent = 'Filtrer par';
                 title.addEventListener('click', function(ev) {
                     ev.stopPropagation();
                     controls.classList.toggle('collapsed');
