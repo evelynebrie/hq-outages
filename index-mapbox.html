@@ -1339,6 +1339,62 @@
         // regional GeoJSON + ~145 MB of dailies. Desktop is unchanged.
         var isMobileDevice = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
 
+        // Mobile only: single-slot cache for the FULL regional file. Used
+        // when the user clicks a hex and we need its `all_datetimes` (not
+        // present in the slim file used for the map). When a hex from a
+        // different region is clicked, the previous region's full data is
+        // released so peak memory stays bounded to ~1 region (≤ 60 MB).
+        var loadedFullRegion = null;
+        var loadedFullData = null;
+        var REGION_BANDS = [
+            { name: 'west',         max: -75 },
+            { name: 'central_west', max: -72 },
+            { name: 'central',      max: -69 },
+            { name: 'central_east', max: -66 },
+            { name: 'east',         max: -63 },
+            { name: 'far_east',     max: Infinity }
+        ];
+        function regionForLon(lon) {
+            for (var i = 0; i < REGION_BANDS.length; i++) {
+                if (lon < REGION_BANDS[i].max) return REGION_BANDS[i].name;
+            }
+            return 'far_east';
+        }
+        // Returns a Promise<Feature|null> for the full version of `hexId`,
+        // fetching that hex's region's full GeoJSON if not already cached.
+        function ensureFullFeature(hexId, centroidLon) {
+            var region = regionForLon(centroidLon);
+            return new Promise(function(resolve) {
+                function lookup(data) {
+                    if (!data || !data.features) { resolve(null); return; }
+                    var match = null;
+                    for (var i = 0; i < data.features.length; i++) {
+                        if (data.features[i].properties.hex_id === hexId) {
+                            match = data.features[i]; break;
+                        }
+                    }
+                    resolve(match);
+                }
+                if (loadedFullRegion === region && loadedFullData) {
+                    lookup(loadedFullData); return;
+                }
+                // Drop the previous region first so the new one's parse
+                // doesn't transiently hold both.
+                loadedFullRegion = null;
+                loadedFullData = null;
+                fetch('total/total_exposure_' + region + '.geojson')
+                    .then(function(r) { return r.ok ? r.json() : null; })
+                    .then(function(data) {
+                        if (data) {
+                            loadedFullRegion = region;
+                            loadedFullData = data;
+                        }
+                        lookup(data);
+                    })
+                    .catch(function() { resolve(null); });
+            });
+        }
+
         function hideLoader() {
             var el = document.getElementById('mapLoader');
             if (el) el.classList.add('hidden');
@@ -1528,10 +1584,12 @@
             setLoaderText('Chargement des données...');
             var regions = ['west', 'central_west', 'central', 'central_east', 'east', 'far_east'];
 
-            // Mobile fetches the 6 regional files SEQUENTIALLY so peak
-            // memory stays bounded by one in-flight parse (~30-60 MB)
-            // instead of all six at once (~400-500 MB which OOMs Safari).
-            // Browser keeps the parallel fetch.
+            // Mobile fetches the SLIM regional files (~62 MB total instead
+            // of 145 MB), sequentially so peak memory stays bounded by
+            // one in-flight parse. Slim drops `all_datetimes`, which is
+            // only needed for the click-through history modal — that's
+            // lazy-loaded per-region via ensureRegionLoaded().
+            // Browser keeps the parallel fetch of the full files.
             var loadedRegions = 0;
             if (isMobileDevice) {
                 setLoaderText('Chargement des données… 0 %');
@@ -1541,14 +1599,18 @@
                 totalsPromise = (async function() {
                     var out = [];
                     for (var i = 0; i < regions.length; i++) {
-                        var resp = await fetch('total/total_exposure_' + regions[i] + '.geojson');
+                        var slimUrl = 'total/total_exposure_' + regions[i] + '_slim.geojson';
+                        var fullUrl = 'total/total_exposure_' + regions[i] + '.geojson';
+                        var resp = await fetch(slimUrl);
+                        if (!resp.ok) {
+                            // Slim file not deployed yet — fall back to full.
+                            resp = await fetch(fullUrl);
+                        }
                         var data = await resp.json();
                         out.push(data);
                         loadedRegions++;
                         var pct = Math.round((loadedRegions / regions.length) * 100);
                         setLoaderText('Chargement des données… ' + pct + ' %');
-                        // Yield so the GC can reclaim transient buffers
-                        // before the next file lands.
                         await new Promise(function(res) { setTimeout(res, 0); });
                     }
                     return out;
@@ -2015,12 +2077,49 @@
             }
         }
 
+        // Mobile only: open the detail modal with a placeholder while we
+        // lazy-fetch the full region file. showDetails() re-renders once
+        // the data arrives.
+        function renderDetailsLoading(hexId) {
+            var html = '<h3 class="hex-title">Hexagone #' + hexId + '</h3>' +
+                '<p style="font-size:13px;color:#6b7280;padding:14px 0;display:flex;align-items:center;gap:10px;">' +
+                '<span class="btn-spinner" style="border-color:#e5e7eb;border-top-color:#9ca3af;margin:0;"></span>' +
+                '<span>Chargement de l\'historique en cours…</span></p>';
+            document.getElementById('modalContent').innerHTML = html;
+            document.getElementById('detailModal').classList.add('active');
+            document.getElementById('modalOverlay').classList.add('active');
+        }
+
         function showDetails(hexId) {
             if (!allData.total || !allData.total.features) return;
             var feature = allData.total.features.find(function(f) { return f.properties.hex_id === hexId; });
             if (!feature) return;
 
             var props = feature.properties;
+
+            // Mobile: the slim file used for the map drops `all_datetimes`.
+            // If it's missing, lazy-fetch the region's full file (which
+            // unloads any previously cached region) and re-render.
+            if (isMobileDevice && !props.all_datetimes) {
+                renderDetailsLoading(hexId);
+                ensureFullFeature(hexId, props.centroid_lon).then(function(fullFeat) {
+                    if (fullFeat && fullFeat.properties && fullFeat.properties.all_datetimes) {
+                        // Splice the heavy fields into the slim feature so
+                        // subsequent clicks on the same hex are instant.
+                        feature.properties.all_datetimes    = fullFeat.properties.all_datetimes;
+                        feature.properties.first_occurrence = fullFeat.properties.first_occurrence;
+                        feature.properties.last_occurrence  = fullFeat.properties.last_occurrence;
+                    }
+                    // Re-render only if the user is still looking at this hex.
+                    if (document.getElementById('detailModal').classList.contains('active') &&
+                        document.querySelector('.hex-title') &&
+                        document.querySelector('.hex-title').textContent.indexOf('#' + hexId) >= 0) {
+                        showDetails(hexId);
+                    }
+                });
+                return;
+            }
+
             var datetimes = (props.all_datetimes || '').split(',').map(function(s) { return s.trim(); }).filter(function(s) { return s.length > 0; }).sort();
 
             var byDate = {};

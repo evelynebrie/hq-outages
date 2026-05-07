@@ -895,6 +895,15 @@ for (i in seq_along(regions)) {
     region_file <- file.path(output_dir, "total", sprintf("total_exposure_%s.geojson", region$name))
     st_write(regional_data, region_file, delete_dsn = TRUE, quiet = TRUE)
     cat(sprintf("  ✓ %s: %d hexagons\n", region$name, nrow(regional_data)))
+
+    # Slim version for the mobile fast-path: drop the heavy `all_datetimes`
+    # field (~57% of the file). Mobile uses this for the map render. The
+    # full file is fetched on-demand only when the user clicks a hex to
+    # see its detailed history (per-region cache, single slot).
+    slim_data <- regional_data %>%
+      dplyr::select(-dplyr::any_of(c("all_datetimes", "first_occurrence", "last_occurrence")))
+    slim_file <- file.path(output_dir, "total", sprintf("total_exposure_%s_slim.geojson", region$name))
+    st_write(slim_data, slim_file, delete_dsn = TRUE, quiet = TRUE)
   }
 }
 
