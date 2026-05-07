@@ -2530,6 +2530,35 @@
             try {
                 var dates = await loadCoreData();
                 updateMap();
+
+                // Mobile only: wait for the hex-data source to finish
+                // loading into Mapbox before hiding the spinner. Reduces
+                // the visible gap between 100 % and hexagons appearing.
+                // Lighter than waiting for `idle` (which crashed on iOS),
+                // because we don't wait for a fully painted frame.
+                if (isMobileDevice) {
+                    await new Promise(function(resolve) {
+                        var done = false;
+                        var finish = function() { if (done) return; done = true; resolve(); };
+                        if (map.isSourceLoaded && map.isSourceLoaded('hex-data')) {
+                            finish();
+                            return;
+                        }
+                        var handler = function(e) {
+                            if (e.sourceId === 'hex-data' && e.isSourceLoaded) {
+                                map.off('sourcedata', handler);
+                                finish();
+                            }
+                        };
+                        map.on('sourcedata', handler);
+                        // Safety net: never hold the spinner more than 5 sec.
+                        setTimeout(function() {
+                            map.off('sourcedata', handler);
+                            finish();
+                        }, 5000);
+                    });
+                }
+
                 hideLoader();
                 onDataLoaded();
                 // Kick off per-day loads in the background so date filters work soon
