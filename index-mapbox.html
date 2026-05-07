@@ -2724,6 +2724,13 @@
             closeWelcomeModal();
         }
 
+        // Kick off the data fetch IMMEDIATELY (in parallel with the
+        // basemap load). loadCoreData() is memoized via coreDataPromise,
+        // so calling it again from map.on('load') returns the same
+        // in-flight promise. Net effect: by the time the user clicks
+        // "Accéder à l'outil", the % counter is often well past 0 %.
+        loadCoreData();
+
         // Initialize map
         map.on('load', async function() {
             try {
