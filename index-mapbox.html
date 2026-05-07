@@ -2530,19 +2530,6 @@
             try {
                 var dates = await loadCoreData();
                 updateMap();
-
-                // Mobile only: wait for the map to be idle (tiles painted)
-                // before hiding the spinner, so 100 % == hexes visible.
-                if (isMobileDevice) {
-                    await new Promise(function(resolve) {
-                        var done = false;
-                        var finish = function() { if (done) return; done = true; resolve(); };
-                        map.once('idle', finish);
-                        // Safety: never hold the spinner more than 8 sec.
-                        setTimeout(finish, 8000);
-                    });
-                }
-
                 hideLoader();
                 onDataLoaded();
                 // Kick off per-day loads in the background so date filters work soon
