@@ -783,17 +783,32 @@
         .faq-modal details.faq-item[open] summary::after { content: '–'; }
         .faq-modal details.faq-item summary:hover { color: #78350f; }
         .faq-modal details.faq-item p { margin: 8px 0 4px; color: #4b5563; font-size: 13px; line-height: 1.55; }
-        .faq-disclaimer {
-            margin-top: 24px;
-            padding-top: 14px;
-            border-top: 1px solid #e5e7eb;
+        .disclaimer-toggle { margin-top: 18px; }
+        .disclaimer-toggle summary {
+            display: inline-block;
+            padding: 5px 12px;
+            background: #f3f4f6;
+            color: #6b7280;
+            font-size: 11px;
+            font-weight: 500;
+            border-radius: 6px;
+            cursor: pointer;
+            list-style: none;
+            border: 1px solid #e5e7eb;
+            user-select: none;
+        }
+        .disclaimer-toggle summary::-webkit-details-marker { display: none; }
+        .disclaimer-toggle summary:hover { background: #e5e7eb; color: #374151; }
+        .disclaimer-toggle[open] summary { background: #e5e7eb; color: #374151; }
+        .disclaimer-content {
+            margin-top: 12px;
             color: #6b7280;
             font-size: 10px;
             line-height: 1.45;
         }
-        .faq-disclaimer p { margin: 0 0 8px; }
-        .faq-disclaimer p:last-child { margin-bottom: 0; }
-        .faq-disclaimer a { color: #6b7280; text-decoration: underline; word-break: break-all; }
+        .disclaimer-content p { margin: 0 0 8px; }
+        .disclaimer-content p:last-child { margin-bottom: 0; }
+        .disclaimer-content a { color: #6b7280; text-decoration: underline; word-break: break-all; }
 
         /* Welcome modal */
         .welcome-modal { max-width: 560px; padding: 32px 36px; text-align: center; }
@@ -1354,10 +1369,13 @@
             <p>L'objectif de cette carte est de promouvoir la transparence de l'information au sujet des pannes de courant au Québec. L'outil actuel d'Info-Pannes d'Hydro-Québec permet seulement de visualiser les pannes actuelles ou planifiées, sans partager d'information sur les pannes résolues.</p>
         </details>
 
-        <div class="faq-disclaimer">
-            <p>Il est expressément convenu que la présence du nom et/ou du logo de l'Université de Montréal sur l'Outil ne constitue en aucun cas une approbation, une validation, ni une caution de l'Université à l'égard de l'Outil, de son contenu, ni des données ou résultats qui y sont présentés.</p>
-            <p>Les données de pannes et d'interruptions de service sont fournies à partir de sources publiques d'Hydro-Québec. Cet outil n'est pas affilié à Hydro-Québec. La présence du nom ou de données d'Hydro-Québec ne constitue en aucun cas une approbation, une validation ou une caution de la part d'Hydro-Québec à l'égard du présent outil, de son contenu ou de ses interprétations. Les informations sont fournies à titre indicatif seulement et peuvent comporter des délais de mise à jour, des erreurs ou des omissions. Elles ne doivent pas être utilisées comme seule source pour des décisions critiques. Les données originales sont fournies sous licence Creative Commons Attribution - Utilisation non commerciale 4.0 International (CC BY-NC 4.0) disponible à l'adresse suivante&nbsp;: <a href="https://creativecommons.org/licences/by-nc/4.0/legalcode.fr" target="_blank" rel="noopener">https://creativecommons.org/licences/by-nc/4.0/legalcode.fr</a></p>
-        </div>
+        <details class="disclaimer-toggle">
+            <summary>Avis juridique</summary>
+            <div class="disclaimer-content">
+                <p>Il est expressément convenu que la présence du nom et/ou du logo de l'Université de Montréal sur l'Outil ne constitue en aucun cas une approbation, une validation, ni une caution de l'Université à l'égard de l'Outil, de son contenu, ni des données ou résultats qui y sont présentés.</p>
+                <p>Les données de pannes et d'interruptions de service sont fournies à partir de sources publiques d'Hydro-Québec. Cet outil n'est pas affilié à Hydro-Québec. La présence du nom ou de données d'Hydro-Québec ne constitue en aucun cas une approbation, une validation ou une caution de la part d'Hydro-Québec à l'égard du présent outil, de son contenu ou de ses interprétations. Les informations sont fournies à titre indicatif seulement et peuvent comporter des délais de mise à jour, des erreurs ou des omissions. Elles ne doivent pas être utilisées comme seule source pour des décisions critiques. Les données originales sont fournies sous licence Creative Commons Attribution - Utilisation non commerciale 4.0 International (CC BY-NC 4.0) disponible à l'adresse suivante&nbsp;: <a href="https://creativecommons.org/licences/by-nc/4.0/legalcode.fr" target="_blank" rel="noopener">https://creativecommons.org/licences/by-nc/4.0/legalcode.fr</a></p>
+            </div>
+        </details>
     </div>
 
     <script>
