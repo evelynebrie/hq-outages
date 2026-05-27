@@ -14,9 +14,8 @@ suppressWarnings({
   has_sf <- requireNamespace("sf", quietly = TRUE)
 })
 
-BASE        <- "https://pannes.hydroquebec.com/pannes/donnees/v3_0/"  # retired upstream
-ARCGIS_BASE <- "https://services5.arcgis.com/0akaykIdiPuMhFIy/arcgis/rest/services/bs_infoPannes_prd_vue/FeatureServer"
-TZ          <- "America/Toronto"
+BASE <- "https://pannes.hydroquebec.com/pannes/donnees/v3_0/"
+TZ   <- "America/Toronto"
 
 # ---------- Helpers ----------
 
@@ -147,55 +146,105 @@ parse_coords <- function(s) {
 # ---------- Main: outages with better memory handling ----------
 
 get_hq_outages <- function(return_sf = FALSE) {
-  # Upstream migrated from bismarkers{ver}.json to an ArcGIS FeatureServer.
-  # Layer 0 = Marqueurs (point per outage). Schema is much sparser now;
-  # fields not exposed publicly (customers, eta_at, status_code, cause_code,
-  # municipality_id, etc.) are filled with NA to keep the output schema stable.
-  page_size <- 2000
-  offset <- 0
-  feats <- list()
-  repeat {
-    url <- sprintf(
-      "%s/0/query?where=1%%3D1&outFields=*&f=geojson&resultOffset=%d&resultRecordCount=%d",
-      ARCGIS_BASE, offset, page_size
-    )
-    message("Fetching outages page (offset=", offset, ")")
-    payload <- get_json(url, timeout_sec = 60)
-    page_feats <- payload$features %||na% list()
-    if (length(page_feats) == 0) break
-    feats <- c(feats, page_feats)
-    if (!isTRUE(payload$properties$exceededTransferLimit)) break
-    offset <- offset + page_size
+  # 1) Get version
+  ver_obj <- get_json(paste0(BASE, "bisversion.json"))
+  ver <- extract_version(ver_obj)
+  if (is.na(ver) || !nzchar(ver)) {
+    stop("Couldn't read 'version' from bisversion.json. ",
+         "Got: ", paste(capture.output(str(ver_obj)), collapse = " "))
   }
-
-  if (length(feats) == 0) {
+  
+  # 2) Fetch outages
+  message("Fetching outages for version: ", ver)
+  raw <- get_json(paste0(BASE, "bismarkers", ver, ".json"), timeout_sec = 60)
+  
+  # Find the outages array
+  pannes <- raw$pannes %||na% raw$markers %||na% raw$outages
+  if (is.null(pannes)) {
+    if (is.list(raw) && length(raw) > 0 && is.list(raw[[1]])) {
+      pannes <- raw[[1]]
+    }
+  }
+  
+  if (is.null(pannes) || length(pannes) == 0) {
     message("No outages in payload.")
     return(tibble::tibble())
   }
-
-  message("Processing ", length(feats), " outages...")
-
-  df <- lapply(feats, function(f) {
-    props  <- f$properties %||na% list()
-    coords <- f$geometry$coordinates %||na% list(NA_real_, NA_real_)
-    tibble::tibble(
-      customers        = NA_integer_,
-      started_at_raw   = as.character(props$dateCreation %||na% NA),
-      eta_raw          = NA_character_,
-      status_code      = NA_character_,
-      lon              = suppressWarnings(as.numeric(coords[[1]])),
-      lat              = suppressWarnings(as.numeric(coords[[2]])),
-      status2          = NA_character_,
-      unknown7         = NA_character_,
-      cause_code       = NA_integer_,
-      municipality_id  = NA_integer_,
-      message_id       = NA_integer_,
-      extra11          = NA_character_,
-      extra12          = NA_character_,
-      idInterruption   = as.character(props$idInterruption %||na% NA),
-      panne_majeure    = suppressWarnings(as.integer(props$panneMajeure %||na% NA))
-    )
-  }) |> dplyr::bind_rows()
+  
+  message("Processing ", length(pannes), " outages...")
+  
+  # Process in batches for large datasets to avoid memory issues
+  BATCH_SIZE <- 5000
+  n_batches <- ceiling(length(pannes) / BATCH_SIZE)
+  
+  if (n_batches > 1) {
+    message("Large dataset detected, processing in ", n_batches, " batches...")
+    df_list <- vector("list", n_batches)
+    
+    for (batch in seq_len(n_batches)) {
+      start_idx <- (batch - 1) * BATCH_SIZE + 1
+      end_idx <- min(batch * BATCH_SIZE, length(pannes))
+      
+      message("  Processing batch ", batch, " (", start_idx, "-", end_idx, ")")
+      
+      batch_data <- lapply(pannes[start_idx:end_idx], function(row) {
+        row <- c(row, rep(NA, 16))[1:16]
+        coords <- as.character(row[[5]])
+        xy <- parse_coords(coords)
+        
+        tibble::tibble(
+          customers        = suppressWarnings(as.integer(row[[1]])),
+          started_at_raw   = as.character(row[[2]]),
+          eta_raw          = as.character(row[[3]]),
+          status_code      = as.character(row[[4]]),
+          lon              = xy$lon,
+          lat              = xy$lat,
+          status2          = as.character(row[[6]]),
+          unknown7         = as.character(row[[7]]),
+          cause_code       = suppressWarnings(as.integer(row[[8]])),
+          municipality_id  = suppressWarnings(as.integer(row[[9]])),
+          message_id       = suppressWarnings(as.integer(row[[10]])),
+          extra11          = as.character(row[[11]]),
+          extra12          = as.character(row[[12]])
+        )
+      })
+      
+      df_list[[batch]] <- dplyr::bind_rows(batch_data)
+      
+      # Force garbage collection every few batches
+      if (batch %% 3 == 0) gc()
+    }
+    
+    message("  Combining batches...")
+    df <- dplyr::bind_rows(df_list)
+    rm(df_list)
+    gc()
+    
+  } else {
+    # Small dataset - process normally
+    df <- lapply(pannes, function(row) {
+      row <- c(row, rep(NA, 16))[1:16]
+      coords <- as.character(row[[5]])
+      xy <- parse_coords(coords)
+      
+      tibble::tibble(
+        customers        = suppressWarnings(as.integer(row[[1]])),
+        started_at_raw   = as.character(row[[2]]),
+        eta_raw          = as.character(row[[3]]),
+        status_code      = as.character(row[[4]]),
+        lon              = xy$lon,
+        lat              = xy$lat,
+        status2          = as.character(row[[6]]),
+        unknown7         = as.character(row[[7]]),
+        cause_code       = suppressWarnings(as.integer(row[[8]])),
+        municipality_id  = suppressWarnings(as.integer(row[[9]])),
+        message_id       = suppressWarnings(as.integer(row[[10]])),
+        extra11          = as.character(row[[11]]),
+        extra12          = as.character(row[[12]])
+      )
+    }) |>
+      dplyr::bind_rows()
+  }
   
   # Add metadata
   status_map <- c(
@@ -253,57 +302,44 @@ get_hq_outages <- function(return_sf = FALSE) {
 
 get_hq_polygons <- function(add_metadata = TRUE, quiet = TRUE) {
   .hq_require_pkg("sf", "polygons output")
-
-  # Upstream now serves polygons as GeoJSON from ArcGIS layer 1 (no more KMZ).
-  page_size <- 2000
-  offset <- 0
-  poly_list <- list()
-  repeat {
-    url <- sprintf(
-      "%s/1/query?where=1%%3D1&outFields=*&f=geojson&resultOffset=%d&resultRecordCount=%d",
-      ARCGIS_BASE, offset, page_size
-    )
-    message("Fetching polygons page (offset=", offset, ")")
-    tmp <- tempfile(fileext = ".geojson")
-    r <- httr::GET(url,
-                   httr::user_agent("HQ-outages-R/1.0"),
-                   httr::write_disk(tmp, overwrite = TRUE),
-                   httr::timeout(120))
-    if (httr::status_code(r) != 200) {
-      stop("Failed to fetch polygons: HTTP ", httr::status_code(r))
-    }
-
-    chunk <- try(sf::st_read(tmp, quiet = quiet), silent = TRUE)
-    if (inherits(chunk, "try-error") || nrow(chunk) == 0) break
-    poly_list[[length(poly_list) + 1]] <- chunk
-
-    meta <- try(jsonlite::fromJSON(tmp, simplifyVector = FALSE), silent = TRUE)
-    exceeded <- !inherits(meta, "try-error") &&
-                isTRUE(meta$properties$exceededTransferLimit)
-    if (!exceeded) break
-    offset <- offset + page_size
+  
+  # Get version
+  ver_obj <- get_json(paste0(BASE, "bisversion.json"))
+  ver <- extract_version(ver_obj)
+  if (is.na(ver) || !nzchar(ver)) {
+    stop("Couldn't read version for polygons. ",
+         "Got: ", paste(capture.output(str(ver_obj)), collapse = " "))
   }
-
-  if (length(poly_list) == 0) {
-    stop("No polygons returned from ArcGIS FeatureServer")
+  
+  # Download KMZ
+  kmz_url <- paste0(BASE, "bispoly", ver, ".kmz")
+  tmp_kmz <- tempfile(fileext = ".kmz")
+  tmp_dir <- tempfile()
+  dir.create(tmp_dir, recursive = TRUE, showWarnings = FALSE)
+  
+  message("Downloading polygon KMZ from: ", kmz_url)
+  r <- httr::GET(kmz_url, httr::write_disk(tmp_kmz, overwrite = TRUE), httr::timeout(120))
+  if (httr::status_code(r) != 200) {
+    stop("Failed to download polygons: HTTP ", httr::status_code(r))
   }
-
-  poly <- do.call(rbind, poly_list)
+  
+  # Read KMZ/KML
+  poly <- try(sf::st_read(tmp_kmz, quiet = quiet), silent = TRUE)
+  if (inherits(poly, "try-error")) {
+    utils::unzip(tmp_kmz, exdir = tmp_dir)
+    kml <- list.files(tmp_dir, pattern = "\\.kml$", full.names = TRUE)[1]
+    if (is.na(kml)) stop("No .kml found inside the downloaded .kmz")
+    poly <- sf::st_read(kml, quiet = quiet)
+  }
+  
   poly <- .hq_clean_polys(poly)
-
-  # Ensure a poly_id column the scraper's ID-selection loop will find first.
-  if ("idInterruption" %in% names(poly)) {
-    poly$poly_id <- as.character(poly$idInterruption)
-  } else {
-    poly$poly_id <- as.character(seq_len(nrow(poly)))
-  }
-
+  
   if (isTRUE(add_metadata)) {
     TZ_local <- if (exists("TZ", inherits = FALSE)) get("TZ") else "America/Toronto"
-    poly$hq_version      <- format(Sys.time(), "%Y%m%dT%H%M%S")
+    poly$hq_version      <- ver
     poly$hq_retrieved_at <- as.character(lubridate::with_tz(Sys.time(), TZ_local))
   }
-
+  
   message("Loaded ", nrow(poly), " polygons")
   poly
 }
