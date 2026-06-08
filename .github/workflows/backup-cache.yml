@@ -10,13 +10,13 @@ jobs:
   backup:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v5
 
       # ============================================================
       # 1. Cumulative hex data cache (the critical one - source of truth)
       # ============================================================
       - name: Restore cumulative cache
-        uses: actions/cache/restore@v3
+        uses: actions/cache/restore@v5
         with:
           path: cache/cumulative_hex_data.rds
           key: hq-cumulative-cache-v2-
@@ -35,7 +35,7 @@ jobs:
           echo "SHA256: $(sha256sum cache/cumulative_hex_data.rds | cut -d' ' -f1)"
 
       - name: Upload cumulative cache artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: cumulative-cache-backup
           path: cache/cumulative_hex_data.rds
@@ -45,7 +45,7 @@ jobs:
       # 2. Public outputs cache (all deployed geojsons + hex grid)
       # ============================================================
       - name: Restore public outputs cache
-        uses: actions/cache/restore@v3
+        uses: actions/cache/restore@v5
         with:
           path: public
           key: hq-public-outputs-v1-
@@ -66,7 +66,7 @@ jobs:
           fi
 
       - name: Upload public outputs artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: public-outputs-backup
           path: public/
@@ -77,7 +77,7 @@ jobs:
       # 3. Dropbox files cache (raw polygon inputs)
       # ============================================================
       - name: Restore dropbox files cache
-        uses: actions/cache/restore@v3
+        uses: actions/cache/restore@v5
         with:
           path: data/daily
           key: dropbox-files-v2-
@@ -97,7 +97,7 @@ jobs:
           fi
 
       - name: Upload dropbox files artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: dropbox-files-backup
           path: data/daily/
@@ -117,7 +117,7 @@ jobs:
           echo "File count: $(find gh-pages-snapshot -type f | wc -l)"
 
       - name: Upload deployed site artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: deployed-site-backup
           path: gh-pages-snapshot/

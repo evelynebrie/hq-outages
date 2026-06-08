@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v5
 
       - name: Setup R
         uses: r-lib/actions/setup-r@v2
@@ -38,7 +38,7 @@ jobs:
         run: echo "version=$(R --version | head -n1 | awk '{print $3}')" >> $GITHUB_OUTPUT
 
       - name: Cache R packages
-        uses: actions/cache@v3
+        uses: actions/cache@v5
         with:
           path: ${{ env.R_LIBS_USER }}
           key: ${{ runner.os }}-r-${{ steps.r-version.outputs.version }}-packages-15min-v2
@@ -50,7 +50,7 @@ jobs:
 
       # NEW: Use Actions cache instead of cloning gh-pages repo
       - name: Restore cumulative hex data cache (Actions Cache)
-        uses: actions/cache/restore@v3
+        uses: actions/cache/restore@v5
         with:
           path: cache/cumulative_hex_data.rds
           key: hq-cumulative-cache-v2-${{ github.run_number }}
@@ -83,7 +83,7 @@ jobs:
           fi
 
       - name: Restore hex grid cache
-        uses: actions/cache@v3
+        uses: actions/cache@v5
         with:
           path: public/hex_grid_template.rds
           key: hq-hex-grid-15min-v2
@@ -91,7 +91,7 @@ jobs:
 
       # Restore public directory (previously generated outputs)
       - name: Restore public directory cache
-        uses: actions/cache/restore@v3
+        uses: actions/cache/restore@v5
         with:
           path: public
           key: hq-public-outputs-v1-${{ github.run_number }}
@@ -100,7 +100,7 @@ jobs:
 
       # NEW: Cache downloaded Dropbox files to avoid re-downloading 7000+ files every run
       - name: Restore Dropbox files cache
-        uses: actions/cache/restore@v3
+        uses: actions/cache/restore@v5
         with:
           path: data/daily
           key: dropbox-files-v2-${{ github.run_id }}
@@ -367,7 +367,7 @@ jobs:
       # Save Dropbox files cache even if download times out (so progress isn't lost)
       - name: Save Dropbox files cache (even on timeout/failure)
         if: always()  # Run even if previous steps failed/timed out
-        uses: actions/cache/save@v3
+        uses: actions/cache/save@v5
         with:
           path: data/daily
           key: dropbox-files-v2-${{ github.run_id }}
@@ -408,7 +408,7 @@ jobs:
       # Save cumulative cache even if processing fails/times out
       - name: Save cumulative hex data cache (even on timeout/failure)
         if: always()  # Run even if R script failed/timed out
-        uses: actions/cache/save@v3
+        uses: actions/cache/save@v5
         with:
           path: cache/cumulative_hex_data.rds
           key: hq-cumulative-cache-v2-${{ github.run_number }}
@@ -416,7 +416,7 @@ jobs:
       # Save generated outputs (daily, monthly, regional files, HTML)
       - name: Save public directory cache (even on timeout/failure)
         if: always()  # Run even if R script failed/timed out
-        uses: actions/cache/save@v3
+        uses: actions/cache/save@v5
         with:
           path: public
           key: hq-public-outputs-v1-${{ github.run_number }}
@@ -541,7 +541,7 @@ jobs:
           echo "Wrote public/CNAME so the custom domain survives keep_files:false redeploys"
 
       - name: Deploy to PUBLIC repo (gh-pages) - HTML and GeoJSON only
-        uses: peaceiris/actions-gh-pages@v3
+        uses: peaceiris/actions-gh-pages@v4
         with:
           personal_token: ${{ secrets.PUBLIC_REPO_TOKEN }}
           external_repository: evelynebrie/hq-outages-public

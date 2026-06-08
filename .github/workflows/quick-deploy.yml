@@ -13,7 +13,7 @@ jobs:
     timeout-minutes: 30
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v5
 
       - name: Setup R
         uses: r-lib/actions/setup-r@v2
@@ -30,7 +30,7 @@ jobs:
           Rscript -e 'install.packages(c("sf","dplyr","fs","purrr","jsonlite","data.table"), repos="https://cloud.r-project.org")'
 
       - name: Restore cumulative hex data cache
-        uses: actions/cache/restore@v3
+        uses: actions/cache/restore@v5
         with:
           path: cache/cumulative_hex_data.rds
           key: hq-cumulative-cache-v2-${{ github.run_number }}
@@ -39,7 +39,7 @@ jobs:
             hq-cumulative-cache-
 
       - name: Restore hex grid cache
-        uses: actions/cache@v3
+        uses: actions/cache@v5
         with:
           path: public/hex_grid_template.rds
           key: hq-hex-grid-15min-v2
@@ -47,7 +47,7 @@ jobs:
 
       # Restore public directory with all generated outputs
       - name: Restore public directory cache
-        uses: actions/cache/restore@v3
+        uses: actions/cache/restore@v5
         with:
           path: public
           key: hq-public-outputs-v1-${{ github.run_number }}
@@ -89,7 +89,7 @@ jobs:
           fi
 
       - name: Deploy to PUBLIC repo (gh-pages)
-        uses: peaceiris/actions-gh-pages@v3
+        uses: peaceiris/actions-gh-pages@v4
         with:
           personal_token: ${{ secrets.PUBLIC_REPO_TOKEN }}
           external_repository: evelynebrie/hq-outages-public

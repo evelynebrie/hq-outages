@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v5
 
       - name: Setup R
         uses: r-lib/actions/setup-r@v2
@@ -46,14 +46,14 @@ jobs:
           echo "SHA256: $(sha256sum cache/cumulative_hex_data.rds | cut -d' ' -f1)"
 
       - name: Save corrected cache to Actions cache (so future runs pick it up)
-        uses: actions/cache/save@v3
+        uses: actions/cache/save@v5
         continue-on-error: true  # OK if key already exists from a prior run
         with:
           path: cache/cumulative_hex_data.rds
           key: hq-cumulative-cache-v2-CORRECTED-${{ github.event.inputs.release_tag }}
 
       - name: Restore hex grid cache
-        uses: actions/cache@v3
+        uses: actions/cache@v5
         with:
           path: public/hex_grid_template.rds
           key: hq-hex-grid-15min-v2
@@ -69,7 +69,7 @@ jobs:
       # DEFENSIVE: save public/ as artifact immediately, regardless of later failures
       - name: Upload public/ as recovery artifact (always)
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: public-regenerated-recovery
           path: public/
@@ -104,14 +104,14 @@ jobs:
           echo "Monthly files: $(find public/monthly -name 'monthly_*.geojson' 2>/dev/null | wc -l)"
 
       - name: Save corrected public outputs to Actions cache
-        uses: actions/cache/save@v3
+        uses: actions/cache/save@v5
         continue-on-error: true  # OK if key already exists from a prior run
         with:
           path: public
           key: hq-public-outputs-v1-CORRECTED-${{ github.event.inputs.release_tag }}
 
       - name: Deploy to public gh-pages
-        uses: peaceiris/actions-gh-pages@v3
+        uses: peaceiris/actions-gh-pages@v4
         with:
           personal_token: ${{ secrets.PUBLIC_REPO_TOKEN }}
           external_repository: evelynebrie/hq-outages-public
