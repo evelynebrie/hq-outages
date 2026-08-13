@@ -1,0 +1,30 @@
+name: Keepalive (prevent scheduled-workflow auto-disable)
+
+# GitHub disables cron-triggered workflows after 60 days with no push to this
+# repo. The scraper commits its output to hq-outages-public, never here, so the
+# clock was never reset and everything went dark on 2026-08-07 (60 days after
+# the last push on 2026-06-08). This pushes a trivial commit twice a month so
+# the counter never gets close.
+
+on:
+  schedule:
+    - cron: '0 6 1,15 * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Touch keepalive stamp and push
+        run: |
+          date -u +"%Y-%m-%dT%H:%M:%SZ" > .github/keepalive-stamp
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/keepalive-stamp
+          git commit -m "Keepalive: reset scheduled-workflow inactivity timer"
+          git push
