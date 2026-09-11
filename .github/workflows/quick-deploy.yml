@@ -88,6 +88,9 @@ jobs:
             echo "Copied landing page"
           fi
 
+      - name: Split GeoJSON files over the GitHub size limit
+        run: python3 scripts/split_large_geojson.py public
+
       - name: Deploy to PUBLIC repo (gh-pages)
         uses: peaceiris/actions-gh-pages@v4
         with:

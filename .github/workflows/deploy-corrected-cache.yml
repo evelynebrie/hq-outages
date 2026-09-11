@@ -110,6 +110,10 @@ jobs:
           path: public
           key: hq-public-outputs-v1-CORRECTED-${{ github.event.inputs.release_tag }}
 
+      # Runs after the public/ cache is saved, so the cache keeps whole files.
+      - name: Split GeoJSON files over the GitHub size limit
+        run: python3 scripts/split_large_geojson.py public
+
       - name: Deploy to public gh-pages
         uses: peaceiris/actions-gh-pages@v4
         with:

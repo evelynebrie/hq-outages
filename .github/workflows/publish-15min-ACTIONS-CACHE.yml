@@ -540,6 +540,10 @@ jobs:
           echo "ousontlespannes.ca" > public/CNAME
           echo "Wrote public/CNAME so the custom domain survives keep_files:false redeploys"
 
+      # Runs after the public/ cache is saved, so the cache keeps whole files.
+      - name: Split GeoJSON files over the GitHub size limit
+        run: python3 scripts/split_large_geojson.py public
+
       - name: Deploy to PUBLIC repo (gh-pages) - HTML and GeoJSON only
         uses: peaceiris/actions-gh-pages@v4
         with:

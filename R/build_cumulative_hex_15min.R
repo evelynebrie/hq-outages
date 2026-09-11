@@ -1836,13 +1836,45 @@ cat('";
             }
         }
 
+        // Files over the GitHub size limit are deployed as <name>.partNN.geojson
+        // (scripts/split_large_geojson.py), and geojson_parts.json maps each
+        // original path to its parts. fetchGeoJSON() hides this: it resolves
+        // to the same FeatureCollection as the unsplit file, or null if the
+        // file is missing. Every .geojson fetch should go through it.
+        var geojsonPartsPromise = null;
+        function fetchGeoJSON(url) {
+            if (!geojsonPartsPromise) {
+                geojsonPartsPromise = fetch("geojson_parts.json", { cache: "no-cache" })
+                    .then(function(r) { return r.ok ? r.json() : null; })
+                    .then(function(m) { return (m && m.files) || {}; })
+                    .catch(function() { return {}; });
+            }
+            return geojsonPartsPromise.then(function(files) {
+                var parts = files[url.split("?")[0]];
+                if (!parts) {
+                    return fetch(url).then(function(r) { return r.ok ? r.json() : null; });
+                }
+                // ?v= ties each part to this manifest, so a browser-cached
+                // part from an earlier deploy can not be mixed in.
+                return Promise.all(parts.map(function(p) {
+                    return fetch(p.path + "?v=" + p.sha1).then(function(r) {
+                        if (!r.ok) throw new Error("Missing " + p.path);
+                        return r.json();
+                    });
+                })).then(function(chunks) {
+                    var merged = chunks[0];
+                    for (var i = 1; i < chunks.length; i++) {
+                        merged.features = merged.features.concat(chunks[i].features);
+                    }
+                    return merged;
+                });
+            });
+        }
+
         // Load current outages FIRST (priority)
-        fetch("current.geojson")
-            .then(function(r) { 
-                if (!r.ok) throw new Error("HTTP " + r.status);
-                return r.json(); 
-            })
+        fetchGeoJSON("current.geojson")
             .then(function(data) {
+                if (!data) throw new Error("current.geojson not found");
                 console.log("Current outages loaded:", data.features ? data.features.length : 0, "features");
                 allData.current = data;
                 dataLoaded.current = true;
@@ -1865,7 +1897,7 @@ cat('";
         // Load regional data files and merge them
         var regions = ["west", "central_west", "central", "central_east", "east", "far_east"];
         var regionalPromises = regions.map(function(region) {
-            return fetch("total/total_exposure_" + region + ".geojson").then(function(r) { return r.json(); });
+            return fetchGeoJSON("total/total_exposure_" + region + ".geojson");
         });
 
         Promise.all(regionalPromises)
@@ -1873,7 +1905,7 @@ cat('";
                 // Merge all regions
                 var allFeatures = [];
                 regionalData.forEach(function(data) {
-                    if (data.features) {
+                    if (data && data.features) {
                         allFeatures = allFeatures.concat(data.features);
                     }
                 });
@@ -1920,9 +1952,8 @@ cat(';
         
         function loadDailyData() {
             dates.forEach(function(date) {
-                fetch("daily/daily_" + date + ".geojson")
-                    .then(function(r) { return r.json(); })
-                    .then(function(data) { allData.daily[date] = data; })
+                fetchGeoJSON("daily/daily_" + date + ".geojson")
+                    .then(function(data) { if (data) allData.daily[date] = data; })
                     .catch(function(e) {});
             });
         }
@@ -1933,12 +1964,9 @@ cat(';
             console.log("Auto-refreshing data...");
 
             // Reload current outages
-            fetch("current.geojson?" + Date.now())
-                .then(function(r) {
-                    if (!r.ok) throw new Error("HTTP " + r.status);
-                    return r.json();
-                })
+            fetchGeoJSON("current.geojson?" + Date.now())
                 .then(function(data) {
+                    if (!data) throw new Error("current.geojson not found");
                     allData.current = data;
                     updateCurrentCount();
                     var dateSelect = document.getElementById("dateSelect");

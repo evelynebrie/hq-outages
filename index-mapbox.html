@@ -1406,6 +1406,41 @@
         // regional GeoJSON + ~145 MB of dailies. Desktop is unchanged.
         var isMobileDevice = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
 
+        // Files over GitHub's size limit are deployed as <name>.partNN.geojson
+        // (scripts/split_large_geojson.py), and geojson_parts.json maps each
+        // original path to its parts. fetchGeoJSON() hides this: it resolves
+        // to the same FeatureCollection as the unsplit file, or null if the
+        // file is missing. Every .geojson fetch should go through it.
+        var geojsonPartsPromise = null;
+        function fetchGeoJSON(url) {
+            if (!geojsonPartsPromise) {
+                geojsonPartsPromise = fetch('geojson_parts.json', { cache: 'no-cache' })
+                    .then(function(r) { return r.ok ? r.json() : null; })
+                    .then(function(m) { return (m && m.files) || {}; })
+                    .catch(function() { return {}; });
+            }
+            return geojsonPartsPromise.then(function(files) {
+                var parts = files[url.split('?')[0]];
+                if (!parts) {
+                    return fetch(url).then(function(r) { return r.ok ? r.json() : null; });
+                }
+                // ?v= ties each part to this manifest, so a browser-cached
+                // part from an earlier deploy can't be mixed in.
+                return Promise.all(parts.map(function(p) {
+                    return fetch(p.path + '?v=' + p.sha1).then(function(r) {
+                        if (!r.ok) throw new Error('Missing ' + p.path);
+                        return r.json();
+                    });
+                })).then(function(chunks) {
+                    var merged = chunks[0];
+                    for (var i = 1; i < chunks.length; i++) {
+                        merged.features = merged.features.concat(chunks[i].features);
+                    }
+                    return merged;
+                });
+            });
+        }
+
         // Mobile only: single-slot cache for the FULL regional file. Used
         // when the user clicks a hex and we need its `all_datetimes` (not
         // present in the slim file used for the map). When a hex from a
@@ -1449,8 +1484,7 @@
                 // doesn't transiently hold both.
                 loadedFullRegion = null;
                 loadedFullData = null;
-                fetch('total/total_exposure_' + region + '.geojson')
-                    .then(function(r) { return r.ok ? r.json() : null; })
+                fetchGeoJSON('total/total_exposure_' + region + '.geojson')
                     .then(function(data) {
                         if (data) {
                             loadedFullRegion = region;
@@ -1668,12 +1702,11 @@
                     for (var i = 0; i < regions.length; i++) {
                         var slimUrl = 'total/total_exposure_' + regions[i] + '_slim.geojson';
                         var fullUrl = 'total/total_exposure_' + regions[i] + '.geojson';
-                        var resp = await fetch(slimUrl);
-                        if (!resp.ok) {
+                        var data = await fetchGeoJSON(slimUrl);
+                        if (!data) {
                             // Slim file not deployed yet — fall back to full.
-                            resp = await fetch(fullUrl);
+                            data = await fetchGeoJSON(fullUrl);
                         }
-                        var data = await resp.json();
                         out.push(data);
                         loadedRegions++;
                         var pct = Math.round((loadedRegions / regions.length) * 100);
@@ -1685,13 +1718,12 @@
             } else {
                 totalsPromise = Promise.all(
                     regions.map(function(region) {
-                        return fetch('total/total_exposure_' + region + '.geojson')
-                            .then(function(r) { return r.json(); });
+                        return fetchGeoJSON('total/total_exposure_' + region + '.geojson');
                     })
                 );
             }
-            var currentPromise = fetch('current.geojson').then(function(r) {
-                return r.ok ? r.json() : { type: 'FeatureCollection', features: [] };
+            var currentPromise = fetchGeoJSON('current.geojson').then(function(data) {
+                return data || { type: 'FeatureCollection', features: [] };
             }).catch(function() { return { type: 'FeatureCollection', features: [] }; });
 
             var results = await Promise.all([totalsPromise, currentPromise]);
@@ -1700,7 +1732,7 @@
 
             allData.total = {
                 type: 'FeatureCollection',
-                features: regionalData.flatMap(function(d) { return d.features || []; })
+                features: regionalData.flatMap(function(d) { return (d && d.features) || []; })
             };
             console.log('Loaded ' + allData.total.features.length + ' hexagons from ' + regions.length + ' regions');
 
@@ -1764,9 +1796,8 @@
             var todayDate = sortedDates[sortedDates.length - 1];
             if (todayDate) {
                 try {
-                    var r = await fetch('daily/daily_' + todayDate + '.geojson');
-                    if (r.ok) {
-                        var data = await r.json();
+                    var data = await fetchGeoJSON('daily/daily_' + todayDate + '.geojson');
+                    if (data) {
                         allData.daily[todayDate] = data;
                         renderHourlyChart(todayDate);
                     }
@@ -1781,8 +1812,7 @@
 
             var remaining = dates.filter(function(d) { return d !== todayDate; });
             var promises = remaining.map(function(date) {
-                return fetch('daily/daily_' + date + '.geojson')
-                    .then(function(r) { return r.ok ? r.json() : null; })
+                return fetchGeoJSON('daily/daily_' + date + '.geojson')
                     .then(function(data) { if (data) allData.daily[date] = data; })
                     .catch(function() {});
             });
@@ -1795,8 +1825,7 @@
         // yet. Safe to call repeatedly — a hit on the cache is a no-op.
         function ensureDailyLoaded(date, callback) {
             if (allData.daily[date]) { if (callback) callback(); return; }
-            fetch('daily/daily_' + date + '.geojson')
-                .then(function(r) { return r.ok ? r.json() : null; })
+            fetchGeoJSON('daily/daily_' + date + '.geojson')
                 .then(function(data) {
                     if (data) allData.daily[date] = data;
                     if (callback) callback();
