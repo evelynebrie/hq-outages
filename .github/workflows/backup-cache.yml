@@ -105,12 +105,12 @@ jobs:
           if-no-files-found: warn
 
       # ============================================================
-      # 4. Deployed site (current gh-pages of hq-outages-public)
+      # 4. Deployed site (current gh-pages of hq-outages-site)
       # ============================================================
       - name: Clone gh-pages branch of public repo
         run: |
           git clone --branch gh-pages --single-branch --depth 1 \
-            https://github.com/evelynebrie/hq-outages-public.git \
+            https://github.com/evelynebrie/hq-outages-site.git \
             gh-pages-snapshot
           rm -rf gh-pages-snapshot/.git
           du -sh gh-pages-snapshot

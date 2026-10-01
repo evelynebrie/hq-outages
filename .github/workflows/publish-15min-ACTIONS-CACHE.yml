@@ -548,10 +548,14 @@ jobs:
         uses: peaceiris/actions-gh-pages@v4
         with:
           personal_token: ${{ secrets.PUBLIC_REPO_TOKEN }}
-          external_repository: evelynebrie/hq-outages-public
+          external_repository: evelynebrie/hq-outages-site
           publish_branch: gh-pages
           publish_dir: public
           keep_files: false
+          # Replace gh-pages history on every deploy. Keeping every snapshot pushed
+          # hq-outages-public over GitHub's size quota (frozen 2026-09-25); that repo
+          # is kept untouched as the archive of the old history.
+          force_orphan: true
           commit_message: "Update 15-minute scrape data (Actions Cache) - ${{ github.run_number }}"
           # Note: This deploys HTML + GeoJSON files only
           # The .rds cache files are NOT in public/ anymore
@@ -563,7 +567,7 @@ jobs:
           echo "✅ DEPLOYMENT COMPLETE (NEW WORKFLOW)"
           echo "========================================="
           echo ""
-          echo "🌐 View at: https://evelynebrie.github.io/hq-outages-public/"
+          echo "🌐 View at: https://ousontlespannes.ca/"
           echo ""
 
           DAILY_COUNT=$(find public/daily -name "daily_*.geojson" 2>/dev/null | wc -l)
